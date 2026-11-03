@@ -1,4 +1,6 @@
+streamlit
 litellm
 python-dotenv
-streamlit
-markitdown[all]
+pypdf
+python-docx
+markitdown
