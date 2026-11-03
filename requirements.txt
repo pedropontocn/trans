@@ -1,0 +1,4 @@
+litellm
+python-dotenv
+streamlit
+markitdown[all]
