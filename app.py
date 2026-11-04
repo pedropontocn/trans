@@ -5,7 +5,8 @@ import os
 import tempfile
 from dotenv import load_dotenv
 from litellm import completion
-from markitdown import MarkItDown # NOVA BIBLIOTECA
+from markitdown import MarkItDown
+
 SYSTEM_PROMPT = """
 Você é um facilitador de deliberação multiagente. Seu objetivo é produzir um TENSION MAP (mapa de tensões) e um MEMORANDO EXECUTIVO para apoiar decisores humanos. Você NÃO decide e NÃO busca consenso. Você amplia a inteligência expondo trade-offs.
 
@@ -43,7 +44,6 @@ Formato de Saída Obrigatório:
 
 load_dotenv()
 
-
 def extrair_json_limpo(texto):
     # Remove blocos de código markdown (```json ... ```)
     texto_limpo = re.sub(r'```(?:json)?', '', texto)
@@ -58,11 +58,9 @@ def extrair_json_limpo(texto):
         print("Erro ao decodificar JSON. Texto recebido:", texto_limpo[:200])
         return None
 
-
 st.set_page_config(page_title="Deliberação Multiagente", page_icon="🏛️", layout="wide")
 
 st.title("🏛️ Painel de Deliberação e Análise de Transição")
-
 
 def _como_texto(valor):
     # O modelo às vezes devolve listas em vez de texto; st.text_area exige string
@@ -75,7 +73,6 @@ def _como_texto(valor):
         return json.dumps(valor, ensure_ascii=False, indent=2)
     return str(valor or "")
 
-
 with st.sidebar:
     st.header("1. Upload do Relatório")
     # Aceita PDF, Word e Excel
@@ -84,7 +81,7 @@ with st.sidebar:
     if st.button("🔍 Extrair Dados do Relatório"):
         if uploaded_file is not None:
             with st.spinner("Lendo tabelas e estruturando os dados (Markdown)..."):
-
+                
                 # 1. Salva o arquivo temporariamente para o MarkItDown ler
                 with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp:
                     tmp.write(uploaded_file.getvalue())
@@ -102,7 +99,6 @@ with st.sidebar:
                     os.remove(tmp_path) # Limpa o arquivo temporário
 
                 # 3. Manda o Markdown para o Claude extrair as informações
-                # Limite aumentado para 60.000 caracteres, pois Markdown é denso
                 prompt_extrator = f"""Leia o relatório de transição abaixo (que está em formato Markdown, com tabelas preservadas) e extraia as informações EXATAS no formato JSON.
 
                 Relatório:
@@ -117,18 +113,17 @@ with st.sidebar:
                 }}"""
 
                 try:
+                    # CORREÇÃO: Modelo atualizado para o 'latest'
                     resp_extrator = completion(
-                        model="anthropic/claude-sonnet-5-5",
+                        model="anthropic/claude-3-5-sonnet-latest",
                         messages=[{"role": "user", "content": prompt_extrator}],
                     )
 
-                    # Usa a nova função de limpeza
                     texto_bruto = resp_extrator.choices[0].message.content
                     dados = extrair_json_limpo(texto_bruto)
 
                     if dados is None:
                         st.error("O modelo não retornou um JSON válido.")
-                        # Mostra a resposta na tela: com o iniciar.bat (pythonw) não há console para o print
                         with st.expander("Ver resposta bruta do extrator"):
                             st.text(texto_bruto)
                         st.stop()
@@ -150,9 +145,9 @@ with st.sidebar:
     lacunas = st.text_area("Lacunas de Dados", value=st.session_state.get('lacunas', ''), height=100)
 
     st.markdown("---")
-    modelo = st.selectbox("Modelo Facilitador", ["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-20250514"])
+    # CORREÇÃO: Lista de modelos atualizada com os nomes corretos
+    modelo = st.selectbox("Modelo Facilitador", ["anthropic/claude-3-5-sonnet-latest", "anthropic/claude-3-opus-20240229"])
     botao_gerar = st.button("🚀 Iniciar Deliberação (2 Etapas)", use_container_width=True)
-
 
 def extrair_json(texto):
     # 1º: bloco entre as tags (evita pegar os JSONs intermediários das Fases 1-3)
@@ -168,26 +163,13 @@ def extrair_json(texto):
         except: pass
     return None
 
-
-def prompt_somente_fases_1_a_4(prompt):
-    # Remove o bloco da Fase 5 (até "REGRAS:") e a menção ao memorando na entrega
-    prompt = re.sub(
-        r"FASE 5 —.*?(?=\nREGRAS:)",
-        "PARE NA FASE 4. Gere APENAS o JSON do Tension Map, não escreva o memorando agora.\n",
-        prompt,
-        flags=re.DOTALL,
-    )
-    return prompt.replace(", seguido do memorando entre [INÍCIO DO MEMORANDO] e [FIM DO MEMORANDO]", "")
-
-
 if botao_gerar:
     if not problema or not fatos:
         st.warning("Por favor, preencha os dados antes de iniciar.")
     else:
-               # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
+        # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
         with st.spinner("Etapa 1/2: O conselho de agentes está debatendo e gerando o Tension Map..."):
             
-            # A MÁGICA ACONTECE AQUI: Dizemos para ele não imprimir as Fases 1 a 3 no JSON final
             instrucao_compacta = """
             Execute internamente as Fases 1 a 3 (Proposição, Crítica, Revisão e Avaliação).
             
@@ -206,21 +188,22 @@ if botao_gerar:
             
             prompt_fase_1_a_4 = SYSTEM_PROMPT + "\n\n" + instrucao_compacta
             
-            # Aumentamos o limite de tokens de saída para garantir que caiba
             user_prompt_1 = f"CENÁRIO: {problema}\nFATOS: {fatos}\nPERSONAS: {personas}\nLACUNAS: {lacunas}\n\nExecute o protocolo e retorne APENAS o JSON final entre [INÍCIO DO JSON] e [FIM DO JSON]."
             
             try:
-                # MUDANÇA IMPORTANTE: Use um modelo com limite de token maior (Sonnet 3.5)
+                # CORREÇÃO: Agora ele usa a variável 'modelo' que o usuário escolheu!
                 resp_1 = completion(
-                    model="anthropic/claude-3-5-sonnet-20241022",
+                    model=modelo,
                     messages=[{"role": "system", "content": prompt_fase_1_a_4}, {"role": "user", "content": user_prompt_1}],
-                    max_tokens=8000, # Aumentado para caber o JSON inteiro
+                    max_tokens=8000,
                 )
                 texto_json = resp_1.choices[0].message.content
                 tension_map = extrair_json_limpo(texto_json)
                 
                 if tension_map is None:
-                    st.error("Falha ao gerar o JSON. O modelo gerou um texto muito longo. Tente novamente.")
+                    st.error("Falha ao gerar o JSON. O modelo gerou um texto muito longo ou inválido.")
+                    with st.expander("Ver resposta bruta (para debug)"):
+                        st.text(texto_json)
                     st.stop()
 
                 # --- ETAPA 2: GERAR MEMORANDO E MATRIZ DE RISCO ---
