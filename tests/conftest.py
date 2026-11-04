@@ -148,6 +148,14 @@ class LLMFalso:
             if self.resposta_extracao_texto is not None or nome is None:
                 return self._resp(self.resposta_extracao_texto or json.dumps(self.insumos))
             return self._resp(nome=nome, args=self.insumos, motivo="tool_calls")
+        if "terminou com as questões não resolvidas" in sistema:
+            self.mensagem_pedidos_debate = ultimo
+            ids = [q["id"] for q in json.loads(ultimo.split("QUESTÕES NÃO RESOLVIDAS:\n")[1].split("\n\nJÁ PEDIDOS:")[0])]
+            pedidos = [{"id": i, "pedido": f"Informar o dado necessário para responder à questão {i}.", "materialidade": "relevante"}
+                       for i in ids]
+            pedidos += [{"id": "Q99", "pedido": "Pedido de questão inexistente.", "materialidade": "critica"},
+                        {"id": ids[0], "pedido": "Informar a dotação atualizada de 2026 por fonte de recurso.", "materialidade": "critica"}]
+            return self._resp(json.dumps({"pedidos": pedidos}))
         if "analista da Equipe de Transição" in sistema:
             self.mensagem_diagnostico = " ".join(p["text"] for p in messages[1]["content"]) if isinstance(messages[1]["content"], list) else messages[1]["content"]
             alvo = {"lacunas": self.lacunas, "atendimento": self.atendimento}

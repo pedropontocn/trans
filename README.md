@@ -58,6 +58,17 @@ Cada lacuna traz um trecho do relatório ou da base que a evidencia, e o código
 evidência conferida fica fora do ofício. A materialidade (crítica, relevante, acessória) decide o que entra por
 padrão: críticas e relevantes. A tabela é editável: dá para incluir, excluir e reescrever cada pedido.
 
+**Desdobramentos dos fatos informados.** Além do que foi pedido, o diagnóstico procura o que o próprio relatório
+torna necessário saber. Para cada fato que gera risco, obrigação ou decisão (obra suspensa, licitação adiada, contrato
+emergencial, decreto citado, valor alto, divergência entre fontes), o modelo usa uma lista de verificação por tipo de
+fato e pede o que falta: por exemplo, contrato, contratada, percentual executado e ato da suspensão de cada obra
+suspensa. A evidência é o trecho do relatório que informa o fato, conferido por código, e o pedido precisa citar o
+fato específico.
+
+**Questões em aberto do debate.** Ao fim da deliberação, as questões não resolvidas do Tension Map que o órgão pode
+responder com dado ou documento viram pedidos, na seção "Pontos em aberto da análise" da tabela e do ofício. As que
+dependem de decisão da nova gestão ficam de fora. Esses pedidos não travam uma nova deliberação.
+
 **Pedidos já feitos.** O diagnóstico também confere, item por item, se o relatório atende os ofícios que a Equipe
 de Transição já enviou (nº 02, 06, 07 e 08/2026 para todas as pastas; 03, 04, 05 e 09 para as pastas específicas,
 marcados conforme o nome da secretaria). Cada item sai como atendido, parcial, não atendido ou não avaliado. Atendido
