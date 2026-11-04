@@ -34,9 +34,13 @@ ANTHROPIC_API_KEY=...
    - valores em R$, percentuais e datas do memorando são conferidos no relatório;
    - citações de lei vão para uma lista de revisão da assessoria jurídica;
    - a completude do relatório (campos "a complementar", datas e valores em branco) é medida por seção;
-   - a confiança da análise é calculada a partir da completude, das evidências rebaixadas e da estabilidade.
+   - a confiança da análise é calculada a partir da completude, das evidências rebaixadas e da estabilidade;
+   - um modelo diferente do que escreveu o memorando revisa a **neutralidade**: se os dois polos de cada trade-off
+     têm o mesmo peso e se há trechos que recomendam uma opção de forma disfarçada. Os trechos apontados são
+     conferidos no memorando; os que não existem são descartados.
 5. **Registro.** Cada rodada é gravada em `registros/`, com modelo, versão do prompt, insumos, resultado da
-   verificação, tokens e custo. A pasta não vai para o GitHub.
+   verificação, tokens e custo. A pasta não vai para o GitHub. No Streamlit Cloud ela é apagada quando o app
+   reinicia, então use o botão **Registro (.json)** para baixar e guardar a trilha de cada análise.
 
 ## Custo aproximado
 

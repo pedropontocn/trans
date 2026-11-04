@@ -51,7 +51,7 @@ LIMITE_CARACTERES = 150_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "1.4"
+APP_VERSAO = "1.5"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -190,6 +190,40 @@ FERRAMENTA_EXTRACAO = {
         },
     },
 }
+
+PROMPT_NEUTRALIDADE = """Você é um revisor de neutralidade. O memorando abaixo deveria expor trade-offs para decisores
+humanos SEM recomendar um caminho. Você não avalia se o conteúdo está certo; só se ele é neutro.
+
+Verifique:
+1. Para cada trade-off do Tension Map, se o memorando descreve os dois polos com peso equivalente: espaço dedicado,
+   verbos, adjetivos e ordem de apresentação. Classifique como "equilibrado", "pende_para_a" ou "pende_para_b".
+2. Trechos do memorando que recomendam, prescrevem ou induzem uma opção: "é preciso", "o ideal é", "recomenda-se",
+   "a melhor saída", adjetivos que desqualificam um polo, conclusões que escolhem um lado.
+   A coluna "Ação mitigadora" da matriz de risco faz parte do método: NÃO a conte como recomendação.
+
+Copie cada trecho LITERALMENTE do memorando, com até 25 palavras; o sistema confere se ele existe.
+Registre o resultado chamando a ferramenta `registrar_neutralidade`. Se não puder usar a ferramenta, devolva só o JSON."""
+
+FERRAMENTA_NEUTRALIDADE = {"type": "function", "function": {
+    "name": "registrar_neutralidade",
+    "description": "Registra a revisão de neutralidade do memorando.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "avaliacao_geral": {"type": "string", "enum": ["neutro", "levemente_enviesado", "enviesado"]},
+            "trade_offs": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"},
+                               "equilibrio": {"type": "string", "enum": ["equilibrado", "pende_para_a", "pende_para_b"]},
+                               "motivo": {"type": "string"}},
+                "required": ["id", "equilibrio", "motivo"]}},
+            "recomendacoes_implicitas": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"trecho": {"type": "string"}, "por_que": {"type": "string"}},
+                "required": ["trecho", "por_que"]}},
+        },
+        "required": ["avaliacao_geral", "trade_offs", "recomendacoes_implicitas"],
+    }}}
 
 # Nomes alternativos que o modelo às vezes usa para cada campo
 SINONIMOS = {
@@ -631,6 +665,34 @@ def verificar_numeros(memo, base):
     return achados
 
 
+def revisar_neutralidade(modelo, memorando, tension_map):
+    """Revisão feita por um modelo diferente do que escreveu o memorando. Os trechos citados são conferidos no memorando."""
+    polos = [{"id": t.get("id"), "titulo": t.get("titulo"),
+              "polo_a": (t.get("polo_a") or {}).get("posicao"), "polo_b": (t.get("polo_b") or {}).get("posicao")}
+             for t in (tension_map.get("trade_offs") or []) if isinstance(t, dict)]
+    texto, args, _ = chamar_modelo(
+        modelo, [{"role": "system", "content": PROMPT_NEUTRALIDADE},
+                 {"role": "user", "content": "TRADE-OFFS (polos):\n" + json.dumps(polos, ensure_ascii=False, indent=2)
+                  + "\n\nMEMORANDO:\n" + memorando}],
+        3000, ferramenta=FERRAMENTA_NEUTRALIDADE, etapa="revisão de neutralidade")
+    revisao = args or extrair_json(texto)
+    if not isinstance(revisao, dict):
+        return {"erro": "o revisor não devolveu um resultado legível", "modelo": modelo}
+    comp = _comparavel(memorando)
+    sh = _shingles(comp.split())
+    achados, descartados = [], 0
+    for r in revisao.get("recomendacoes_implicitas") or []:
+        if isinstance(r, dict) and trecho_confere(str(r.get("trecho", "")), comp, sh):
+            achados.append({"trecho": str(r["trecho"]), "por_que": str(r.get("por_que", ""))})
+        else:
+            descartados += 1
+    desequilibrados = [t for t in (revisao.get("trade_offs") or [])
+                       if isinstance(t, dict) and t.get("equilibrio") in ("pende_para_a", "pende_para_b")]
+    return {"modelo": modelo, "avaliacao_geral": revisao.get("avaliacao_geral", "?"),
+            "trade_offs": revisao.get("trade_offs") or [], "desequilibrados": desequilibrados,
+            "recomendacoes_implicitas": achados, "trechos_descartados": descartados}
+
+
 def validar_tension_map(tm):
     """Lista o que falta ou está errado no Tension Map em relação ao formato esperado."""
     if not isinstance(tm, dict):
@@ -670,7 +732,7 @@ def salvar_registro(dados):
         return None
 
 
-def markdown_verificacao(ev, numeros, registro_id, modelo, confianca=None, completude=None, tm=None):
+def markdown_verificacao(ev, numeros, registro_id, modelo, confianca=None, completude=None, tm=None, neutralidade=None):
     """Seção que vai no fim do Word, para o leitor saber o que foi conferido."""
     nao_enc = [n for n in numeros if n["situacao"] == "não encontrado"]
     calc = [n for n in numeros if n["situacao"] == "cálculo declarado"]
@@ -697,6 +759,15 @@ def markdown_verificacao(ev, numeros, registro_id, modelo, confianca=None, compl
     if ev["normas"]:
         refs = sorted({r["referencia"] for r in ev["normas"] if r["referencia"]})
         linhas.append("- **Citações legais a confirmar com a assessoria jurídica:** " + "; ".join(refs[:10]) + ".")
+    if neutralidade and not neutralidade.get("erro"):
+        partes = [f"avaliação geral: {neutralidade['avaliacao_geral'].replace('_', ' ')}"]
+        if neutralidade["desequilibrados"]:
+            partes.append("polos desequilibrados em " + ", ".join(
+                f"{t.get('id')} ({'pende para A' if t['equilibrio'] == 'pende_para_a' else 'pende para B'})"
+                for t in neutralidade["desequilibrados"]))
+        if neutralidade["recomendacoes_implicitas"]:
+            partes.append(f"{len(neutralidade['recomendacoes_implicitas'])} trecho(s) com recomendação implícita")
+        linhas.append(f"- **Revisão de neutralidade ({neutralidade['modelo']}):** " + "; ".join(partes) + ".")
     conferidos = sum(1 for n in numeros if n["situacao"] == "conferido")
     linhas.append(f"- **Números do memorando conferidos no relatório:** {conferidos} de {len(numeros)}.")
     if calc:
@@ -1364,12 +1435,18 @@ if botao_gerar:
                         memorando = memorando.rstrip() + ("\n" if continuacao.lstrip().startswith(("|", "#", "-")) else " ") + continuacao.lstrip()
                 memorando = memorando.strip()
                 numeros = verificar_numeros(memorando, base_verificacao)
+                # Revisão de neutralidade com o modelo da extração: mais barato e diferente do que escreveu o memorando
+                with st.spinner("Revisando a neutralidade do memorando..."):
+                    try:
+                        neutralidade = revisar_neutralidade(modelo_extracao, memorando, tension_map)
+                    except Exception as e:
+                        neutralidade = {"erro": str(e), "modelo": modelo_extracao}
                 confianca = confianca_calculada(completude, tension_map.get("estabilidade"), evidencias)
-                uso = st.session_state.get("uso_rodada", [])
+                uso = list(st.session_state.get("uso_rodada", []))
                 uso_extracao = st.session_state.get("uso_extracao", [])
                 custo, custo_parcial = custo_estimado(uso)
                 custo_extracao, _ = custo_estimado(uso_extracao)
-                versao_prompt = hashlib.md5((PROMPT_EXTRATOR + PROMPT_ETAPA_1 + PROMPT_CONSOLIDACAO + PROMPT_ETAPA_2).encode()).hexdigest()[:8]
+                versao_prompt = hashlib.md5((PROMPT_EXTRATOR + PROMPT_ETAPA_1 + PROMPT_CONSOLIDACAO + PROMPT_ETAPA_2 + PROMPT_NEUTRALIDADE).encode()).hexdigest()[:8]
                 assinatura = hashlib.md5((cenario + relatorio).encode()).hexdigest()
                 registro_id = f"{versao_prompt}-{assinatura[:8]}"
                 resultado = {
@@ -1391,8 +1468,9 @@ if botao_gerar:
                     "data": _data_extenso(date.today()),
                     "assinatura_insumos": hashlib.md5(cenario.encode()).hexdigest(),
                     "registro_id": registro_id,
+                    "neutralidade": neutralidade,
                 }
-                resultado["registro_caminho"] = salvar_registro({
+                registro = {
                     "id": registro_id, "gerado_em": datetime.now().isoformat(timespec="seconds"),
                     "versao_app": APP_VERSAO, "versao_prompt": versao_prompt,
                     "modelo_debate": modelo, "modelo_extracao": modelo_extracao, "rodadas": n_rodadas,
@@ -1401,9 +1479,12 @@ if botao_gerar:
                     "completude": completude, "confianca_calculada": confianca,
                     "tension_maps_por_rodada": {f"R{i}": tm for i, tm in rodadas_validas},
                     "tension_map": tension_map, "memorando": memorando,
-                    "verificacao": {"evidencias": evidencias, "numeros": numeros, "problemas_formato": problemas},
+                    "verificacao": {"evidencias": evidencias, "numeros": numeros, "problemas_formato": problemas,
+                                    "neutralidade": neutralidade},
                     "uso_tokens": uso_extracao + uso, "custo_estimado_usd": round(custo + custo_extracao, 4),
-                })
+                }
+                resultado["registro_caminho"] = salvar_registro(registro)
+                resultado["registro_json"] = json.dumps(registro, ensure_ascii=False, indent=2)
                 st.session_state["resultado"] = resultado
             except Exception as e:
                 st.error(f"❌ Erro na API: {e}")
@@ -1453,9 +1534,10 @@ else:
         "data": resultado["data"],
         "rodape_extra": f"apoio de IA, reg. {resultado.get('registro_id', '')}",
     }
+    neutralidade = resultado.get("neutralidade") or {}
     memo_docx = memo + "\n\n" + markdown_verificacao(ev, numeros, resultado.get("registro_id", ""), resultado["modelo"],
-                                                         confianca, resultado.get("completude"), tm)
-    col1, col2, col3 = st.columns(3)
+                                                         confianca, resultado.get("completude"), tm, neutralidade)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.download_button("⬇️ Memorando (.docx)", data=gerar_docx(memo_docx, meta), file_name="memorando_transicao.docx",
                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1465,6 +1547,12 @@ else:
     with col3:
         st.download_button("⬇️ Tension Map (.json)", data=json.dumps(tm, ensure_ascii=False, indent=2),
                            file_name="tension_map.json", use_container_width=True)
+    with col4:
+        st.download_button("⬇️ Registro (.json)", data=resultado.get("registro_json") or "{}",
+                           file_name=f"registro_{resultado.get('registro_id', 'rodada')}.json", use_container_width=True,
+                           disabled=not resultado.get("registro_json"),
+                           help="Trilha de auditoria completa: insumos, rodadas, verificação, tokens e custo. "
+                                "No Streamlit Cloud, a pasta de registros do servidor é apagada quando o app reinicia; baixe e guarde.")
 
     aba_memo, aba_mapa, aba_verif, aba_json = st.tabs(["📄 Memorando", "🧭 Tension Map", "✅ Verificação", "{ } JSON"])
     with aba_memo:
@@ -1586,6 +1674,26 @@ else:
         for n in sorted(numeros, key=lambda n: {"não encontrado": 0, "cálculo declarado": 1}.get(n["situacao"], 2)):
             icone = {"não encontrado": "🔴", "cálculo declarado": "🟡"}.get(n["situacao"], "🟢")
             st.markdown(f"{icone} **{n['valor']}** — {n['situacao']}  \n<small>…{n['contexto']}…</small>", unsafe_allow_html=True)
+        st.subheader("Neutralidade do memorando")
+        if not neutralidade:
+            st.markdown("A revisão de neutralidade não foi feita nesta rodada.")
+        elif neutralidade.get("erro"):
+            st.markdown(f"A revisão de neutralidade falhou: {neutralidade['erro']}")
+        else:
+            st.markdown(f"Revisado por **{neutralidade['modelo']}**, um modelo diferente do que escreveu o memorando. "
+                        f"Avaliação geral: **{neutralidade['avaliacao_geral'].replace('_', ' ')}**.")
+            for t in neutralidade["trade_offs"]:
+                if isinstance(t, dict):
+                    icone = "🟢" if t.get("equilibrio") == "equilibrado" else "🟡"
+                    rotulo = {"equilibrado": "equilibrado", "pende_para_a": "pende para o polo A",
+                              "pende_para_b": "pende para o polo B"}.get(t.get("equilibrio"), t.get("equilibrio"))
+                    st.markdown(f"{icone} **{t.get('id')}** — {rotulo}. {t.get('motivo', '')}")
+            if neutralidade["recomendacoes_implicitas"]:
+                st.markdown("**Trechos que soam como recomendação** (conferidos no memorando):")
+                for r in neutralidade["recomendacoes_implicitas"]:
+                    st.markdown(f"- “{r['trecho']}” — {r['por_que']}")
+            if neutralidade.get("trechos_descartados"):
+                st.caption(f"{neutralidade['trechos_descartados']} trecho(s) apontado(s) pelo revisor não existem no memorando e foram descartados.")
         st.subheader("Registro desta rodada")
         st.markdown(f"Identificador **{resultado.get('registro_id', '')}**, modelo {resultado['modelo']}, versão do app {APP_VERSAO}.")
         if resultado.get("registro_caminho"):

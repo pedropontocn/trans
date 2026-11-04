@@ -129,3 +129,12 @@ def test_word_gerado_abre_e_tem_matriz(funcoes):
     tabelas = [t for t in documento.tables if t.rows and "Probabilidade" in [c.text for c in t.rows[0].cells]]
     assert len(tabelas) == 1 and len(tabelas[0].rows) == 3      # cabeçalho + 2 riscos numa tabela só
     assert "**" not in "\n".join(p.text for p in documento.paragraphs)
+
+
+def test_secao_de_verificacao_do_word_inclui_neutralidade(funcoes):
+    ev = {"conferidas": [], "calculos": [], "rebaixadas": [], "normas": []}
+    neutralidade = {"modelo": "anthropic/claude-sonnet-5-5", "avaliacao_geral": "levemente_enviesado",
+                    "desequilibrados": [{"id": "T2", "equilibrio": "pende_para_b"}],
+                    "recomendacoes_implicitas": [{"trecho": "x", "por_que": "y"}]}
+    md = funcoes.markdown_verificacao(ev, [], "abc", "anthropic/claude-opus-5-5", neutralidade=neutralidade)
+    assert "Revisão de neutralidade" in md and "T2 (pende para B)" in md and "1 trecho(s)" in md
