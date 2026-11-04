@@ -4,6 +4,7 @@ Os testes NÃO chamam nenhuma API: o LiteLLM e o MarkItDown são trocados por ve
 antes de o app ser carregado. Por isso rodam de graça, no GitHub Actions ou no seu computador.
 """
 import json
+import re
 import sys
 import threading
 import types
@@ -96,6 +97,12 @@ class LLMFalso:
                                  {"trecho": "Definir o destino das licitações adiadas", "por_que": "soa como ordem"},
                                  {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
         self.falhar_neutralidade = False
+        self.texto_relatorio = RELATORIO           # o que o MarkItDown falso devolve
+        self.registro_anterior = None              # bytes de um registro .json para o segundo upload
+        self.pareamento = None                     # resposta do pareamento de trade-offs (None = pareia por id igual)
+        self.personas_mudas = set()                # ids de personas que respondem sem JSON na Fase 1
+        self.falhar_avaliador = False
+        self.sintese = None                        # Tension Map da síntese do modo independente
         self._n_tm = 0
 
     def _resp(self, conteudo="", nome=None, args=None, motivo="stop", entrada=10000, saida=2000):
@@ -118,6 +125,42 @@ class LLMFalso:
             if self.resposta_extracao_texto is not None or nome is None:
                 return self._resp(self.resposta_extracao_texto or json.dumps(self.insumos))
             return self._resp(nome=nome, args=self.insumos, motivo="tool_calls")
+        if "Você participa de uma deliberação multiagente" in sistema:
+            pid = re.search(r"VOCÊ É: \[([^\]]+)\]", ultimo).group(1)
+            if "FASE 1 — PROPOSIÇÃO" in ultimo:
+                if pid in self.personas_mudas:
+                    return self._resp("não sei responder")
+                obj = {"plano": f"Plano de {pid}", "premissas": [f"premissa de {pid}"],
+                       "argumentos": [{"afirmacao": "a", "evidencia": 1, "fonte": FONTE_OK}]}
+            elif "FASE 2 — CRÍTICA" in ultimo:
+                outros = list(json.loads(ultimo.split("PROPOSTAS DAS OUTRAS PERSONAS:\n")[1].split("\n\nFASE 2")[0]))
+                obj = {"criticas": [{"alvo": o, "critica": f"{pid} critica {o}", "tipo_divergencia": "causal",
+                                     "evidencia": 3, "fonte": SEM_FONTE} for o in outros[:2]]
+                                   + [{"alvo": "inexistente", "critica": "x", "evidencia": 5}]}
+            else:
+                obj = {"decisao": "REVISAR" if pid.endswith("1") else "DEFENDER", "plano_final": f"Plano final de {pid}",
+                       "premissas_abandonadas": [], "justificativa": "j"}
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(obj) + "[FIM DO JSON]", entrada=15000, saida=600)
+        if "avaliador independente de políticas públicas" in sistema:
+            if self.falhar_avaliador:
+                raise RuntimeError("GEMINI_API_KEY inválida")
+            planos = json.loads(ultimo.split("PLANOS:\n")[1])
+            self.planos_vistos_pelo_avaliador = ultimo
+            return self._resp(json.dumps({"avaliacoes": [{"plano": r, "notas": {"viabilidade_juridica": 3, "viabilidade_fiscal": 2,
+                                                                                "impacto_para_a_populacao": 4, "ancoragem_em_evidencias": 3},
+                                                          "comentario": f"fraco em {r}"} for r in planos]}))
+        if "As Fases 1 a 3 JÁ ACONTECERAM" in sistema:
+            self.historico_sintese = ultimo
+            alvo = self.sintese or tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])
+            return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(json.dumps(alvo))
+        if "Pareie os que tratam do mesmo dilema" in sistema:
+            if self.pareamento is None:
+                anteriores = json.loads(ultimo.split("ANTERIOR:\n")[1].split("\n\nATUAL:")[0])
+                atuais = {t["id"] for t in json.loads(ultimo.split("ATUAL:\n")[1])}
+                pares = {"pares": [{"anterior": t["id"], "atual": t["id"]} for t in anteriores if t["id"] in atuais]}
+            else:
+                pares = self.pareamento
+            return self._resp(nome=nome, args=pares, motivo="tool_calls") if nome else self._resp(json.dumps(pares))
         if "revisor de neutralidade" in sistema:
             if self.falhar_neutralidade:
                 raise RuntimeError("serviço indisponível")
@@ -143,8 +186,22 @@ class LLMFalso:
 class ArquivoFalso:
     name = "relatorio_exemplo.pdf"
 
+    def __init__(self, texto=RELATORIO):
+        self.texto = texto
+
     def getvalue(self):
-        return b"%PDF falso"
+        # o conteúdo muda quando o relatório muda, como num arquivo de verdade
+        return b"%PDF falso " + self.texto.encode("utf-8")
+
+
+class RegistroFalso:
+    name = "registro_anterior.json"
+
+    def __init__(self, dados):
+        self.dados = dados
+
+    def getvalue(self):
+        return self.dados
 
 
 @pytest.fixture
@@ -157,7 +214,7 @@ def llm(monkeypatch):
 
     class MarkItDown:
         def convert(self, caminho):
-            return NS(text_content=RELATORIO)
+            return NS(text_content=falso.texto_relatorio)
 
     markitdown.MarkItDown = MarkItDown
     monkeypatch.setitem(sys.modules, "litellm", litellm)
@@ -180,7 +237,12 @@ def app(llm, monkeypatch, tmp_path):
     import streamlit
     from streamlit.testing.v1 import AppTest
 
-    monkeypatch.setattr(streamlit, "file_uploader", lambda *a, **k: ArquivoFalso())
+    def uploader(rotulo, *a, **k):
+        if "anterior" in rotulo.lower():
+            return RegistroFalso(llm.registro_anterior) if llm.registro_anterior else None
+        return ArquivoFalso(llm.texto_relatorio)
+
+    monkeypatch.setattr(streamlit, "file_uploader", uploader)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PAINEL_REGISTROS", str(tmp_path / "registros"))
     at = AppTest.from_file(str(APP), default_timeout=120)
