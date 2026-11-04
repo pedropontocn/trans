@@ -3,39 +3,12 @@ import json
 import re
 import os
 import tempfile
+import io
+import docx
+from docx.shared import Pt
 from dotenv import load_dotenv
 from litellm import completion
 from markitdown import MarkItDown
-import docx
-import io
-
-def gerar_docx(texto_markdown):
-    doc = docx.Document()
-    # Título principal
-    doc.add_heading('Memorando Executivo e Matriz de Risco', 0)
-    
-    linhas = texto_markdown.split('\n')
-    for linha in linhas:
-        if linha.startswith('# '):
-            doc.add_heading(linha.replace('# ', ''), level=1)
-        elif linha.startswith('## '):
-            doc.add_heading(linha.replace('## ', ''), level=2)
-        elif linha.startswith('### '):
-            doc.add_heading(linha.replace('### ', ''), level=3)
-        elif linha.startswith('|'):
-            # Pula a formatação complexa de tabela markdown por simplicidade
-            # mas mantém o texto legível
-            if '---' not in linha:
-                texto_limpo = linha.replace('|', ' | ').replace('  ', ' ')
-                doc.add_paragraph(texto_limpo)
-        elif linha.strip():
-            doc.add_paragraph(linha)
-            
-    # Salva em memória
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
 
 # --- PROMPT DO SISTEMA ---
 SYSTEM_PROMPT = """
@@ -97,14 +70,55 @@ def _como_texto(valor):
         return json.dumps(valor, ensure_ascii=False, indent=2)
     return str(valor or "")
 
+def gerar_docx(texto_markdown):
+    """Converte o texto markdown gerado pela IA em um arquivo Word (.docx) formatado."""
+    doc = docx.Document()
+    
+    # Estilo base
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Arial'
+    font.size = Pt(11)
+    
+    linhas = texto_markdown.split('\n')
+    
+    for linha in linhas:
+        linha = linha.strip()
+        if not linha:
+            continue
+            
+        if linha.startswith('# '):
+            doc.add_heading(linha.replace('# ', ''), level=1)
+        elif linha.startswith('## '):
+            doc.add_heading(linha.replace('## ', ''), level=2)
+        elif linha.startswith('### '):
+            doc.add_heading(linha.replace('### ', ''), level=3)
+        elif linha.startswith('|'):
+            # Lógica simples para transformar tabelas Markdown em tabelas do Word
+            if '---' in linha:
+                continue # Pula a linha separadora do markdown
+            colunas = [c.strip() for c in linha.split('|') if c.strip()]
+            if colunas:
+                tabela = doc.add_table(rows=1, cols=len(colunas))
+                tabela.style = 'Table Grid'
+                hdr_cells = tabela.rows[0].cells
+                for i, col in enumerate(colunas):
+                    hdr_cells[i].text = col
+        else:
+            doc.add_paragraph(linha)
+            
+    # Salva em memória
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.header("0. Configuração de IA")
-    # Atualizado para o modelo atual e válido
     modelo = st.selectbox("Modelo Facilitador", [
-        "anthropic/claude-sonnet-4-6", 
-        "anthropic/claude-sonnet-4-5-20250929",
-        "anthropic/claude-opus-4-6"
+        "anthropic/claude-3-5-sonnet-20241022", 
+        "anthropic/claude-3-opus-20240229"
     ])
     
     st.markdown("---")
@@ -239,11 +253,21 @@ if botao_gerar:
                 st.header("📄 Memorando e Matriz de Risco")
                 st.markdown(memorando)
 
-                col1, col2 = st.columns(2)
+                # --- BOTÕES DE DOWNLOAD ---
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.download_button("⬇️ Baixar Memorando (.md)", data=memorando, file_name="memorando_transicao.md")
-                with col2:
                     st.download_button("⬇️ Baixar Dados (.json)", data=json.dumps(tension_map, ensure_ascii=False, indent=2), file_name="tension_map.json")
+                with col2:
+                    st.download_button("⬇️ Baixar Texto (.md)", data=memorando, file_name="memorando_transicao.md")
+                with col3:
+                    # Gera o arquivo do Word
+                    arquivo_word = gerar_docx(memorando)
+                    st.download_button(
+                        label="⬇️ Baixar Relatório (.docx)",
+                        data=arquivo_word,
+                        file_name="relatorio_transicao.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
 
                 with st.expander("Ver Dados Estruturados (JSON)"):
                     st.json(tension_map)
