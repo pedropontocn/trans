@@ -90,6 +90,12 @@ class LLMFalso:
         self.memorando = MEMORANDO
         self.memorando_cortado_uma_vez = False
         self.recusar_ferramentas = None              # exceção para simular modelos/versões sem ferramenta
+        self.neutralidade = {"avaliacao_geral": "levemente_enviesado",
+                             "trade_offs": [{"id": "T1", "equilibrio": "pende_para_a", "motivo": "o polo A tem o dobro do espaço"}],
+                             "recomendacoes_implicitas": [
+                                 {"trecho": "Definir o destino das licitações adiadas", "por_que": "soa como ordem"},
+                                 {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
+        self.falhar_neutralidade = False
         self._n_tm = 0
 
     def _resp(self, conteudo="", nome=None, args=None, motivo="stop", entrada=10000, saida=2000):
@@ -112,6 +118,10 @@ class LLMFalso:
             if self.resposta_extracao_texto is not None or nome is None:
                 return self._resp(self.resposta_extracao_texto or json.dumps(self.insumos))
             return self._resp(nome=nome, args=self.insumos, motivo="tool_calls")
+        if "revisor de neutralidade" in sistema:
+            if self.falhar_neutralidade:
+                raise RuntimeError("serviço indisponível")
+            return self._resp(nome=nome, args=self.neutralidade, motivo="tool_calls") if nome else self._resp(json.dumps(self.neutralidade))
         if "Consolide-os" in sistema:
             alvo = self.consolidacao or self.rodadas[0]
             return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(json.dumps(alvo))

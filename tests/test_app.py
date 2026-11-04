@@ -98,3 +98,39 @@ def test_memorando_cortado_e_continuado(app, llm):
     r = _deliberar(at)
     assert not r["memorando_cortado"]
     assert r["memorando"].count("## Matriz de Risco") == 1 and r["memorando"].rstrip().endswith("| Finanças |")
+
+
+def test_revisao_de_neutralidade_confere_trechos(app, llm):
+    at = app.run()
+    at.slider[0].set_value(1).run()
+    r = _deliberar(at)
+    n = r["neutralidade"]
+    assert n["avaliacao_geral"] == "levemente_enviesado"
+    assert [t["id"] for t in n["desequilibrados"]] == ["T1"]
+    # o trecho que existe no memorando fica; o inventado é descartado
+    assert [x["trecho"] for x in n["recomendacoes_implicitas"]] == ["Definir o destino das licitações adiadas"]
+    assert n["trechos_descartados"] == 1
+    # a revisão usa o modelo da extração, diferente do que escreveu o memorando
+    revisao = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_neutralidade")
+    assert revisao["modelo"].endswith("sonnet-5-5")
+    assert any(u["etapa"] == "revisão de neutralidade" for u in r["uso"])
+
+
+def test_falha_na_neutralidade_nao_derruba_a_analise(app, llm):
+    llm.falhar_neutralidade = True
+    at = app.run()
+    at.slider[0].set_value(1).run()
+    r = _deliberar(at)
+    assert "erro" in r["neutralidade"] and r["memorando"]
+
+
+def test_registro_pode_ser_baixado(app, llm):
+    at = app.run()
+    at.slider[0].set_value(1).run()
+    r = _deliberar(at)
+    registro = json.loads(r["registro_json"])
+    assert registro["id"] == r["registro_id"]
+    assert {"insumos", "tension_map", "memorando", "verificacao", "uso_tokens"} <= set(registro)
+    assert "neutralidade" in registro["verificacao"]
+    botoes = [b for b in at.get("download_button")]
+    assert any("Registro" in getattr(b, "proto", b).label for b in botoes)
