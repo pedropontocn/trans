@@ -150,7 +150,7 @@ with st.sidebar:
     lacunas = st.text_area("Lacunas de Dados", value=st.session_state.get('lacunas', ''), height=100)
 
     st.markdown("---")
-    modelo = st.selectbox("Modelo Facilitador", ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5"])
+    modelo = st.selectbox("Modelo Facilitador", ["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-20250514"])
     botao_gerar = st.button("🚀 Iniciar Deliberação (2 Etapas)", use_container_width=True)
 
 
