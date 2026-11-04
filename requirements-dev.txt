@@ -1,0 +1,6 @@
+# Dependências só para os testes (não incluem litellm nem markitdown: os testes usam versões falsas)
+streamlit>=1.32
+python-docx
+python-dotenv
+jsonschema
+pytest

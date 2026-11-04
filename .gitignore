@@ -1,0 +1,13 @@
+# Segredos
+.env
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Saídas geradas pelo app e pelo orquestrador
+registros/
+output_*.json
+output_*.md
+output_*.txt
