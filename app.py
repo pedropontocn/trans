@@ -89,6 +89,9 @@ NESTA ETAPA: escreva a Fase 5 a partir do cenário, dos fatos e do Tension Map f
 Não acrescente trade-offs, números ou fatos que não estejam nesses insumos. Não recomende um caminho:
 apresente as opções, quem ganha e quem perde com cada uma e o que se sabe sobre cada argumento.
 
+Tamanho: o memorando inteiro, com a matriz, deve caber em 2 páginas (no máximo 1.100 palavras).
+Seja direto: frases curtas, sem repetir o que já está no Tension Map.
+
 Entregue somente o Markdown abaixo, nesta ordem, sem texto antes ou depois:
 
 # Memorando Executivo
@@ -811,12 +814,21 @@ if botao_gerar:
                 st.stop()
 
             with st.spinner("Etapa 2/2: redigindo o memorando executivo e a matriz de risco..."):
-                memorando, _, motivo2 = chamar_modelo(
-                    modelo,
-                    [{"role": "system", "content": PROMPT_ETAPA_2},
-                     {"role": "user", "content": cenario + "\n\nTENSION MAP (Fase 4):\n"
-                      + json.dumps(tension_map, ensure_ascii=False, indent=2)}],
-                    6000)
+                mensagens2 = [{"role": "system", "content": PROMPT_ETAPA_2},
+                              {"role": "user", "content": cenario + "\n\nTENSION MAP (Fase 4):\n"
+                               + json.dumps(tension_map, ensure_ascii=False, indent=2)}]
+                memorando, _, motivo2 = chamar_modelo(modelo, mensagens2, 16000)
+                # Se ainda for cortado, pede para continuar de onde parou (até 2 vezes)
+                for _ in range(2):
+                    if motivo2 != "length":
+                        break
+                    continuacao, _, motivo2 = chamar_modelo(
+                        modelo,
+                        mensagens2 + [{"role": "assistant", "content": memorando},
+                                      {"role": "user", "content": "Continue o memorando exatamente de onde parou, "
+                                       "sem repetir nada do que já escreveu e sem comentários."}],
+                        8000)
+                    memorando = memorando.rstrip() + ("\n" if continuacao.lstrip().startswith(("|", "#", "-")) else " ") + continuacao.lstrip()
             st.session_state["resultado"] = {
                 "tension_map": tension_map,
                 "memorando": memorando.strip(),
