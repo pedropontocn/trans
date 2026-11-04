@@ -227,3 +227,33 @@ def test_modo_independente_exige_tres_personas(app, llm):
     next(b for b in at.button if "deliber" in b.label.lower()).click().run()
     assert not at.exception, at.exception
     assert any("pelo menos 3 personas" in e.value for e in at.error)
+
+
+def _diagnosticar(at):
+    next(b for b in at.button if "Diagnosticar" in b.label).click().run()
+    assert not at.exception, at.exception
+    return at.session_state["diagnostico"]
+
+
+def test_diagnostico_com_base_e_oficio(app, llm):
+    llm.base_projetos = "obra;municipio;situacao\nPonte do Rio Exemplo;Exemplópolis;em execução\n"
+    at = app.run()
+    d = _diagnosticar(at)
+    assert d["com_base"] and any(i["onde"] == "base de projetos" for i in d["itens"])
+    assert [m.value for m in at.metric][:1] == ["1"]                    # 1 crítica conferida
+    assert any("Minuta de ofício" in getattr(b, "proto", b).label for b in at.get("download_button"))
+
+
+def test_lacuna_critica_segura_o_debate_ate_confirmar(app, llm):
+    at = app.run()
+    _diagnosticar(at)
+    next(b for b in at.button if "deliber" in b.label.lower()).click().run()
+    assert "resultado" not in at.session_state
+    assert any("lacunas críticas sem resposta" in w.value for w in at.warning)
+    # marcando "deliberar mesmo assim", o debate roda e recebe as lacunas como contexto
+    next(c for c in at.checkbox if "mesmo assim" in c.label).check().run()
+    at.slider[0].set_value(1).run()
+    r = _deliberar(at)
+    debate = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
+    assert "LACUNAS IDENTIFICADAS NO DIAGNÓSTICO PRÉVIO" in debate["mensagens"][1]["content"][1]["text"]
+    assert json.loads(r["registro_json"])["diagnostico_lacunas"]["itens"]
