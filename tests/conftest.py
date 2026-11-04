@@ -104,6 +104,12 @@ class LLMFalso:
         self.falhar_avaliador = False
         self.sintese = None                        # Tension Map da síntese do modo independente
         self.base_projetos = None                  # texto de uma base de projetos (CSV) para o upload opcional
+        self.atendimento = [
+            {"item_id": "02.2", "situacao": "atendido", "evidencia": "Empenhado até 23/10/2026: R$ 398.750.000,00", "pedido": ""},
+            {"item_id": "02.3", "situacao": "atendido", "evidencia": "nenhuma obra está paralisada no estado", "pedido": ""},
+            {"item_id": "07.1", "situacao": "nao_atendido", "evidencia": "",
+             "pedido": "Informar as ações judiciais com potencial de bloqueio financeiro, com número e valor."},
+            {"item_id": "06.4", "situacao": "nao_atendido", "evidencia": "", "pedido": "Informar as licitações em curso."}]
         self.lacunas = [
             {"tipo": "declarada", "secao": "1.2 Orçamento do exercício", "item": "Dotação atualizada",
              "evidencia": "Dotação atualizada: [A complementar]", "por_que_falta": "sem a dotação não dá para medir o espaço fiscal",
@@ -142,9 +148,17 @@ class LLMFalso:
             if self.resposta_extracao_texto is not None or nome is None:
                 return self._resp(self.resposta_extracao_texto or json.dumps(self.insumos))
             return self._resp(nome=nome, args=self.insumos, motivo="tool_calls")
+        if "terminou com as questões não resolvidas" in sistema:
+            self.mensagem_pedidos_debate = ultimo
+            ids = [q["id"] for q in json.loads(ultimo.split("QUESTÕES NÃO RESOLVIDAS:\n")[1].split("\n\nJÁ PEDIDOS:")[0])]
+            pedidos = [{"id": i, "pedido": f"Informar o dado necessário para responder à questão {i}.", "materialidade": "relevante"}
+                       for i in ids]
+            pedidos += [{"id": "Q99", "pedido": "Pedido de questão inexistente.", "materialidade": "critica"},
+                        {"id": ids[0], "pedido": "Informar a dotação atualizada de 2026 por fonte de recurso.", "materialidade": "critica"}]
+            return self._resp(json.dumps({"pedidos": pedidos}))
         if "analista da Equipe de Transição" in sistema:
             self.mensagem_diagnostico = " ".join(p["text"] for p in messages[1]["content"]) if isinstance(messages[1]["content"], list) else messages[1]["content"]
-            alvo = {"lacunas": self.lacunas}
+            alvo = {"lacunas": self.lacunas, "atendimento": self.atendimento}
             return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(json.dumps(alvo))
         if "Você participa de uma deliberação multiagente" in sistema:
             pid = re.search(r"VOCÊ É: \[([^\]]+)\]", ultimo).group(1)

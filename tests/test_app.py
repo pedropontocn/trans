@@ -240,7 +240,8 @@ def test_diagnostico_com_base_e_oficio(app, llm):
     at = app.run()
     d = _diagnosticar(at)
     assert d["com_base"] and any(i["onde"] == "base de projetos" for i in d["itens"])
-    assert [m.value for m in at.metric][:1] == ["1"]                    # 1 crítica conferida
+    assert [m.value for m in at.metric][:1] == ["2"]                    # dotação + pedido 07.1 não atendido
+    assert "07.1 (Ofício nº 07/2026)" in llm.mensagem_diagnostico          # itens dos ofícios vão para o modelo
     assert any("Minuta de ofício" in getattr(b, "proto", b).label for b in at.get("download_button"))
 
 
@@ -257,3 +258,22 @@ def test_lacuna_critica_segura_o_debate_ate_confirmar(app, llm):
     debate = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
     assert "LACUNAS IDENTIFICADAS NO DIAGNÓSTICO PRÉVIO" in debate["mensagens"][1]["content"][1]["text"]
     assert json.loads(r["registro_json"])["diagnostico_lacunas"]["itens"]
+
+
+def test_questoes_do_debate_viram_pedidos_sem_travar_nova_deliberacao(app, llm):
+    tm = tension_map([trade_off("T1", "Licitações")])
+    tm["unresolved_questions"] = [{"id": "Q1", "questao": "Qual o motivo do adiamento?", "quem_responde": "Licitações", "afeta": ["T1"]}]
+    llm.rodadas = [tm]
+    at = app.run()
+    at.slider[0].set_value(1).run()
+    r = _deliberar(at)
+    assert r["pedidos_do_debate"] == 2                                 # uma questão pode gerar mais de um pedido
+    d = at.session_state["diagnostico"]
+    assert d.get("so_debate") and {i["origem_id"] for i in d["itens"]} == {"Q1"}
+    assert any("viraram pedidos ao órgão" in m.value for m in at.info)
+    # rodar o diagnóstico depois mantém os pedidos do debate
+    next(b for b in at.button if "Diagnosticar" in b.label).click().run()
+    assert any(i["tipo"] == "questao_debate" for i in at.session_state["diagnostico"]["itens"])
+    # e esses pedidos não travam uma nova deliberação (só as lacunas críticas do relatório travam)
+    next(c for c in at.checkbox if "mesmo assim" in c.label).check().run()
+    _deliberar(at)

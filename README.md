@@ -58,8 +58,27 @@ Cada lacuna traz um trecho do relatório ou da base que a evidencia, e o código
 evidência conferida fica fora do ofício. A materialidade (crítica, relevante, acessória) decide o que entra por
 padrão: críticas e relevantes. A tabela é editável: dá para incluir, excluir e reescrever cada pedido.
 
+**Desdobramentos dos fatos informados.** Além do que foi pedido, o diagnóstico procura o que o próprio relatório
+torna necessário saber. Para cada fato que gera risco, obrigação ou decisão (obra suspensa, licitação adiada, contrato
+emergencial, decreto citado, valor alto, divergência entre fontes), o modelo usa uma lista de verificação por tipo de
+fato e pede o que falta: por exemplo, contrato, contratada, percentual executado e ato da suspensão de cada obra
+suspensa. A evidência é o trecho do relatório que informa o fato, conferido por código, e o pedido precisa citar o
+fato específico.
+
+**Questões em aberto do debate.** Ao fim da deliberação, as questões não resolvidas do Tension Map que o órgão pode
+responder com dado ou documento viram pedidos, na seção "Pontos em aberto da análise" da tabela e do ofício. As que
+dependem de decisão da nova gestão ficam de fora. Esses pedidos não travam uma nova deliberação.
+
+**Pedidos já feitos.** O diagnóstico também confere, item por item, se o relatório atende os ofícios que a Equipe
+de Transição já enviou (nº 02, 06, 07 e 08/2026 para todas as pastas; 03, 04, 05 e 09 para as pastas específicas,
+marcados conforme o nome da secretaria). Cada item sai como atendido, parcial, não atendido ou não avaliado. Atendido
+e parcial precisam de trecho do relatório, conferido por código. Antes de reiterar um item "não atendido", o código
+procura no relatório termos daquele item; se encontrar, o item fica desmarcado, com aviso para conferir. Isso funciona
+com qualquer formato de relatório, já que o modelo de relatório é de uso recomendado, mas não obrigatório.
+
 O painel gera a **minuta de ofício** em Word, no padrão ofício, da Equipe de Transição ao titular da pasta, com os
-pedidos agrupados por seção, prazo de 5 dias úteis (com feriados nacionais e do RJ; confira o calendário oficial) e
+reiteração dos itens não atendidos de cada ofício anterior, os demais pedidos agrupados por seção, referência aos
+ofícios e canal de resposta já preenchidos, prazo de 5 dias úteis (com feriados nacionais e do RJ; confira o calendário oficial) e
 um parágrafo pedindo que o órgão declare expressamente o que não existir ou não puder ser enviado. Também baixa a
 matriz de lacunas em CSV.
 

@@ -244,3 +244,83 @@ def test_oficio_em_word(funcoes):
                    "2. Seção 1.2 Orçamento do exercício:", "a) Informar a dotação atualizada.", "b) Informar os restos a pagar.",
                    "3. Itens da base de projetos não mencionados no relatório:", "informado expressamente", "Atenciosamente,"):
         assert trecho in texto, trecho
+
+
+def test_oficios_aplicaveis_e_referencia(funcoes):
+    assert funcoes.oficios_aplicaveis("Secretaria de Estado das Cidades") == ["02", "06", "07", "08"]
+    assert {"03", "04"} <= set(funcoes.oficios_aplicaveis("Secretaria de Estado de Fazenda"))
+    assert "09" in funcoes.oficios_aplicaveis("Secretaria de Estado de Defesa Civil")
+    ref = funcoes.referencia_oficios(["07", "02"], "23/10/2026")
+    assert ref.startswith("Ofícios nº 02 e 07/2026 – Equipe de Transição, encaminhados pelo Ofício Circular SECC/CHEGAB nº 10/2026")
+    assert ref.endswith("posicionadas em 23/10/2026.")
+
+
+def test_diagnostico_confere_atendimento_aos_oficios(funcoes, llm):
+    texto, _ = funcoes.limpar_relatorio(RELATORIO)
+    d = funcoes.diagnosticar("anthropic/claude-opus-5-5", texto, "", "cenário", ["02", "06", "07", "08"])
+    at = {a["item_id"]: a for a in d["atendimento"]}
+    assert len(at) == 25
+    assert at["02.2"]["situacao"] == "atendido" and at["02.2"]["evidencia"]
+    assert at["02.3"]["situacao"] == "parcial" and "não foi encontrada" in at["02.3"]["alerta"]   # evidência falsa
+    assert at["07.1"]["situacao"] == "nao_atendido" and not at["07.1"]["alerta"]
+    assert at["06.4"]["situacao"] == "nao_atendido" and "concorrencia" in at["06.4"]["alerta"]   # o relatório fala de concorrências
+    assert at["08.6"]["situacao"] == "nao_avaliado"
+    itens = {i.get("item_id"): i for i in d["itens"] if i["tipo"] == "nao_atendido"}
+    assert itens["07.1"]["materialidade"] == "critica" and itens["07.1"]["incluir"]
+    assert not itens["06.4"]["incluir"]                                    # não reitera o que pode ter sido respondido
+    assert d["itens"][0]["tipo"] == "nao_atendido"                         # reiterações primeiro
+
+
+def test_oficio_reitera_pedidos_nao_atendidos(funcoes):
+    import io
+    from datetime import date
+
+    import docx
+    itens = [{"oficio": "07", "item_id": "07.1", "secao": "Ofício nº 07/2026",
+              "pedido": "Informar as ações judiciais com potencial de bloqueio financeiro."},
+             {"secao": "1.2 Orçamento do exercício", "pedido": "Informar a dotação atualizada."}]
+    dados = {"secretaria": "Secretaria de Estado das Cidades", "tratamento": "Senhor", "prazo_dias": 5,
+             "referencia": funcoes.referencia_oficios(["07"], "23/10/2026"), "data_relatorio": "23/10/2026",
+             "data_oficio": date(2026, 11, 4)}
+    conteudo, _ = funcoes.gerar_oficio_docx(dados, itens)
+    texto = "\n".join(p.text for p in docx.Document(io.BytesIO(conteudo)).paragraphs)
+    for trecho in ("Referência: Ofício nº 07/2026 – Equipe de Transição", "em resposta aos ofícios em referência",
+                   "2. Reiteramos o solicitado no Ofício nº 07/2026 – Equipe de Transição (ações judiciais, auditorias e "
+                   "órgãos de controle), em especial:", "a) Informar as ações judiciais com potencial de bloqueio financeiro.",
+                   "3. Seção 1.2 Orçamento do exercício:"):
+        assert trecho in texto, trecho
+
+
+def test_prompt_pede_desdobramentos_com_lista_de_verificacao(funcoes):
+    assert '"desdobramento"' in funcoes.PROMPT_DIAGNOSTICO
+    assert "percentual de execução física e financeira" in funcoes.PROMPT_DIAGNOSTICO
+    enum = funcoes.FERRAMENTA_DIAGNOSTICO["function"]["parameters"]["properties"]["lacunas"]["items"]["properties"]["tipo"]["enum"]
+    assert "desdobramento" in enum and "nao_atendido" not in enum and "questao_debate" not in enum
+
+
+def test_desdobramento_usa_o_fato_como_evidencia(funcoes, llm):
+    llm.lacunas = [{"tipo": "desdobramento", "secao": "3.2 Obras suspensas", "item": "Dados das cinco obras suspensas",
+                    "evidencia": "Cinco obras estão com execução suspensa aguardando decisão da Casa Civil",
+                    "por_que_falta": "sem contrato e percentual executado não dá para avaliar o custo de esperar",
+                    "materialidade": "critica", "pedido": "Informar, para cada uma das cinco obras suspensas, o contrato, a "
+                    "contratada, o percentual executado e a data e o ato da suspensão."},
+                   {"tipo": "nao_atendido", "secao": "x", "item": "tipo reservado ao código", "evidencia": "Cinco obras estão "
+                    "com execução suspensa", "por_que_falta": "x", "materialidade": "relevante", "pedido": "Outro pedido."}]
+    texto, _ = funcoes.limpar_relatorio(RELATORIO)
+    d = funcoes.diagnosticar("anthropic/claude-opus-5-5", texto, "", "cenário", [])
+    itens = {i["item"]: i for i in d["itens"]}
+    obra = itens["Dados das cinco obras suspensas"]
+    assert obra["tipo"] == "desdobramento" and obra["verificado"] and obra["incluir"]
+    assert itens["tipo reservado ao código"]["tipo"] == "evasiva"       # o modelo não cria "pedido não atendido"
+
+
+def test_pedidos_do_debate(funcoes, llm):
+    tm = tension_map([trade_off("T1", "a")])
+    tm["unresolved_questions"] = [{"id": "Q1", "questao": "Qual a dotação atualizada?", "quem_responde": "ASSPLO", "afeta": ["T1"]},
+                                  {"id": "Q2", "questao": "Quando as obras foram suspensas?", "quem_responde": "SUBGFISO", "afeta": ["T2"]}]
+    itens, _ = funcoes.pedidos_do_debate("anthropic/claude-sonnet-5-5", tm,
+                                         ["Informar a dotação atualizada de 2026 por fonte de recurso."])
+    assert [i["origem_id"] for i in itens] == ["Q1", "Q2"]              # Q99 inexistente e o repetido saem
+    assert all(i["tipo"] == "questao_debate" and i["incluir"] for i in itens)
+    assert itens[1]["unidade"] == "SUBGFISO" and "afeta T2" in itens[1]["por_que_falta"]
+    assert "Informar a dotação atualizada" in llm.mensagem_pedidos_debate        # a lista de já pedidos vai ao modelo
