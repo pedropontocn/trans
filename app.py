@@ -305,13 +305,16 @@ def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None):
     """Chama o modelo e devolve (texto, argumentos da ferramenta ou None, motivo de parada)."""
     extras = {}
     if ferramenta:
-        extras = {"tools": [ferramenta], "tool_choice": {"type": "function", "function": {"name": ferramenta["function"]["name"]}}}
+        # "auto" em vez de forçar a ferramenta: alguns modelos (ex.: Opus 5.5) não aceitam uso forçado.
+        # Os prompts já mandam chamar a ferramenta e, se o modelo responder em texto, o JSON é lido do texto.
+        extras = {"tools": [ferramenta], "tool_choice": "auto"}
     try:
         resp = completion(model=modelo, messages=mensagens, max_tokens=max_tokens, **extras)
-    except ImportError:
-        # Algumas versões do LiteLLM exigem o pacote "mcp" para usar ferramentas.
-        # Sem ele, repete a chamada sem ferramenta; os prompts já pedem o JSON em texto nesse caso.
-        if not extras:
+    except Exception as e:
+        # Sem o pacote "mcp", ou com um modelo que não aceita ferramentas, repete a chamada sem ferramenta;
+        # os prompts já pedem o JSON em texto nesse caso.
+        sem_suporte = isinstance(e, ImportError) or "UnsupportedParams" in type(e).__name__ or "tool" in str(e).lower()
+        if not extras or not sem_suporte:
             raise
         resp = completion(model=modelo, messages=mensagens, max_tokens=max_tokens)
     escolha = resp.choices[0]
