@@ -7,24 +7,24 @@ from dotenv import load_dotenv
 from litellm import completion
 from markitdown import MarkItDown
 
-# --- PROMPT DO SISTEMA (Embutido) ---
+# --- PROMPT DO SISTEMA ---
 SYSTEM_PROMPT = """
 Você é um facilitador de deliberação multiagente. Seu objetivo é produzir um TENSION MAP (mapa de tensões) e um MEMORANDO EXECUTIVO para apoiar decisores humanos. Você NÃO decide e NÃO busca consenso. Você amplia a inteligência expondo trade-offs.
 
 PROTOCOLO OBRIGATÓRIO DE EXECUÇÃO EM 5 FASES:
-FASE 1 — PROPOSIÇÃO: Cada persona propõe um plano (JSON).
-FASE 2 — CRÍTICA CRUZADA: Cada persona critica os planos das outras (Regra Adversarial).
-FASE 2.5 — REVISÃO: Cada persona escolhe REVISAR (abandonando premissas), DEFENDER ou MANTER.
-FASE 3 — AVALIAÇÃO INDEPENDENTE: Nota cega (forte/moderado/fraco/rejeitar).
-FASE 4 — TENSION MAP: Agrupar argumentos por mecanismo causal (deduplicação). Produzir o JSON final com trade_offs (mínimo 3), evidence_level (1 a 5) e unresolved_questions.
+FASE 1 — PROPOSIÇÃO: Cada persona propõe um plano.
+FASE 2 — CRÍTICA CRUZADA: Cada persona critica os planos das outras.
+FASE 2.5 — REVISÃO: Cada persona escolhe REVISAR, DEFENDER ou MANTER.
+FASE 3 — AVALIAÇÃO INDEPENDENTE: Nota cega.
+FASE 4 — TENSION MAP: Produzir o JSON final com os trade-offs deduplicados.
 FASE 5 — MEMORANDO EXECUTIVO: 2 páginas em português claro. Top 3 trade-offs, quem ganha/perde, decisões da semana, dados faltantes, custo de não decidir.
 
 DIRETRIZES INVIOLÁVEIS:
 1. Use a hierarquia de evidências: Nível 1 (Fato documental) a Nível 5 (Sem evidência).
 2. Classifique as divergências: factual, causal, normativa, distributiva, temporal ou epistêmica.
-3. Aplique as restrições legais brasileiras (estabilidade do servidor, Lei 14.133/21, patrimonialismo, TCE/MPRJ).
+3. Aplique as restrições legais brasileiras.
 4. NUNCA fabrique dissenso. Se houver convergência legítima, registre-a.
-5. ENTREGUE APENAS UM BLOCO JSON VÁLIDO E O MEMORANDO EM TEXTO PURO. Não use formatação markdown ao redor do JSON.
+5. ENTREGUE APENAS UM BLOCO JSON VÁLIDO E O MEMORANDO EM TEXTO PURO.
 
 Formato de Saída Obrigatório:
 [INÍCIO DO JSON]
@@ -69,12 +69,10 @@ def _como_texto(valor):
 
 # --- BARRA LATERAL ---
 with st.sidebar:
-    # Define o modelo no topo para ser usado em TODAS as etapas
     st.header("0. Configuração de IA")
     modelo = st.selectbox("Modelo Facilitador", [
-        "anthropic/claude-sonnet-4-6",   # Modelo atualizado para 2026
-        "anthropic/claude-opus-4-6",
-        "anthropic/claude-3-5-sonnet-latest" # Fallback genérico
+        "anthropic/claude-3-5-sonnet-20241022",   
+        "anthropic/claude-3-opus-20240229"
     ])
     
     st.markdown("---")
@@ -99,21 +97,18 @@ with st.sidebar:
                 finally:
                     os.remove(tmp_path) 
 
-                prompt_extrator = f"""Leia o relatório de transição abaixo (que está em formato Markdown, com tabelas preservadas) e extraia as informações EXATAS no formato JSON.
-
-                Relatório:
-                {texto_relatorio[:60000]}
+                prompt_extrator = f"""Leia o relatório de transição abaixo e extraia as informações EXATAS no formato JSON.
+                Relatório: {texto_relatorio[:60000]}
 
                 Retorne APENAS o JSON:
                 {{
-                  "problema": "Resuma em 1 parágrafo o maior dilema ou conflito estratégico da secretaria.",
-                  "fatos": "Liste de 5 a 8 fatos ancoradores cruciais. Se houver tabelas de contratos ou obras, extraia os nomes das empresas, valores e saldos exatos.",
-                  "personas": "Crie 5 a 6 personas com critérios de decisão conflitantes baseados nos atores citados.",
+                  "problema": "Resuma em 1 parágrafo o maior dilema da secretaria.",
+                  "fatos": "Liste de 5 a 8 fatos ancoradores cruciais (números, orçamento, contratos vencendo).",
+                  "personas": "Crie 5 a 6 personas com critérios de decisão conflitantes.",
                   "lacunas": "Liste de 3 a 4 informações críticas que o relatório NÃO responde."
                 }}"""
 
                 try:
-                    # Usa a mesma variável modelo do topo
                     resp_extrator = completion(
                         model=modelo,
                         messages=[{"role": "user", "content": prompt_extrator}],
@@ -157,9 +152,16 @@ if botao_gerar:
         # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
         with st.spinner(f"Etapa 1/2: O conselho de agentes ({modelo}) está debatendo..."):
             
+            # REGRA DE CONCISÃO ADICIONADA AQUI
             instrucao_compacta = """
             Execute internamente as Fases 1 a 3 (Proposição, Crítica, Revisão e Avaliação).
-            MAS NÃO RETORNE O HISTÓRICO DAS FASES 1 A 3 NO JSON. Retorne APENAS o Tension Map da Fase 4, com os trade-offs já deduplicados e sintetizados.
+            MAS NÃO RETORNE O HISTÓRICO DAS FASES 1 A 3 NO JSON. Retorne APENAS o Tension Map da Fase 4.
+            
+            REGRA DE OURO DE CONCISÃO: 
+            - Crie no máximo 4 trade-offs.
+            - No campo "descricao" de cada trade-off, use no máximo 2 frases.
+            - No campo "mecanismo_causal", use no máximo 1 frase.
+            - Seja direto e cirúrgico. O objetivo é caber no limite de tokens.
             """
             
             prompt_fase_1_a_4 = SYSTEM_PROMPT + "\n\n" + instrucao_compacta
@@ -172,7 +174,7 @@ if botao_gerar:
                         {"role": "system", "content": prompt_fase_1_a_4}, 
                         {"role": "user", "content": user_prompt_1}
                     ],
-                    max_tokens=8000,
+                    max_tokens=8192, # Aumentado para o máximo seguro
                 )
                 texto_json = resp_1.choices[0].message.content
                 tension_map = extrair_json_limpo(texto_json)
