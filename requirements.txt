@@ -1,6 +1,6 @@
 streamlit
-litellm>=1.60.0
+litellm
 python-dotenv
+markitdown[pdf, docx, xlsx]
 pypdf
 python-docx
-markitdown[pdf]
