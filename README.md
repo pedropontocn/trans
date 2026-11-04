@@ -42,6 +42,25 @@ ANTHROPIC_API_KEY=...
    verificação, tokens e custo. A pasta não vai para o GitHub. No Streamlit Cloud ela é apagada quando o app
    reinicia, então use o botão **Registro (.json)** para baixar e guardar a trilha de cada análise.
 
+## Modo "Personas independentes"
+
+No modo rápido, um único modelo simula todas as personas numa chamada, e as rodadas medem se ele é consistente.
+No modo **Personas independentes**, o debate acontece de verdade:
+
+1. **Fase 1:** cada persona propõe o seu plano numa chamada própria.
+2. **Fase 2:** cada persona recebe os planos das outras e os critica.
+3. **Fase 2.5:** cada persona recebe as críticas que sofreu e decide revisar, defender ou manter o plano.
+4. **Fase 3:** um modelo de outra família (Gemini, por padrão) dá notas aos planos finais sem saber quem os
+   propôs. O código embaralha os planos e retira deles os nomes e ids das personas.
+5. **Fase 4:** o modelo do debate extrai o Tension Map do histórico real. O código confere se cada polo foi
+   defendido por uma persona que de fato participou.
+
+O histórico completo aparece na aba **Debate** e vai para o registro. Personas que não respondem ficam de fora,
+com aviso; com menos de 3, o debate não acontece. Os modelos Gemini usam a `GEMINI_API_KEY` dos Secrets.
+
+Com o Sonnet 5.5 nas personas e o Opus 5.5 na síntese e no memorando, uma análise custa cerca de US$ 0,60. O custo
+exibido no painel não inclui o Gemini, que ainda não tem preço cadastrado (aparece marcado com *).
+
 ## Comparar com uma análise anterior
 
 Para acompanhar a evolução do relatório até a posse, suba na barra lateral o **registro (.json) de uma análise

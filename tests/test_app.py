@@ -165,3 +165,65 @@ def test_registro_invalido_mostra_erro(app, llm):
     at = app.run()
     assert not at.exception, at.exception
     assert any("não é um registro de análise válido" in e.value for e in at.error)
+
+
+PERSONAS_4 = ("- [p1] Fazenda: foco em caixa\n- [p2] Controle externo: legalidade\n"
+              "- [p3] Beneficiário: cidadão na ponta\n- [p4] Casa Civil: coordenação política")
+
+
+def _modo_independente(at, personas=PERSONAS_4):
+    at.radio[0].set_value("Personas independentes").run()
+    at.session_state["personas"] = personas
+    return at
+
+
+def test_modo_independente_completo(app, llm):
+    llm.sintese = tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])
+    llm.sintese["trade_offs"][1]["polo_b"]["defendido_por"] = ["p9"]            # persona que não existe
+    at = _modo_independente(app.run())
+    r = _deliberar(at)
+    d = r["debate"]
+    fases = [c for c in llm.chamadas if "Você participa" in str(c["mensagens"][0]["content"])]
+    assert len(fases) == 12                                                  # 4 personas × 3 fases
+    assert all(c["modelo"].endswith("sonnet-5-5") for c in fases)
+    aval = next(c for c in llm.chamadas if c["modelo"].startswith("gemini/"))
+    assert aval["modelo"] == "gemini/gemini-3.1-pro-preview"
+    # avaliação cega: o avaliador não vê nomes nem ids das personas
+    for nome in ("Fazenda", "Controle externo", "p1", "p2"):
+        assert nome not in llm.planos_vistos_pelo_avaliador.split("PLANOS:")[1]
+    assert "Plano final de [omitido]" in llm.planos_vistos_pelo_avaliador
+    assert all(x["avaliacao_cega"] for x in d["personas"])
+    # críticas a alvos inexistentes são descartadas; cada persona recebe críticas reais
+    assert all(c["alvo"] in {"p1", "p2", "p3", "p4"} for x in d["personas"] for c in x["criticas_recebidas"])
+    assert d["personas"][0]["revisao"]["decisao"] == "REVISAR"
+    # a síntese recebe o histórico real e o código confere quem defendeu cada polo
+    assert "Plano final de p2" in llm.historico_sintese
+    assert any("p9" in prob for prob in r["problemas_formato"])
+    assert r["tension_map"]["modo_debate"]["avaliador"] == "gemini/gemini-3.1-pro-preview"
+    assert any("de outra família" in m for m in r["confianca"]["motivos"])
+    assert [t.label for t in at.tabs][-1] == "🗣️ Debate"
+    assert json.loads(r["registro_json"])["modo_debate"] == "personas independentes"
+
+
+def test_persona_que_nao_responde_fica_de_fora(app, llm):
+    llm.personas_mudas = {"p3"}
+    at = _modo_independente(app.run())
+    r = _deliberar(at)
+    assert r["debate"]["ausentes"] == ["p3"]
+    assert any("p3" in prob and "Fase 1" in prob for prob in r["problemas_formato"])
+
+
+def test_falha_do_avaliador_limita_a_confianca(app, llm):
+    llm.falhar_avaliador = True
+    at = _modo_independente(app.run())
+    r = _deliberar(at)
+    assert "GEMINI_API_KEY" in r["debate"]["erro_avaliacao"]
+    assert r["confianca"]["nivel"] in ("baixa", "média")
+    assert any("avaliação cega falhou" in m for m in r["confianca"]["motivos"])
+
+
+def test_modo_independente_exige_tres_personas(app, llm):
+    at = _modo_independente(app.run(), personas="- [p1] Fazenda\n- [p2] Controle")
+    next(b for b in at.button if "deliber" in b.label.lower()).click().run()
+    assert not at.exception, at.exception
+    assert any("pelo menos 3 personas" in e.value for e in at.error)

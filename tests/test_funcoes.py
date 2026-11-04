@@ -174,3 +174,16 @@ def test_pareamento_descarta_ids_inexistentes_e_repetidos(funcoes, llm):
     assert [(m["anterior"], m["atual"]) for m in r["mantidos"]] == [("C1", "T1")]
     assert "estabilidade 2/3 → 3/3" in r["mantidos"][0]["mudancas"]
     assert [t["id"] for t in r["novos"]] == ["T2"] and [t["id"] for t in r["sairam"]] == ["C2"]
+
+
+def test_ler_personas(funcoes):
+    texto = ("- [fazenda] Fazenda: foco em caixa\n- [controle] Controle externo: legalidade\n"
+             "3. Beneficiário\n- [fazenda] Outra fazenda: repetida\n\n")
+    p = funcoes.ler_personas(texto)
+    assert [x["id"] for x in p] == ["fazenda", "controle", "beneficiario", "fazenda_"]
+    assert p[0]["criterio"] == "foco em caixa" and p[2]["nome"] == "Beneficiário"
+
+
+def test_mesma_familia(funcoes):
+    assert funcoes.mesma_familia("anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5")
+    assert not funcoes.mesma_familia("gemini/gemini-3.1-pro-preview", "anthropic/claude-sonnet-5-5")
