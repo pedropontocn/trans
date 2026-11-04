@@ -138,3 +138,39 @@ def test_secao_de_verificacao_do_word_inclui_neutralidade(funcoes):
                     "recomendacoes_implicitas": [{"trecho": "x", "por_que": "y"}]}
     md = funcoes.markdown_verificacao(ev, [], "abc", "anthropic/claude-opus-5-5", neutralidade=neutralidade)
     assert "Revisão de neutralidade" in md and "T2 (pende para B)" in md and "1 trecho(s)" in md
+
+
+RELATORIO_NOVO = (RELATORIO
+                  .replace("Dotação atualizada: \\[A complementar\\].", "Dotação atualizada: R$ 430.000.000,00.")
+                  .replace("R$ 120.500.000,00", "R$ 98.000.000,00"))
+
+
+def test_retrato_e_comparacao_do_relatorio(funcoes):
+    antigo = funcoes.retrato_relatorio(funcoes.limpar_relatorio(RELATORIO)[0])
+    novo = funcoes.retrato_relatorio(funcoes.limpar_relatorio(RELATORIO_NOVO)[0])
+    c = funcoes.comparar_relatorios(antigo, novo)
+    assert [p["secao"][:3] for p in c["preenchidas"]] == ["1.2"]
+    mudou = {v["secao"][:3]: v for v in c["valores_mudaram"]}
+    assert mudou["3.1"]["sairam"] == ["120.500.000,00"] and mudou["3.1"]["entraram"] == ["98.000.000,00"]
+    assert "430.000.000,00" in mudou["1.2"]["entraram"]
+
+
+def test_comparacao_de_riscos(funcoes):
+    from conftest import MEMORANDO
+    novo = (MEMORANDO.replace("| Perda de propostas | Alta | Médio |", "| Perda das propostas | Média | Médio |")
+            .replace("| Obrigações sem caixa | Média | Alto | Demonstrativo de restos a pagar | Finanças |",
+                     "| Questionamento do TCE | Alta | Alto | Parecer da PGE | Jurídico |"))
+    r = funcoes.comparar_riscos(funcoes.extrair_matriz(MEMORANDO), funcoes.extrair_matriz(novo))
+    assert r["mudaram"] == [{"risco": "Perda das propostas", "mudancas": ["probabilidade Alta → Média"]}]
+    assert r["novos"] == ["Questionamento do TCE"] and r["sairam"] == ["Obrigações sem caixa"]
+
+
+def test_pareamento_descarta_ids_inexistentes_e_repetidos(funcoes, llm):
+    antigo = tension_map([trade_off("C1", "Licitações", estabilidade="2/3"), trade_off("C2", "Atas")])
+    novo = tension_map([trade_off("T1", "Licitações adiadas", estabilidade="3/3"), trade_off("T2", "Obras")])
+    llm.pareamento = {"pares": [{"anterior": "C1", "atual": "T1"}, {"anterior": "C2", "atual": "T1"},
+                                {"anterior": "C9", "atual": "T2"}]}
+    r = funcoes.comparar_trade_offs("anthropic/claude-sonnet-5-5", antigo, novo)
+    assert [(m["anterior"], m["atual"]) for m in r["mantidos"]] == [("C1", "T1")]
+    assert "estabilidade 2/3 → 3/3" in r["mantidos"][0]["mudancas"]
+    assert [t["id"] for t in r["novos"]] == ["T2"] and [t["id"] for t in r["sairam"]] == ["C2"]

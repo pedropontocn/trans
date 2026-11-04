@@ -96,6 +96,9 @@ class LLMFalso:
                                  {"trecho": "Definir o destino das licitações adiadas", "por_que": "soa como ordem"},
                                  {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
         self.falhar_neutralidade = False
+        self.texto_relatorio = RELATORIO           # o que o MarkItDown falso devolve
+        self.registro_anterior = None              # bytes de um registro .json para o segundo upload
+        self.pareamento = None                     # resposta do pareamento de trade-offs (None = pareia por id igual)
         self._n_tm = 0
 
     def _resp(self, conteudo="", nome=None, args=None, motivo="stop", entrada=10000, saida=2000):
@@ -118,6 +121,14 @@ class LLMFalso:
             if self.resposta_extracao_texto is not None or nome is None:
                 return self._resp(self.resposta_extracao_texto or json.dumps(self.insumos))
             return self._resp(nome=nome, args=self.insumos, motivo="tool_calls")
+        if "Pareie os que tratam do mesmo dilema" in sistema:
+            if self.pareamento is None:
+                anteriores = json.loads(ultimo.split("ANTERIOR:\n")[1].split("\n\nATUAL:")[0])
+                atuais = {t["id"] for t in json.loads(ultimo.split("ATUAL:\n")[1])}
+                pares = {"pares": [{"anterior": t["id"], "atual": t["id"]} for t in anteriores if t["id"] in atuais]}
+            else:
+                pares = self.pareamento
+            return self._resp(nome=nome, args=pares, motivo="tool_calls") if nome else self._resp(json.dumps(pares))
         if "revisor de neutralidade" in sistema:
             if self.falhar_neutralidade:
                 raise RuntimeError("serviço indisponível")
@@ -143,8 +154,22 @@ class LLMFalso:
 class ArquivoFalso:
     name = "relatorio_exemplo.pdf"
 
+    def __init__(self, texto=RELATORIO):
+        self.texto = texto
+
     def getvalue(self):
-        return b"%PDF falso"
+        # o conteúdo muda quando o relatório muda, como num arquivo de verdade
+        return b"%PDF falso " + self.texto.encode("utf-8")
+
+
+class RegistroFalso:
+    name = "registro_anterior.json"
+
+    def __init__(self, dados):
+        self.dados = dados
+
+    def getvalue(self):
+        return self.dados
 
 
 @pytest.fixture
@@ -157,7 +182,7 @@ def llm(monkeypatch):
 
     class MarkItDown:
         def convert(self, caminho):
-            return NS(text_content=RELATORIO)
+            return NS(text_content=falso.texto_relatorio)
 
     markitdown.MarkItDown = MarkItDown
     monkeypatch.setitem(sys.modules, "litellm", litellm)
@@ -180,7 +205,12 @@ def app(llm, monkeypatch, tmp_path):
     import streamlit
     from streamlit.testing.v1 import AppTest
 
-    monkeypatch.setattr(streamlit, "file_uploader", lambda *a, **k: ArquivoFalso())
+    def uploader(rotulo, *a, **k):
+        if "anterior" in rotulo.lower():
+            return RegistroFalso(llm.registro_anterior) if llm.registro_anterior else None
+        return ArquivoFalso(llm.texto_relatorio)
+
+    monkeypatch.setattr(streamlit, "file_uploader", uploader)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PAINEL_REGISTROS", str(tmp_path / "registros"))
     at = AppTest.from_file(str(APP), default_timeout=120)

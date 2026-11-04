@@ -134,3 +134,34 @@ def test_registro_pode_ser_baixado(app, llm):
     assert "neutralidade" in registro["verificacao"]
     botoes = [b for b in at.get("download_button")]
     assert any("Registro" in getattr(b, "proto", b).label for b in botoes)
+
+
+def test_comparacao_com_analise_anterior(app, llm):
+    from streamlit.testing.v1 import AppTest
+
+    from test_funcoes import RELATORIO_NOVO
+    at = app.run()
+    at.slider[0].set_value(1).run()
+    primeiro = _deliberar(at)
+    assert "retrato_relatorio" in json.loads(primeiro["registro_json"])
+
+    # segunda análise: relatório atualizado + registro da primeira
+    llm.texto_relatorio = RELATORIO_NOVO
+    llm.registro_anterior = primeiro["registro_json"].encode("utf-8")
+    at2 = AppTest.from_file(app._script_path, default_timeout=120).run()
+    assert not at2.exception, at2.exception
+    at2.slider[0].set_value(1).run()
+    r = _deliberar(at2)
+    c = r["comparacao"]
+    assert c["anterior_id"] == primeiro["registro_id"]
+    assert [p["secao"][:3] for p in c["relatorio"]["preenchidas"]] == ["1.2"]
+    assert len(c["trade_offs"]["mantidos"]) == 2
+    assert [t.label for t in at2.tabs][-1] == "🔄 Comparação"
+    assert "comparacao_com" in json.loads(r["registro_json"])
+
+
+def test_registro_invalido_mostra_erro(app, llm):
+    llm.registro_anterior = b'{"nada": 1}'
+    at = app.run()
+    assert not at.exception, at.exception
+    assert any("não é um registro de análise válido" in e.value for e in at.error)

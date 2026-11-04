@@ -42,6 +42,19 @@ ANTHROPIC_API_KEY=...
    verificação, tokens e custo. A pasta não vai para o GitHub. No Streamlit Cloud ela é apagada quando o app
    reinicia, então use o botão **Registro (.json)** para baixar e guardar a trilha de cada análise.
 
+## Comparar com uma análise anterior
+
+Para acompanhar a evolução do relatório até a posse, suba na barra lateral o **registro (.json) de uma análise
+anterior** junto com o relatório novo. O painel mostra numa aba própria, e numa seção do Word:
+
+- **relatório:** seções que ficaram completas, seções com mais pendências e valores em R$ que mudaram (por código);
+- **trade-offs:** os que se mantiveram (e se mudaram de estabilidade, evidência ou posição), os novos e os que
+  saíram. Um modelo barato pareia os trade-offs pelo mecanismo causal; o código descarta ids inexistentes ou repetidos;
+- **matriz de risco:** riscos novos, que saíram e que mudaram de probabilidade ou impacto (por código);
+- **completude e confiança**, antes e depois.
+
+Registros gerados antes da versão 1.6 não guardam os valores do relatório; nesse caso só as pendências são comparadas.
+
 ## Custo aproximado
 
 Com o Opus 5.5 no debate, o Sonnet 5.5 na extração e 3 rodadas, uma análise completa custa cerca de

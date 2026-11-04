@@ -51,7 +51,7 @@ LIMITE_CARACTERES = 150_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "1.5"
+APP_VERSAO = "1.6"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -976,6 +976,218 @@ def confianca_calculada(completude, estab, ev):
     return {"nivel": ordem[nivel], "motivos": motivos}
 
 
+# --- COMPARAÇÃO ENTRE ANÁLISES ------------------------------------------------------
+# Compara a análise atual com o registro (.json) de uma análise anterior.
+
+# Valores monetários no formato brasileiro (638.817.965,00) ou abreviados com R$ (R$ 1,3 bi)
+RE_VALOR_BR = re.compile(r"(?:R\$\s*)?\d{1,3}(?:\.\d{3})+,\d{2}|R\$\s*\d+(?:,\d+)?\s*(?:mil|mi|milh[aã]o|milh[oõ]es|bi|bilh[aã]o|bilh[oõ]es)\b", re.I)
+
+
+def _chave_secao(titulo):
+    m = re.match(r"^(\d+(?:\.\d+)*)", titulo.strip())
+    return m.group(1) if m else _norm(titulo)[:40]
+
+
+def retrato_relatorio(texto):
+    """Resumo do relatório por seção (pendências e valores em R$), guardado no registro para comparações futuras."""
+    titulos = list(RE_TITULO.finditer(texto or ""))
+    retrato = {}
+    for i, m in enumerate(titulos):
+        corpo = texto[m.end(): titulos[i + 1].start() if i + 1 < len(titulos) else len(texto)]
+        if len(corpo.strip()) < 30:
+            continue
+        titulo = re.sub(r"[*\\]", "", m.group(1)).strip()[:90]
+        valores = sorted({re.sub(r"^R\$\s*", "", v).strip() for v in RE_VALOR_BR.findall(corpo)})
+        retrato[_chave_secao(titulo)] = {"titulo": titulo, "pendencias": len(RE_PENDENCIA.findall(corpo)), "valores": valores}
+    return retrato
+
+
+def _retrato_do_registro(registro):
+    if isinstance(registro.get("retrato_relatorio"), dict):
+        return registro["retrato_relatorio"], True
+    # registros anteriores à versão 1.6 só têm a completude: compara pendências, sem valores
+    comp = registro.get("completude") or {}
+    return {_chave_secao(s["secao"]): {"titulo": s["secao"], "pendencias": s["pendencias"], "valores": None}
+            for s in comp.get("secoes") or []}, False
+
+
+def comparar_relatorios(antigo, novo):
+    preenchidas, novas_pendencias, valores = [], [], []
+    for chave, n in novo.items():
+        a = antigo.get(chave)
+        if a is None:
+            continue
+        if a["pendencias"] and not n["pendencias"]:
+            preenchidas.append({"secao": n["titulo"], "antes": a["pendencias"]})
+        elif n["pendencias"] > a["pendencias"]:
+            novas_pendencias.append({"secao": n["titulo"], "antes": a["pendencias"], "depois": n["pendencias"]})
+        if a.get("valores") is not None and n.get("valores") is not None and a["valores"] != n["valores"]:
+            valores.append({"secao": n["titulo"], "sairam": sorted(set(a["valores"]) - set(n["valores"])),
+                            "entraram": sorted(set(n["valores"]) - set(a["valores"]))})
+    return {"preenchidas": preenchidas, "novas_pendencias": novas_pendencias, "valores_mudaram": valores,
+            "secoes_novas": [n["titulo"] for k, n in novo.items() if k not in antigo],
+            "secoes_removidas": [a["titulo"] for k, a in antigo.items() if k not in novo]}
+
+
+def extrair_matriz(memorando):
+    """Lê as linhas da tabela da Matriz de Risco do memorando."""
+    for bloco in _ler_markdown(memorando or ""):
+        if bloco[0] != "table":
+            continue
+        cab = [_norm(c) for c in bloco[1][0]]
+        if not any("probab" in c for c in cab):
+            continue
+        idx = {nome: next((i for i, c in enumerate(cab) if chave in c), None)
+               for nome, chave in (("risco", "risco"), ("probabilidade", "probab"), ("impacto", "impact"))}
+        linhas = []
+        for linha in bloco[1][1:]:
+            pega = lambda k: linha[idx[k]].strip() if idx[k] is not None and idx[k] < len(linha) else ""
+            if pega("risco"):
+                linhas.append({"risco": re.sub(r"\*\*", "", pega("risco")), "probabilidade": pega("probabilidade"), "impacto": pega("impacto")})
+        return linhas
+    return []
+
+
+def comparar_riscos(antigos, novos):
+    """Pareia os riscos pelo texto (semelhança de pelo menos 55%) e aponta o que mudou de nível."""
+    from difflib import SequenceMatcher
+    livres = list(range(len(antigos)))
+    novos_r, mudaram, mantidos = [], [], 0
+    for n in novos:
+        melhor, nota = None, 0.0
+        for i in livres:
+            r = SequenceMatcher(None, _norm(antigos[i]["risco"]), _norm(n["risco"])).ratio()
+            if r > nota:
+                melhor, nota = i, r
+        if melhor is None or nota < 0.55:
+            novos_r.append(n["risco"])
+            continue
+        livres.remove(melhor)
+        a = antigos[melhor]
+        mudancas = [f"{campo} {a[campo] or '—'} → {n[campo] or '—'}" for campo in ("probabilidade", "impacto")
+                    if _nivel(a[campo]) != _nivel(n[campo])]
+        if mudancas:
+            mudaram.append({"risco": n["risco"], "mudancas": mudancas})
+        else:
+            mantidos += 1
+    return {"novos": novos_r, "sairam": [antigos[i]["risco"] for i in livres], "mudaram": mudaram, "mantidos": mantidos}
+
+
+PROMPT_PAREAMENTO = """Você recebeu os trade-offs de duas análises da mesma secretaria: uma ANTERIOR e uma ATUAL.
+Pareie os que tratam do mesmo dilema, isto é, o mesmo mecanismo causal, mesmo escritos com palavras diferentes.
+Cada trade-off aparece em no máximo um par. Não force pares: um dilema que só existe numa das análises fica sem par.
+Use só ids que existem nas listas. Registre chamando a ferramenta `registrar_pareamento`; sem ela, devolva só o JSON."""
+
+FERRAMENTA_PAREAMENTO = {"type": "function", "function": {
+    "name": "registrar_pareamento",
+    "description": "Registra os pares de trade-offs equivalentes entre a análise anterior e a atual.",
+    "parameters": {"type": "object", "properties": {"pares": {"type": "array", "items": {
+        "type": "object", "properties": {"anterior": {"type": "string"}, "atual": {"type": "string"}},
+        "required": ["anterior", "atual"]}}}, "required": ["pares"]}}}
+
+
+def _resumo_trade_offs(tm):
+    return [{"id": t.get("id"), "titulo": t.get("titulo"), "mecanismo_causal": t.get("mecanismo_causal"),
+             "polo_a": (t.get("polo_a") or {}).get("posicao"), "polo_b": (t.get("polo_b") or {}).get("posicao")}
+            for t in ((tm or {}).get("trade_offs") or []) if isinstance(t, dict)]
+
+
+def comparar_trade_offs(modelo, tm_antigo, tm_novo):
+    from difflib import SequenceMatcher
+    antigos = {t["id"]: t for t in ((tm_antigo or {}).get("trade_offs") or []) if isinstance(t, dict) and t.get("id")}
+    novos = {t["id"]: t for t in ((tm_novo or {}).get("trade_offs") or []) if isinstance(t, dict) and t.get("id")}
+    if not antigos or not novos:
+        return {"mantidos": [], "novos": list(novos), "sairam": list(antigos)}
+    texto, args, _ = chamar_modelo(
+        modelo, [{"role": "system", "content": PROMPT_PAREAMENTO},
+                 {"role": "user", "content": "ANTERIOR:\n" + json.dumps(_resumo_trade_offs(tm_antigo), ensure_ascii=False)
+                  + "\n\nATUAL:\n" + json.dumps(_resumo_trade_offs(tm_novo), ensure_ascii=False)}],
+        2000, ferramenta=FERRAMENTA_PAREAMENTO, etapa="comparação de trade-offs")
+    pares_brutos = ((args or extrair_json(texto) or {}).get("pares")) or []
+    usados_a, usados_n, mantidos = set(), set(), []
+    for p in pares_brutos:
+        a, n = str(p.get("anterior", "")), str(p.get("atual", ""))
+        if a not in antigos or n not in novos or a in usados_a or n in usados_n:
+            continue          # id inexistente ou repetido: o código descarta
+        usados_a.add(a)
+        usados_n.add(n)
+        ta, tn = antigos[a], novos[n]
+        polos = lambda t: " | ".join(str((t.get(k) or {}).get("posicao", "")) for k in ("polo_a", "polo_b"))
+        mudancas = []
+        if ta.get("estabilidade") != tn.get("estabilidade") and tn.get("estabilidade"):
+            mudancas.append(f"estabilidade {ta.get('estabilidade') or '—'} → {tn.get('estabilidade')}")
+        if ta.get("nivel_evidencia") != tn.get("nivel_evidencia"):
+            mudancas.append(f"evidência nível {ta.get('nivel_evidencia')} → {tn.get('nivel_evidencia')}")
+        if SequenceMatcher(None, _norm(polos(ta)), _norm(polos(tn))).ratio() < 0.7:
+            mudancas.append("posições dos polos reformuladas")
+        mantidos.append({"anterior": a, "atual": n, "titulo": tn.get("titulo"), "mudancas": mudancas})
+    return {"mantidos": mantidos,
+            "novos": [{"id": k, "titulo": t.get("titulo")} for k, t in novos.items() if k not in usados_n],
+            "sairam": [{"id": k, "titulo": t.get("titulo")} for k, t in antigos.items() if k not in usados_a]}
+
+
+def comparar_analises(modelo, registro_antigo, atual):
+    """atual: dict com tension_map, memorando, completude, confianca e retrato_relatorio da análise nova."""
+    retrato_antigo, tem_valores = _retrato_do_registro(registro_antigo)
+    comp_antiga = registro_antigo.get("completude") or {}
+    try:
+        trade_offs = comparar_trade_offs(modelo, registro_antigo.get("tension_map"), atual["tension_map"])
+    except Exception as e:
+        trade_offs = {"erro": str(e), "mantidos": [], "novos": [], "sairam": []}
+    return {
+        "anterior_id": registro_antigo.get("id", "?"),
+        "anterior_data": _data_hora_br(registro_antigo.get("gerado_em")),
+        "relatorio": comparar_relatorios(retrato_antigo, atual.get("retrato_relatorio") or {}),
+        "valores_comparados": tem_valores,
+        "completude": {"antes": comp_antiga.get("indice"), "depois": (atual.get("completude") or {}).get("indice")},
+        "confianca": {"antes": (registro_antigo.get("confianca_calculada") or {}).get("nivel"),
+                      "depois": (atual.get("confianca") or {}).get("nivel")},
+        "trade_offs": trade_offs,
+        "riscos": comparar_riscos(extrair_matriz(registro_antigo.get("memorando")), extrair_matriz(atual["memorando"])),
+    }
+
+
+def _data_hora_br(iso):
+    try:
+        return datetime.fromisoformat(str(iso)).strftime("%d/%m/%Y %H:%M")
+    except ValueError:
+        return str(iso or "")
+
+
+def _pct(x):
+    return f"{x:.0%}" if isinstance(x, (int, float)) else "—"
+
+
+def markdown_comparacao(c):
+    """Seção do Word com o que mudou desde a análise anterior."""
+    rel, to, ri = c["relatorio"], c["trade_offs"], c["riscos"]
+    linhas = ["## O que mudou desde a análise anterior",
+              f"Comparação com a análise de {c['anterior_data'] or 'data não registrada'} (registro {c['anterior_id']})."]
+    linhas.append(f"- **Completude do relatório:** {_pct(c['completude']['antes'])} → {_pct(c['completude']['depois'])} "
+                  f"das seções completas; {len(rel['preenchidas'])} seção(ões) preenchida(s) desde então.")
+    if rel["preenchidas"]:
+        linhas.append("- **Seções que ficaram completas:** " + "; ".join(p["secao"] for p in rel["preenchidas"][:8]) + ".")
+    if rel["valores_mudaram"]:
+        linhas.append("- **Valores que mudaram no relatório:** " + "; ".join(
+            f"{v['secao']} ({', '.join(v['sairam'][:2]) or '—'} → {', '.join(v['entraram'][:2]) or '—'})"
+            for v in rel["valores_mudaram"][:6]) + ".")
+    if c["confianca"]["antes"] or c["confianca"]["depois"]:
+        linhas.append(f"- **Confiança calculada:** {c['confianca']['antes'] or '—'} → {c['confianca']['depois'] or '—'}.")
+    linhas.append(f"- **Trade-offs:** {len(to['mantidos'])} mantido(s), {len(to['novos'])} novo(s), {len(to['sairam'])} saíram.")
+    for m in to["mantidos"]:
+        if m["mudancas"]:
+            linhas.append(f"  - {m['titulo']}: " + "; ".join(m["mudancas"]) + ".")
+    if to["novos"]:
+        linhas.append("- **Trade-offs novos:** " + "; ".join(t["titulo"] or t["id"] for t in to["novos"]) + ".")
+    if to["sairam"]:
+        linhas.append("- **Trade-offs que saíram:** " + "; ".join(t["titulo"] or t["id"] for t in to["sairam"]) + ".")
+    linhas.append(f"- **Riscos:** {ri['mantidos']} sem mudança, {len(ri['mudaram'])} mudaram de nível, "
+                  f"{len(ri['novos'])} novo(s), {len(ri['sairam'])} saíram.")
+    for m in ri["mudaram"][:8]:
+        linhas.append(f"  - {m['risco']}: " + "; ".join(m["mudancas"]) + ".")
+    return "\n".join(linhas)
+
+
 # --- WORD -----------------------------------------------------------------
 
 AZUL = RGBColor(0x1B, 0x2A, 0x41)
@@ -1336,6 +1548,22 @@ with st.sidebar:
             st.text(st.session_state["texto_relatorio"][:20000]
                     + ("\n\n[… mostrando os primeiros 20 mil caracteres]" if len(st.session_state["texto_relatorio"]) > 20000 else ""))
 
+    arquivo_anterior = st.file_uploader("Análise anterior para comparar (registro .json, opcional)", type=["json"],
+                                        help="O arquivo que o botão 'Registro (.json)' baixa ao fim de cada análise.")
+    if arquivo_anterior is None:
+        st.session_state.pop("registro_anterior", None)
+    else:
+        try:
+            anterior = json.loads(arquivo_anterior.getvalue().decode("utf-8"))
+            if not isinstance(anterior, dict) or "tension_map" not in anterior or "memorando" not in anterior:
+                raise ValueError("o arquivo não tem Tension Map e memorando")
+            st.session_state["registro_anterior"] = anterior
+            st.caption(f"🔄 Vai comparar com a análise de {_data_hora_br(anterior.get('gerado_em'))} "
+                       f"(registro {anterior.get('id', '?')}).")
+        except (ValueError, UnicodeDecodeError) as e:
+            st.session_state.pop("registro_anterior", None)
+            st.error(f"Esse arquivo não é um registro de análise válido ({e}). Use o arquivo baixado no botão 'Registro (.json)'.")
+
     st.markdown("---")
     st.header("2. Revisão e ajustes")
     st.text_area("Problema central", key="problema", height=100)
@@ -1477,6 +1705,7 @@ if botao_gerar:
                     "arquivo": st.session_state.get("arquivo_nome", ""), "assinatura_relatorio": hashlib.md5(relatorio.encode()).hexdigest(),
                     "insumos": {c: st.session_state[c] for c in CAMPOS},
                     "completude": completude, "confianca_calculada": confianca,
+                    "retrato_relatorio": retrato_relatorio(relatorio),
                     "tension_maps_por_rodada": {f"R{i}": tm for i, tm in rodadas_validas},
                     "tension_map": tension_map, "memorando": memorando,
                     "verificacao": {"evidencias": evidencias, "numeros": numeros, "problemas_formato": problemas,
@@ -1484,6 +1713,13 @@ if botao_gerar:
                     "uso_tokens": uso_extracao + uso, "custo_estimado_usd": round(custo + custo_extracao, 4),
                 }
                 resultado["registro_caminho"] = salvar_registro(registro)
+                resultado["retrato_relatorio"] = registro["retrato_relatorio"]
+                anterior = st.session_state.get("registro_anterior")
+                if anterior:
+                    with st.spinner("Comparando com a análise anterior..."):
+                        resultado["comparacao"] = comparar_analises(modelo_extracao, anterior, resultado)
+                    registro["comparacao_com"] = {"id": resultado["comparacao"]["anterior_id"],
+                                                  "resumo": markdown_comparacao(resultado["comparacao"])}
                 resultado["registro_json"] = json.dumps(registro, ensure_ascii=False, indent=2)
                 st.session_state["resultado"] = resultado
             except Exception as e:
@@ -1534,7 +1770,17 @@ else:
         "data": resultado["data"],
         "rodape_extra": f"apoio de IA, reg. {resultado.get('registro_id', '')}",
     }
+    anterior = st.session_state.get("registro_anterior")
+    comparacao = resultado.get("comparacao")
+    if anterior and (not comparacao or comparacao.get("anterior_id") != anterior.get("id", "?")):
+        if st.button("🔄 Comparar com a análise anterior carregada", type="secondary"):
+            with st.spinner("Comparando com a análise anterior..."):
+                resultado["comparacao"] = comparar_analises(modelo_extracao, anterior, resultado)
+            st.session_state["resultado"] = resultado
+            st.rerun()
     neutralidade = resultado.get("neutralidade") or {}
+    if comparacao:
+        memo = memo + "\n\n" + markdown_comparacao(comparacao)
     memo_docx = memo + "\n\n" + markdown_verificacao(ev, numeros, resultado.get("registro_id", ""), resultado["modelo"],
                                                          confianca, resultado.get("completude"), tm, neutralidade)
     col1, col2, col3, col4 = st.columns(4)
@@ -1554,7 +1800,67 @@ else:
                            help="Trilha de auditoria completa: insumos, rodadas, verificação, tokens e custo. "
                                 "No Streamlit Cloud, a pasta de registros do servidor é apagada quando o app reinicia; baixe e guarde.")
 
-    aba_memo, aba_mapa, aba_verif, aba_json = st.tabs(["📄 Memorando", "🧭 Tension Map", "✅ Verificação", "{ } JSON"])
+    nomes_abas = ["📄 Memorando", "🧭 Tension Map", "✅ Verificação", "{ } JSON"] + (["🔄 Comparação"] if comparacao else [])
+    abas = st.tabs(nomes_abas)
+    aba_memo, aba_mapa, aba_verif, aba_json = abas[:4]
+    if comparacao:
+        with abas[4]:
+            rel, to, ri = comparacao["relatorio"], comparacao["trade_offs"], comparacao["riscos"]
+            st.caption(f"Comparação com a análise de {comparacao['anterior_data'] or '—'} (registro {comparacao['anterior_id']}). "
+                       "O relatório e os riscos são comparados por código; o pareamento dos trade-offs é feito por um modelo "
+                       "e conferido por código.")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Completude", _pct(comparacao["completude"]["depois"]),
+                      delta=(f"{(comparacao['completude']['depois'] - comparacao['completude']['antes']) * 100:+.0f} p.p."
+                             if isinstance(comparacao["completude"]["antes"], (int, float))
+                             and isinstance(comparacao["completude"]["depois"], (int, float)) else None))
+            c2.metric("Confiança", str(comparacao["confianca"]["depois"] or "—").capitalize(),
+                      help=f"Antes: {comparacao['confianca']['antes'] or '—'}")
+            c3.metric("Trade-offs mantidos", len(to["mantidos"]), help=f"{len(to['novos'])} novos, {len(to['sairam'])} saíram")
+            c4.metric("Riscos que mudaram", len(ri["mudaram"]), help=f"{len(ri['novos'])} novos, {len(ri['sairam'])} saíram")
+
+            st.subheader("Relatório")
+            if rel["preenchidas"]:
+                st.markdown("**Seções que ficaram completas:**")
+                for x in rel["preenchidas"]:
+                    st.markdown(f"- 🟢 {x['secao']} (tinha {x['antes']} pendência(s))")
+            if rel["novas_pendencias"]:
+                st.markdown("**Seções com mais pendências que antes:**")
+                for x in rel["novas_pendencias"]:
+                    st.markdown(f"- 🔴 {x['secao']} ({x['antes']} → {x['depois']})")
+            if rel["valores_mudaram"]:
+                st.markdown("**Valores em R$ que mudaram:**")
+                for v in rel["valores_mudaram"]:
+                    st.markdown(f"- **{v['secao']}**: saíram {', '.join(v['sairam']) or '—'}; entraram {', '.join(v['entraram']) or '—'}")
+            elif not comparacao["valores_comparados"]:
+                st.caption("O registro anterior é de uma versão do app que não guardava os valores do relatório; "
+                           "só as pendências foram comparadas.")
+            if not (rel["preenchidas"] or rel["novas_pendencias"] or rel["valores_mudaram"]):
+                st.markdown("Nenhuma mudança encontrada nas seções do relatório.")
+            if rel["secoes_novas"]:
+                st.caption("Seções novas: " + "; ".join(rel["secoes_novas"]))
+            if rel["secoes_removidas"]:
+                st.caption("Seções que não existem mais: " + "; ".join(rel["secoes_removidas"]))
+
+            st.subheader("Trade-offs")
+            if to.get("erro"):
+                st.warning(f"O pareamento dos trade-offs falhou: {to['erro']}")
+            for m in to["mantidos"]:
+                st.markdown(f"- 🔁 **{m['titulo']}** ({m['anterior']} → {m['atual']})"
+                            + (": " + "; ".join(m["mudancas"]) if m["mudancas"] else ": sem mudança relevante"))
+            for t in to["novos"]:
+                st.markdown(f"- 🆕 **{t['titulo']}** ({t['id']})")
+            for t in to["sairam"]:
+                st.markdown(f"- ➖ ~~{t['titulo']}~~ ({t['id']}, só na análise anterior)")
+
+            st.subheader("Matriz de risco")
+            for m in ri["mudaram"]:
+                st.markdown(f"- ↕️ **{m['risco']}**: " + "; ".join(m["mudancas"]))
+            for r_ in ri["novos"]:
+                st.markdown(f"- 🆕 {r_}")
+            for r_ in ri["sairam"]:
+                st.markdown(f"- ➖ ~~{r_}~~")
+            st.caption(f"{ri['mantidos']} risco(s) sem mudança de nível.")
     with aba_memo:
         st.markdown(memo)
     with aba_mapa:
