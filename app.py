@@ -306,7 +306,14 @@ def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None):
     extras = {}
     if ferramenta:
         extras = {"tools": [ferramenta], "tool_choice": {"type": "function", "function": {"name": ferramenta["function"]["name"]}}}
-    resp = completion(model=modelo, messages=mensagens, max_tokens=max_tokens, **extras)
+    try:
+        resp = completion(model=modelo, messages=mensagens, max_tokens=max_tokens, **extras)
+    except ImportError:
+        # Algumas versões do LiteLLM exigem o pacote "mcp" para usar ferramentas.
+        # Sem ele, repete a chamada sem ferramenta; os prompts já pedem o JSON em texto nesse caso.
+        if not extras:
+            raise
+        resp = completion(model=modelo, messages=mensagens, max_tokens=max_tokens)
     escolha = resp.choices[0]
     msg = escolha.message
     argumentos = None
