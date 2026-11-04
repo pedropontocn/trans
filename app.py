@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from litellm import completion
 from markitdown import MarkItDown
 
-# --- PROMPT DO SISTEMA (Embutido para evitar erro de importação) ---
+# --- PROMPT DO SISTEMA (Embutido) ---
 SYSTEM_PROMPT = """
 Você é um facilitador de deliberação multiagente. Seu objetivo é produzir um TENSION MAP (mapa de tensões) e um MEMORANDO EXECUTIVO para apoiar decisores humanos. Você NÃO decide e NÃO busca consenso. Você amplia a inteligência expondo trade-offs.
 
@@ -46,7 +46,6 @@ Formato de Saída Obrigatório:
 load_dotenv()
 
 st.set_page_config(page_title="Deliberação Multiagente", page_icon="🏛️", layout="wide")
-
 st.title("🏛️ Painel de Deliberação e Análise de Transição")
 
 # --- FUNÇÕES AUXILIARES ---
@@ -63,16 +62,22 @@ def extrair_json_limpo(texto):
 
 def _como_texto(valor):
     if isinstance(valor, list):
-        return "\n".join(
-            json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
-            for v in valor
-        )
+        return "\n".join(json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v) for v in valor)
     if isinstance(valor, dict):
         return json.dumps(valor, ensure_ascii=False, indent=2)
     return str(valor or "")
 
 # --- BARRA LATERAL ---
 with st.sidebar:
+    # Define o modelo no topo para ser usado em TODAS as etapas
+    st.header("0. Configuração de IA")
+    modelo = st.selectbox("Modelo Facilitador", [
+        "anthropic/claude-sonnet-4-6",   # Modelo atualizado para 2026
+        "anthropic/claude-opus-4-6",
+        "anthropic/claude-3-5-sonnet-latest" # Fallback genérico
+    ])
+    
+    st.markdown("---")
     st.header("1. Upload do Relatório")
     uploaded_file = st.file_uploader("Suba o relatório (PDF, DOCX ou XLSX)", type=["pdf", "docx", "xlsx"])
 
@@ -80,7 +85,6 @@ with st.sidebar:
         if uploaded_file is not None:
             with st.spinner("Lendo tabelas e estruturando os dados (Markdown)..."):
                 
-                # Salva temporariamente para o MarkItDown ler
                 with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp:
                     tmp.write(uploaded_file.getvalue())
                     tmp_path = tmp.name
@@ -109,10 +113,11 @@ with st.sidebar:
                 }}"""
 
                 try:
-                    # Usando Claude 3.5 Sonnet (Versão estável de Out/2024)
+                    # Usa a mesma variável modelo do topo
                     resp_extrator = completion(
-                        model="anthropic/claude-3-5-sonnet-20241022",
+                        model=modelo,
                         messages=[{"role": "user", "content": prompt_extrator}],
+                        max_tokens=4000
                     )
 
                     texto_bruto = resp_extrator.choices[0].message.content
@@ -142,12 +147,6 @@ with st.sidebar:
     lacunas = st.text_area("Lacunas de Dados", value=st.session_state.get('lacunas', ''), height=100)
 
     st.markdown("---")
-    # Modelos validados no LiteLLM
-    modelo = st.selectbox("Modelo Facilitador", [
-        "anthropic/claude-3-5-sonnet-20241022", 
-        "anthropic/claude-3-opus-20240229",
-        "anthropic/claude-3-haiku-20240307"
-    ])
     botao_gerar = st.button("🚀 Iniciar Deliberação (2 Etapas)", use_container_width=True)
 
 # --- LÓGICA PRINCIPAL ---
@@ -156,26 +155,15 @@ if botao_gerar:
         st.warning("Por favor, preencha os dados antes de iniciar.")
     else:
         # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
-        with st.spinner("Etapa 1/2: O conselho de agentes está debatendo e gerando o Tension Map..."):
+        with st.spinner(f"Etapa 1/2: O conselho de agentes ({modelo}) está debatendo..."):
             
             instrucao_compacta = """
             Execute internamente as Fases 1 a 3 (Proposição, Crítica, Revisão e Avaliação).
-            
             MAS NÃO RETORNE O HISTÓRICO DAS FASES 1 A 3 NO JSON. Retorne APENAS o Tension Map da Fase 4, com os trade-offs já deduplicados e sintetizados.
-            
-            O JSON deve ter o formato estrito:
-            {
-              "tension_map_id": "RJ_SECID_2027",
-              "scenario": "...",
-              "baseline_reference": "...",
-              "trade_offs": [ ... no máximo 6 trade-offs detalhados ... ],
-              "unresolved_questions": [ ... no máximo 4 ... ],
-              "confidence_assessment": { ... }
-            }
             """
             
             prompt_fase_1_a_4 = SYSTEM_PROMPT + "\n\n" + instrucao_compacta
-            user_prompt_1 = f"CENÁRIO: {problema}\nFATOS: {fatos}\nPERSONAS: {personas}\nLACUNAS: {lacunas}\n\nExecute o protocolo e retorne APENAS o JSON final entre [INÍCIO DO JSON] e [FIM DO JSON]."
+            user_prompt_1 = f"CENÁRIO: {problema}\nFATOS: {fatos}\nPERSONAS: {personas}\nLACUNAS: {lacunas}\n\nExecute o protocolo e retorne APENAS o JSON final."
             
             try:
                 resp_1 = completion(
@@ -195,27 +183,21 @@ if botao_gerar:
                         st.text(texto_json)
                     st.stop()
 
-                # --- ETAPA 2: GERAR MEMORANDO E MATRIZ DE RISCO ---
+                # --- ETAPA 2: GERAR MEMORANDO ---
                 with st.spinner("Etapa 2/2: Redigindo Memorando Executivo e Matriz de Risco..."):
                     prompt_memo = f"""
-                    Com base no seguinte Tension Map, escreva o Memorando Executivo e a Matriz de Risco para o Secretário.
-
+                    Com base no Tension Map abaixo, escreva o Memorando Executivo e a Matriz de Risco.
                     TENSION MAP: {json.dumps(tension_map, ensure_ascii=False)}
-
-                    Entregue o texto em Markdown com a seguinte estrutura:
+                    
+                    Entregue em Markdown:
                     # Memorando Executivo
-                    (Texto direto, 2 páginas)
-
-                    # Matriz de Risco de Ação
-                    | Risco Identificado | Probabilidade (Alta/Média/Baixa) | Impacto (Alto/Médio/Baixo) | Ação Mitigadora Proposta | Responsável Sugerido |
-                    |---|---|---|---|---|
-                    (Preencha a tabela com os riscos do mapa)
+                    # Matriz de Risco de Ação (Tabela com Colunas: Risco, Probabilidade, Impacto, Ação, Responsável)
                     """
 
                     resp_2 = completion(
                         model=modelo,
                         messages=[{"role": "user", "content": prompt_memo}],
-                        max_tokens=8000
+                        max_tokens=4000
                     )
                     memorando = resp_2.choices[0].message.content
 
