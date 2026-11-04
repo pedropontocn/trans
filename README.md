@@ -58,8 +58,16 @@ Cada lacuna traz um trecho do relatório ou da base que a evidencia, e o código
 evidência conferida fica fora do ofício. A materialidade (crítica, relevante, acessória) decide o que entra por
 padrão: críticas e relevantes. A tabela é editável: dá para incluir, excluir e reescrever cada pedido.
 
+**Pedidos já feitos.** O diagnóstico também confere, item por item, se o relatório atende os ofícios que a Equipe
+de Transição já enviou (nº 02, 06, 07 e 08/2026 para todas as pastas; 03, 04, 05 e 09 para as pastas específicas,
+marcados conforme o nome da secretaria). Cada item sai como atendido, parcial, não atendido ou não avaliado. Atendido
+e parcial precisam de trecho do relatório, conferido por código. Antes de reiterar um item "não atendido", o código
+procura no relatório termos daquele item; se encontrar, o item fica desmarcado, com aviso para conferir. Isso funciona
+com qualquer formato de relatório, já que o modelo de relatório é de uso recomendado, mas não obrigatório.
+
 O painel gera a **minuta de ofício** em Word, no padrão ofício, da Equipe de Transição ao titular da pasta, com os
-pedidos agrupados por seção, prazo de 5 dias úteis (com feriados nacionais e do RJ; confira o calendário oficial) e
+reiteração dos itens não atendidos de cada ofício anterior, os demais pedidos agrupados por seção, referência aos
+ofícios e canal de resposta já preenchidos, prazo de 5 dias úteis (com feriados nacionais e do RJ; confira o calendário oficial) e
 um parágrafo pedindo que o órgão declare expressamente o que não existir ou não puder ser enviado. Também baixa a
 matriz de lacunas em CSV.
 

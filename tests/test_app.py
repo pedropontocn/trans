@@ -240,7 +240,8 @@ def test_diagnostico_com_base_e_oficio(app, llm):
     at = app.run()
     d = _diagnosticar(at)
     assert d["com_base"] and any(i["onde"] == "base de projetos" for i in d["itens"])
-    assert [m.value for m in at.metric][:1] == ["1"]                    # 1 crítica conferida
+    assert [m.value for m in at.metric][:1] == ["2"]                    # dotação + pedido 07.1 não atendido
+    assert "07.1 (Ofício nº 07/2026)" in llm.mensagem_diagnostico          # itens dos ofícios vão para o modelo
     assert any("Minuta de ofício" in getattr(b, "proto", b).label for b in at.get("download_button"))
 
 
