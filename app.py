@@ -45,9 +45,7 @@ Formato de Saída Obrigatório:
 load_dotenv()
 
 def extrair_json_limpo(texto):
-    # Remove blocos de código markdown (```json ... ```)
     texto_limpo = re.sub(r'```(?:json)?', '', texto)
-    # Encontra o primeiro '{' e o último '}'
     inicio = texto_limpo.find('{')
     fim = texto_limpo.rfind('}')
     if inicio != -1 and fim != -1:
@@ -63,7 +61,6 @@ st.set_page_config(page_title="Deliberação Multiagente", page_icon="🏛️", 
 st.title("🏛️ Painel de Deliberação e Análise de Transição")
 
 def _como_texto(valor):
-    # O modelo às vezes devolve listas em vez de texto; st.text_area exige string
     if isinstance(valor, list):
         return "\n".join(
             json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
@@ -75,19 +72,16 @@ def _como_texto(valor):
 
 with st.sidebar:
     st.header("1. Upload do Relatório")
-    # Aceita PDF, Word e Excel
     uploaded_file = st.file_uploader("Suba o relatório (PDF, DOCX ou XLSX)", type=["pdf", "docx", "xlsx"])
 
     if st.button("🔍 Extrair Dados do Relatório"):
         if uploaded_file is not None:
             with st.spinner("Lendo tabelas e estruturando os dados (Markdown)..."):
                 
-                # 1. Salva o arquivo temporariamente para o MarkItDown ler
                 with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp:
                     tmp.write(uploaded_file.getvalue())
                     tmp_path = tmp.name
 
-                # 2. Converte para Markdown (as tabelas viram texto estruturado!)
                 md = MarkItDown()
                 try:
                     result = md.convert(tmp_path)
@@ -96,9 +90,8 @@ with st.sidebar:
                     st.error(f"Erro ao ler o arquivo: {e}")
                     st.stop()
                 finally:
-                    os.remove(tmp_path) # Limpa o arquivo temporário
+                    os.remove(tmp_path)
 
-                # 3. Manda o Markdown para o Claude extrair as informações
                 prompt_extrator = f"""Leia o relatório de transição abaixo (que está em formato Markdown, com tabelas preservadas) e extraia as informações EXATAS no formato JSON.
 
                 Relatório:
@@ -113,9 +106,9 @@ with st.sidebar:
                 }}"""
 
                 try:
-                    # CORREÇÃO: Modelo atualizado para o 'latest'
+                    # CORREÇÃO: Modelo válido e suportado pelo LiteLLM
                     resp_extrator = completion(
-                        model="anthropic/claude-3-5-sonnet-latest",
+                        model="anthropic/claude-3-5-sonnet-20240620",
                         messages=[{"role": "user", "content": prompt_extrator}],
                     )
 
@@ -145,18 +138,16 @@ with st.sidebar:
     lacunas = st.text_area("Lacunas de Dados", value=st.session_state.get('lacunas', ''), height=100)
 
     st.markdown("---")
-    # CORREÇÃO: Lista de modelos atualizada com os nomes corretos
-    modelo = st.selectbox("Modelo Facilitador", ["anthropic/claude-3-5-sonnet-latest", "anthropic/claude-3-opus-20240229"])
+    # CORREÇÃO: Modelos válidos e suportados
+    modelo = st.selectbox("Modelo Facilitador", ["anthropic/claude-sonnet-4-6", "anthropic/claude-3-opus-20240229"])
     botao_gerar = st.button("🚀 Iniciar Deliberação (2 Etapas)", use_container_width=True)
 
 def extrair_json(texto):
-    # 1º: bloco entre as tags (evita pegar os JSONs intermediários das Fases 1-3)
     match = re.search(r'\[INÍCIO DO JSON\]\s*(.*?)\s*\[FIM DO JSON\]', texto, re.DOTALL)
     if match:
         bloco = re.sub(r'^```(?:json)?\s*|\s*```$', '', match.group(1).strip())
         try: return json.loads(bloco)
         except: pass
-    # 2º: fallback para o maior objeto JSON do texto
     match = re.search(r'\{.*\}', texto, re.DOTALL)
     if match:
         try: return json.loads(match.group(0))
@@ -167,7 +158,6 @@ if botao_gerar:
     if not problema or not fatos:
         st.warning("Por favor, preencha os dados antes de iniciar.")
     else:
-        # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
         with st.spinner("Etapa 1/2: O conselho de agentes está debatendo e gerando o Tension Map..."):
             
             instrucao_compacta = """
@@ -191,7 +181,7 @@ if botao_gerar:
             user_prompt_1 = f"CENÁRIO: {problema}\nFATOS: {fatos}\nPERSONAS: {personas}\nLACUNAS: {lacunas}\n\nExecute o protocolo e retorne APENAS o JSON final entre [INÍCIO DO JSON] e [FIM DO JSON]."
             
             try:
-                # CORREÇÃO: Agora ele usa a variável 'modelo' que o usuário escolheu!
+                # CORREÇÃO: Agora usa a variável 'modelo' que o usuário escolheu no menu
                 resp_1 = completion(
                     model=modelo,
                     messages=[{"role": "system", "content": prompt_fase_1_a_4}, {"role": "user", "content": user_prompt_1}],
@@ -206,7 +196,6 @@ if botao_gerar:
                         st.text(texto_json)
                     st.stop()
 
-                # --- ETAPA 2: GERAR MEMORANDO E MATRIZ DE RISCO ---
                 with st.spinner("Etapa 2/2: Redigindo Memorando Executivo e Matriz de Risco..."):
                     prompt_memo = f"""
                     Com base no seguinte Tension Map, escreva o Memorando Executivo e a Matriz de Risco para o Secretário.
