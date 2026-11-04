@@ -118,6 +118,21 @@ anterior** junto com o relatório novo. O painel mostra numa aba própria, e num
 
 Registros gerados antes da versão 1.6 não guardam os valores do relatório; nesse caso só as pendências são comparadas.
 
+## Economia de tokens
+
+- **Relatório em cache uma vez só.** O diagnóstico, as rodadas do debate e a síntese do modo independente usam o
+  mesmo começo de mensagem (prompt de sistema comum, mesmas ferramentas e o relatório); as instruções de cada etapa
+  vêm depois. O relatório é gravado em cache uma vez, por 1 hora, e as demais chamadas o leem por 5% do preço. Isso
+  compensa quando se diagnostica e depois se delibera, ou quando se delibera de novo com ajustes, dentro de uma hora.
+- **Parada antecipada das rodadas.** Com 3 ou mais rodadas, o painel roda as rodadas 1 e 2 e confere se chegaram
+  aos mesmos trade-offs. Um modelo barato pareia os trade-offs e o código decide: só para se as duas rodadas têm o
+  mesmo número de trade-offs e todos foram pareados. Nesse caso as demais não rodam, e a verificação registra isso.
+  Dá para desligar na barra lateral ("Parar na 2ª rodada se as duas concordarem").
+- **Respostas reaproveitadas.** Se a extração ou o diagnóstico rodam de novo com exatamente os mesmos insumos, a
+  resposta do modelo é reaproveitada sem nova chamada; a verificação por código roda de novo. Os botões "Extrair
+  novamente" e "Refazer o diagnóstico do zero" forçam uma nova chamada. As respostas ficam na memória do app e
+  somem quando ele reinicia.
+
 ## Custo aproximado
 
 Com o Opus 5.5 no debate, o Sonnet 5.5 na extração e 3 rodadas, uma análise completa custa cerca de

@@ -38,10 +38,13 @@ def test_deliberacao_com_uma_rodada(app, llm):
     r = _deliberar(at)
     assert r["n_rodadas"] == 1 and r["confianca"]["nivel"] in ("baixa", "média")
     assert [c["ferramenta"] for c in llm.chamadas].count("registrar_tension_map") == 1
-    # o relatório vai para o debate, marcado para cache
-    partes = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")["mensagens"][1]["content"]
-    assert partes[0]["cache_control"] and "<relatorio>" in partes[0]["text"]
-    assert "QUALIDADE DO RELATÓRIO" in partes[1]["text"]
+    # o relatório vai para o debate, marcado para cache de 1 hora, antes das instruções da etapa
+    chamada = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
+    partes = chamada["mensagens"][1]["content"]
+    assert partes[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"} and "<relatorio>" in partes[0]["text"]
+    assert "<instrucoes>" in partes[1]["text"] and partes[1]["cache_control"] == {"type": "ephemeral"}
+    assert "QUALIDADE DO RELATÓRIO" in partes[2]["text"]
+    assert chamada["ferramentas"] == ["registrar_tension_map", "registrar_diagnostico"]
 
 
 def test_tres_rodadas_com_estabilidade(app, llm):
@@ -51,6 +54,7 @@ def test_tres_rodadas_com_estabilidade(app, llm):
     llm.consolidacao = tension_map([trade_off("C1", "Licitações", origens=["R1-T1", "R2-T1", "R3-T2"]),
                                     trade_off("C2", "Atas", origens=["R1-T2", "R3-T1"]),
                                     trade_off("C3", "Obras", 1, FONTE_FALSA, origens=["R2-T2"])])
+    llm.pareamento = {"pares": [{"anterior": "T1", "atual": "T1"}]}     # rodadas 1 e 2 divergem: roda a 3ª
     at = app.run()
     r = _deliberar(at)
     tm = r["tension_map"]
@@ -58,6 +62,33 @@ def test_tres_rodadas_com_estabilidade(app, llm):
     assert [f["id"] for f in tm["sinais_fracos"]] == ["C3"]
     assert [c["ferramenta"] for c in llm.chamadas].count("registrar_tension_map") == 3
     assert [c["ferramenta"] for c in llm.chamadas].count("registrar_consolidacao") == 1
+    assert r["n_rodadas"] == 3 and "previstas" not in tm["estabilidade"]
+
+
+def test_para_na_segunda_rodada_quando_as_duas_concordam(app, llm):
+    llm.rodadas = [tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")]),
+                   tension_map([trade_off("T1", "Licitações adiadas"), trade_off("T2", "Atas SRP")])]
+    llm.consolidacao = tension_map([trade_off("C1", "Licitações", origens=["R1-T1", "R2-T1"]),
+                                    trade_off("C2", "Atas", origens=["R1-T2", "R2-T2"])])
+    at = app.run()
+    r = _deliberar(at)
+    tm = r["tension_map"]
+    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_tension_map") == 2
+    assert r["n_rodadas"] == 2 and r["n_rodadas_previstas"] == 3
+    assert [(t["id"], t["estabilidade"]) for t in tm["trade_offs"]] == [("C1", "2/2"), ("C2", "2/2")]
+    assert tm["estabilidade"]["previstas"] == 3
+    assert any("não foram necessárias" in m for m in r["confianca"]["motivos"])
+    # a checagem usa o modelo barato da extração
+    checagem = next(c for c in llm.chamadas if "Pareie" in c["mensagens"][0]["content"])
+    assert checagem["modelo"].endswith("sonnet-5-5")
+
+
+def test_sem_parada_antecipada_roda_todas(app, llm):
+    at = app.run()
+    at.checkbox(key="parar_cedo").uncheck().run()
+    r = _deliberar(at)
+    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_tension_map") == 3
+    assert r["n_rodadas"] == 3 and not any("Pareie" in str(c["mensagens"][0]["content"]) for c in llm.chamadas)
 
 
 def test_resultado_continua_na_tela_depois_de_um_download(app, llm):
@@ -183,7 +214,7 @@ def test_modo_independente_completo(app, llm):
     at = _modo_independente(app.run())
     r = _deliberar(at)
     d = r["debate"]
-    fases = [c for c in llm.chamadas if "Você participa" in str(c["mensagens"][0]["content"])]
+    fases = [c for c in llm.chamadas if "Você participa" in str(c["mensagens"][1:2])]
     assert len(fases) == 12                                                  # 4 personas × 3 fases
     assert all(c["modelo"].endswith("sonnet-5-5") for c in fases)
     aval = next(c for c in llm.chamadas if c["modelo"].startswith("gemini/"))
@@ -256,7 +287,7 @@ def test_lacuna_critica_segura_o_debate_ate_confirmar(app, llm):
     at.slider[0].set_value(1).run()
     r = _deliberar(at)
     debate = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
-    assert "LACUNAS IDENTIFICADAS NO DIAGNÓSTICO PRÉVIO" in debate["mensagens"][1]["content"][1]["text"]
+    assert "LACUNAS IDENTIFICADAS NO DIAGNÓSTICO PRÉVIO" in debate["mensagens"][1]["content"][-1]["text"]
     assert json.loads(r["registro_json"])["diagnostico_lacunas"]["itens"]
 
 
@@ -277,3 +308,43 @@ def test_questoes_do_debate_viram_pedidos_sem_travar_nova_deliberacao(app, llm):
     # e esses pedidos não travam uma nova deliberação (só as lacunas críticas do relatório travam)
     next(c for c in at.checkbox if "mesmo assim" in c.label).check().run()
     _deliberar(at)
+
+
+def test_diagnostico_e_debate_compartilham_o_prefixo_do_cache(app, llm):
+    at = app.run()
+    _diagnosticar(at)
+    next(c for c in at.checkbox if "mesmo assim" in c.label).check().run()
+    _deliberar(at)
+    diag = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_diagnostico")
+    debate = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
+    # mesmas ferramentas, mesmo sistema e mesmo bloco do relatório: o debate lê do cache o que o diagnóstico gravou
+    assert diag["kw"]["tools"] == debate["kw"]["tools"]
+    assert diag["mensagens"][0] == debate["mensagens"][0]
+    assert diag["mensagens"][1]["content"][0] == debate["mensagens"][1]["content"][0]
+
+
+def test_diagnostico_repetido_reaproveita_a_resposta(app, llm):
+    at = app.run()
+    _diagnosticar(at)
+    d2 = _diagnosticar(at)
+    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_diagnostico") == 1
+    assert d2["reaproveitado"] and d2["uso"] == [] and d2["itens"]
+    assert any("reaproveitado" in c.value for c in at.caption)
+    # "Refazer do zero" chama o modelo de novo
+    next(b for b in at.button if "Refazer o diagnóstico" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_diagnostico") == 2
+    assert not at.session_state["diagnostico"]["reaproveitado"]
+
+
+def test_extracao_reaproveitada_em_nova_sessao(app, llm):
+    from streamlit.testing.v1 import AppTest
+    app.run()
+    outra = AppTest.from_file(app._script_path, default_timeout=120).run()     # outra sessão, mesmo relatório
+    assert not outra.exception, outra.exception
+    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_insumos") == 1
+    assert outra.session_state["problema"] == "Carteira travada na transição."
+    assert outra.session_state["uso_extracao"] == []
+    # "Extrair novamente" chama o modelo de novo
+    next(b for b in outra.button if "Extrair novamente" in b.label).click().run()
+    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_insumos") == 2
