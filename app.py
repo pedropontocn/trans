@@ -184,31 +184,44 @@ if botao_gerar:
     if not problema or not fatos:
         st.warning("Por favor, preencha os dados antes de iniciar.")
     else:
-        # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
+               # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
         with st.spinner("Etapa 1/2: O conselho de agentes está debatendo e gerando o Tension Map..."):
-
-            prompt_fase_1_a_4 = prompt_somente_fases_1_a_4(SYSTEM_PROMPT)
-
-            user_prompt_1 = f"CENÁRIO: {problema}\nFATOS: {fatos}\nPERSONAS: {personas}\nLACUNAS: {lacunas}\n\nExecute as Fases 1 a 4 e retorne APENAS o JSON entre [INÍCIO DO JSON] e [FIM DO JSON]."
-
+            
+            # A MÁGICA ACONTECE AQUI: Dizemos para ele não imprimir as Fases 1 a 3 no JSON final
+            instrucao_compacta = """
+            Execute internamente as Fases 1 a 3 (Proposição, Crítica, Revisão e Avaliação).
+            
+            MAS NÃO RETORNE O HISTÓRICO DAS FASES 1 A 3 NO JSON. Retorne APENAS o Tension Map da Fase 4, com os trade-offs já deduplicados e sintetizados.
+            
+            O JSON deve ter o formato estrito:
+            {
+              "tension_map_id": "RJ_SECID_2027",
+              "scenario": "...",
+              "baseline_reference": "...",
+              "trade_offs": [ ... no máximo 6 trade-offs detalhados ... ],
+              "unresolved_questions": [ ... no máximo 4 ... ],
+              "confidence_assessment": { ... }
+            }
+            """
+            
+            prompt_fase_1_a_4 = SYSTEM_PROMPT + "\n\n" + instrucao_compacta
+            
+            # Aumentamos o limite de tokens de saída para garantir que caiba
+            user_prompt_1 = f"CENÁRIO: {problema}\nFATOS: {fatos}\nPERSONAS: {personas}\nLACUNAS: {lacunas}\n\nExecute o protocolo e retorne APENAS o JSON final entre [INÍCIO DO JSON] e [FIM DO JSON]."
+            
             try:
+                # MUDANÇA IMPORTANTE: Use um modelo com limite de token maior (Sonnet 3.5)
                 resp_1 = completion(
-                    model=modelo,
+                    model="anthropic/claude-3-5-sonnet-20241022",
                     messages=[{"role": "system", "content": prompt_fase_1_a_4}, {"role": "user", "content": user_prompt_1}],
-                    max_tokens=16000,  # Fases 1-4 com 5-8 personas passam fácil de 4096
+                    max_tokens=8000, # Aumentado para caber o JSON inteiro
                 )
                 texto_json = resp_1.choices[0].message.content
-                if resp_1.choices[0].finish_reason == "length":
-                    st.warning("⚠️ A Etapa 1 atingiu o limite de tokens; o JSON pode estar cortado.")
-                tension_map = extrair_json(texto_json)
-
-                if not tension_map:
-                    st.error("Falha ao gerar o JSON. Tente novamente.")
-                    with st.expander("Ver texto bruto da Etapa 1"):
-                        st.text(texto_json)
+                tension_map = extrair_json_limpo(texto_json)
+                
+                if tension_map is None:
+                    st.error("Falha ao gerar o JSON. O modelo gerou um texto muito longo. Tente novamente.")
                     st.stop()
-
-                st.success("✅ Tension Map gerado com sucesso! Iniciando Etapa 2...")
 
                 # --- ETAPA 2: GERAR MEMORANDO E MATRIZ DE RISCO ---
                 with st.spinner("Etapa 2/2: Redigindo Memorando Executivo e Matriz de Risco..."):
