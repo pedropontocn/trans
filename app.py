@@ -71,22 +71,17 @@ def _como_texto(valor):
     return str(valor or "")
 
 def gerar_docx(texto_markdown):
-    """Converte o texto markdown gerado pela IA em um arquivo Word (.docx) formatado."""
     doc = docx.Document()
-    
-    # Estilo base
     style = doc.styles['Normal']
     font = style.font
     font.name = 'Arial'
     font.size = Pt(11)
     
     linhas = texto_markdown.split('\n')
-    
     for linha in linhas:
         linha = linha.strip()
         if not linha:
             continue
-            
         if linha.startswith('# '):
             doc.add_heading(linha.replace('# ', ''), level=1)
         elif linha.startswith('## '):
@@ -94,9 +89,8 @@ def gerar_docx(texto_markdown):
         elif linha.startswith('### '):
             doc.add_heading(linha.replace('### ', ''), level=3)
         elif linha.startswith('|'):
-            # Lógica simples para transformar tabelas Markdown em tabelas do Word
             if '---' in linha:
-                continue # Pula a linha separadora do markdown
+                continue
             colunas = [c.strip() for c in linha.split('|') if c.strip()]
             if colunas:
                 tabela = doc.add_table(rows=1, cols=len(colunas))
@@ -107,7 +101,6 @@ def gerar_docx(texto_markdown):
         else:
             doc.add_paragraph(linha)
             
-    # Salva em memória
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
@@ -143,6 +136,7 @@ with st.sidebar:
                 finally:
                     os.remove(tmp_path) 
 
+                # CORREÇÃO AQUI: FORÇANDO O MODELO HÍBRIDO DE PERSONAS
                 prompt_extrator = f"""Leia o relatório de transição abaixo e extraia as informações EXATAS no formato JSON.
                 Relatório: {texto_relatorio[:60000]}
 
@@ -150,7 +144,7 @@ with st.sidebar:
                 {{
                   "problema": "Resuma em 1 parágrafo o maior dilema da secretaria.",
                   "fatos": "Liste de 5 a 8 fatos ancoradores cruciais (números, orçamento, contratos vencendo).",
-                  "personas": "Crie 5 a 6 personas com critérios de decisão conflitantes.",
+                  "personas": "OBRIGATÓRIO: Use o Modelo Híbrido. Inclua SEMPRE estes 5 agentes fixos: 1. fazenda_planejamento (foco em caixa), 2. orgao_controle (foco em legalidade/TCE), 3. casa_civil (foco em coordenação política), 4. beneficiario_servico (foco no cidadão na ponta), 5. baseline (status quo). Depois, crie mais 2 personas técnicas específicas desta secretaria com base no relatório (ex: diretor_tecnico, sindicato). Descreva o critério de decisão de cada uma.",
                   "lacunas": "Liste de 3 a 4 informações críticas que o relatório NÃO responde."
                 }}"""
 
@@ -184,7 +178,7 @@ with st.sidebar:
     st.header("2. Revisão e Ajustes")
     problema = st.text_area("Problema Central", value=st.session_state.get('problema', ''), height=100)
     fatos = st.text_area("Fatos Ancoradores", value=st.session_state.get('fatos', ''), height=150)
-    personas = st.text_area("Personas", value=st.session_state.get('personas', ''), height=150)
+    personas = st.text_area("Personas", value=st.session_state.get('personas', ''), height=200)
     lacunas = st.text_area("Lacunas de Dados", value=st.session_state.get('lacunas', ''), height=100)
 
     st.markdown("---")
@@ -195,7 +189,6 @@ if botao_gerar:
     if not problema or not fatos:
         st.warning("Por favor, preencha os dados antes de iniciar.")
     else:
-        # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
         with st.spinner(f"Etapa 1/2: O conselho de agentes ({modelo}) está debatendo..."):
             
             instrucao_compacta = """
@@ -230,7 +223,6 @@ if botao_gerar:
                         st.text(texto_json)
                     st.stop()
 
-                # --- ETAPA 2: GERAR MEMORANDO ---
                 with st.spinner("Etapa 2/2: Redigindo Memorando Executivo e Matriz de Risco..."):
                     prompt_memo = f"""
                     Com base no Tension Map abaixo, escreva o Memorando Executivo e a Matriz de Risco.
@@ -253,14 +245,12 @@ if botao_gerar:
                 st.header("📄 Memorando e Matriz de Risco")
                 st.markdown(memorando)
 
-                # --- BOTÕES DE DOWNLOAD ---
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.download_button("⬇️ Baixar Dados (.json)", data=json.dumps(tension_map, ensure_ascii=False, indent=2), file_name="tension_map.json")
                 with col2:
                     st.download_button("⬇️ Baixar Texto (.md)", data=memorando, file_name="memorando_transicao.md")
                 with col3:
-                    # Gera o arquivo do Word
                     arquivo_word = gerar_docx(memorando)
                     st.download_button(
                         label="⬇️ Baixar Relatório (.docx)",
