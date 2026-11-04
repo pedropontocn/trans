@@ -6,6 +6,36 @@ import tempfile
 from dotenv import load_dotenv
 from litellm import completion
 from markitdown import MarkItDown
+import docx
+import io
+
+def gerar_docx(texto_markdown):
+    doc = docx.Document()
+    # Título principal
+    doc.add_heading('Memorando Executivo e Matriz de Risco', 0)
+    
+    linhas = texto_markdown.split('\n')
+    for linha in linhas:
+        if linha.startswith('# '):
+            doc.add_heading(linha.replace('# ', ''), level=1)
+        elif linha.startswith('## '):
+            doc.add_heading(linha.replace('## ', ''), level=2)
+        elif linha.startswith('### '):
+            doc.add_heading(linha.replace('### ', ''), level=3)
+        elif linha.startswith('|'):
+            # Pula a formatação complexa de tabela markdown por simplicidade
+            # mas mantém o texto legível
+            if '---' not in linha:
+                texto_limpo = linha.replace('|', ' | ').replace('  ', ' ')
+                doc.add_paragraph(texto_limpo)
+        elif linha.strip():
+            doc.add_paragraph(linha)
+            
+    # Salva em memória
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 # --- PROMPT DO SISTEMA ---
 SYSTEM_PROMPT = """
