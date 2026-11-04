@@ -4,7 +4,7 @@ Painel de Deliberação e Análise de Transição (Streamlit)
 Instalação:
     pip install -r requirements.txt
 Execução:
-    streamlit run painel_deliberacao.py
+    streamlit run app.py
 A chave da API fica no arquivo .env, na mesma pasta:
     ANTHROPIC_API_KEY=...
 """
@@ -52,7 +52,7 @@ CAMPOS = ["problema", "fatos", "personas", "lacunas"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
 APP_VERSAO = "1.4"
-PASTA_REGISTROS = Path(__file__).resolve().parent / "registros"
+PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
 # (entrada, saída, multiplicador da leitura de cache). Escrita de cache de 5 minutos custa 1,25x a entrada.

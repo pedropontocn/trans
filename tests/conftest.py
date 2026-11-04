@@ -1,0 +1,177 @@
+"""Infraestrutura dos testes.
+
+Os testes NÃO chamam nenhuma API: o LiteLLM e o MarkItDown são trocados por versões falsas
+antes de o app ser carregado. Por isso rodam de graça, no GitHub Actions ou no seu computador.
+"""
+import json
+import sys
+import threading
+import types
+from pathlib import Path
+from types import SimpleNamespace as NS
+
+import pytest
+
+RAIZ = Path(__file__).resolve().parent.parent
+APP = RAIZ / "app.py"
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+RELATORIO = (FIXTURES / "relatorio_exemplo.md").read_text(encoding="utf-8")
+
+# Trechos que existem no relatório de exemplo e trechos inventados
+FONTE_OK = {"tipo": "relatorio", "referencia": "3.1",
+            "trecho": "Quatro concorrências estão adiadas sine die, somando R$ 120.500.000,00"}
+FONTE_FALSA = {"tipo": "relatorio", "referencia": "1.2",
+               "trecho": "a Secretaria tem R$ 500 milhões livres em caixa para 2027"}
+SEM_FONTE = {"tipo": "nenhuma", "referencia": "", "trecho": ""}
+
+MEMORANDO = """# Memorando Executivo
+
+## Em síntese
+- Quatro licitações somam R$ 120,5 mi e estão adiadas.
+- A LOA 2026 é de R$ 412 mi.
+
+## Os 3 principais trade-offs
+### T1. Licitações adiadas
+Decidir cedo ou esperar. Diferença de R$ 13,3 mi (cálculo) entre LOA e empenhado.
+
+## Decisões que precisam ser tomadas nesta semana
+1. Definir o destino das licitações adiadas.
+
+## Dados faltantes
+- Dotação atualizada (orçamento).
+
+## Custo de não decidir
+O prazo das atas é de cerca de 85 dias; um valor inventado: R$ 999,9 mi.
+
+## Matriz de Risco
+| Risco | Probabilidade | Impacto | Ação mitigadora | Responsável |
+|---|---|---|---|---|
+| Perda de propostas | Alta | Médio | Atualizar preços | Licitações |
+| Obrigações sem caixa | Média | Alto | Demonstrativo de restos a pagar | Finanças |
+"""
+
+
+def polo(evidencia, fonte):
+    return {"posicao": "p", "defendido_por": ["P1"], "argumento": "a", "evidencia": evidencia, "fonte": fonte}
+
+
+def trade_off(id_, titulo, evidencia=1, fonte=FONTE_OK, **extra):
+    t = {"id": id_, "titulo": titulo, "descricao": "d", "mecanismo_causal": "m",
+         "polo_a": polo(evidencia, fonte), "polo_b": polo(4, SEM_FONTE), "tipos_divergencia": ["temporal"],
+         "nivel_evidencia": evidencia, "quem_ganha": "g", "quem_perde": "p", "o_que_mudaria": "o"}
+    t.update(extra)
+    return t
+
+
+def tension_map(trade_offs, **sem):
+    tm = {"tension_map_id": "tm", "scenario": "cenário",
+          "baseline_reference": {"cenario": "nada muda",
+                                 "consequencias": [{"efeito": "e", "evidencia": 1, "fonte": FONTE_OK}],
+                                 "custo_de_esperar": "crescente"},
+          "convergencias": [], "trade_offs": trade_offs, "unresolved_questions": [],
+          "confidence_assessment": {"nivel_geral": "baixa", "justificativa": "j", "principais_limitacoes": []}}
+    for chave in sem:
+        tm.pop(chave, None)
+    return tm
+
+
+class LLMFalso:
+    """Faz o papel do modelo. Cada teste ajusta as respostas que quer."""
+
+    def __init__(self):
+        self.chamadas = []
+        self.trava = threading.Lock()
+        self.insumos = {"problema": "Carteira travada na transição.", "fatos": [FONTE_OK["trecho"]],
+                        "personas": [{"id": "baseline", "nome": "Status quo", "criterio": "nada muda"}],
+                        "lacunas": ["Dotação atualizada"]}
+        self.resposta_extracao_texto = None          # se definido, a extração responde em texto, sem ferramenta
+        self.rodadas = [tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])]
+        self.consolidacao = None
+        self.memorando = MEMORANDO
+        self.memorando_cortado_uma_vez = False
+        self.recusar_ferramentas = None              # exceção para simular modelos/versões sem ferramenta
+        self._n_tm = 0
+
+    def _resp(self, conteudo="", nome=None, args=None, motivo="stop", entrada=10000, saida=2000):
+        chamadas = [NS(function=NS(name=nome, arguments=json.dumps(args)))] if nome else None
+        return NS(choices=[NS(message=NS(content=conteudo, tool_calls=chamadas), finish_reason=motivo)],
+                  usage=NS(prompt_tokens=entrada, completion_tokens=saida))
+
+    def __call__(self, model, messages, max_tokens, **kw):
+        nome = kw["tools"][0]["function"]["name"] if kw.get("tools") else None
+        with self.trava:
+            self.chamadas.append({"modelo": model, "ferramenta": nome, "mensagens": messages, "kw": kw})
+        if nome and self.recusar_ferramentas:
+            raise self.recusar_ferramentas
+        ultimo = messages[-1]["content"]
+        ultimo = ultimo if isinstance(ultimo, str) else " ".join(p["text"] for p in ultimo)
+        sistema = messages[0]["content"]
+        sistema = sistema if isinstance(sistema, str) else " ".join(p["text"] for p in sistema)
+
+        if "Leia o relatório de transição" in ultimo or "Leia o relatório de transição" in sistema:
+            if self.resposta_extracao_texto is not None or nome is None:
+                return self._resp(self.resposta_extracao_texto or json.dumps(self.insumos))
+            return self._resp(nome=nome, args=self.insumos, motivo="tool_calls")
+        if "Consolide-os" in sistema:
+            alvo = self.consolidacao or self.rodadas[0]
+            return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(json.dumps(alvo))
+        if "Execute o protocolo" in ultimo or "não segue o formato" in ultimo:
+            with self.trava:
+                i = self._n_tm
+                self._n_tm += 1
+            alvo = self.rodadas[i % len(self.rodadas)]
+            return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(
+                "[INÍCIO DO JSON]" + json.dumps(alvo) + "[FIM DO JSON]")
+        # memorando
+        if self.memorando_cortado_uma_vez:
+            if ultimo.startswith("Continue"):
+                return self._resp(self.memorando[len(self.memorando) // 2:])
+            return self._resp(self.memorando[:len(self.memorando) // 2], motivo="length")
+        return self._resp(self.memorando)
+
+
+class ArquivoFalso:
+    name = "relatorio_exemplo.pdf"
+
+    def getvalue(self):
+        return b"%PDF falso"
+
+
+@pytest.fixture
+def llm(monkeypatch):
+    """Instala o LiteLLM e o MarkItDown falsos e devolve o modelo falso para o teste configurar."""
+    falso = LLMFalso()
+    litellm = types.ModuleType("litellm")
+    litellm.completion = falso
+    markitdown = types.ModuleType("markitdown")
+
+    class MarkItDown:
+        def convert(self, caminho):
+            return NS(text_content=RELATORIO)
+
+    markitdown.MarkItDown = MarkItDown
+    monkeypatch.setitem(sys.modules, "litellm", litellm)
+    monkeypatch.setitem(sys.modules, "markitdown", markitdown)
+    return falso
+
+
+@pytest.fixture
+def funcoes(llm):
+    """As funções do app, sem a interface (tudo o que vem antes de '# --- ESTADO INICIAL')."""
+    codigo = APP.read_text(encoding="utf-8").split("# --- ESTADO INICIAL")[0]
+    ns = {"__file__": str(APP), "__name__": "app_funcoes"}
+    exec(compile(codigo, str(APP), "exec"), ns)
+    return NS(**{k: v for k, v in ns.items() if not k.startswith("__")})
+
+
+@pytest.fixture
+def app(llm, monkeypatch, tmp_path):
+    """O app inteiro rodando no AppTest do Streamlit, com upload de um relatório falso."""
+    import streamlit
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(streamlit, "file_uploader", lambda *a, **k: ArquivoFalso())
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PAINEL_REGISTROS", str(tmp_path / "registros"))
+    at = AppTest.from_file(str(APP), default_timeout=120)
+    return at
