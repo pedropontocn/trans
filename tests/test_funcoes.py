@@ -324,3 +324,31 @@ def test_pedidos_do_debate(funcoes, llm):
     assert all(i["tipo"] == "questao_debate" and i["incluir"] for i in itens)
     assert itens[1]["unidade"] == "SUBGFISO" and "afeta T2" in itens[1]["por_que_falta"]
     assert "Informar a dotação atualizada" in llm.mensagem_pedidos_debate        # a lista de já pedidos vai ao modelo
+
+
+def test_custo_da_escrita_de_cache_de_uma_hora(funcoes):
+    base = {"modelo": "anthropic/claude-opus-5-5", "entrada": 1_000_000, "entrada_sem_cache": 0, "cache_leitura": 0,
+            "cache_escrita": 1_000_000, "saida": 0}
+    assert round(funcoes.custo_estimado([base])[0], 2) == 5.00                         # 5 minutos: 1,25x
+    assert round(funcoes.custo_estimado([dict(base, cache_escrita_1h=1_000_000)])[0], 2) == 8.00   # 1 hora: 2x
+
+
+def test_mensagens_sem_cache_para_outros_modelos(funcoes):
+    msgs = funcoes.mensagens_com_cache("gemini/gemini-3.8-flash", "INSTRUÇÕES", "texto do relatório", "pergunta",
+                                       dados_extra="<base_projetos>x</base_projetos>")
+    assert msgs[0] == {"role": "system", "content": "INSTRUÇÕES"}
+    assert msgs[1]["content"].startswith("<relatorio>") and msgs[1]["content"].endswith("pergunta")
+
+
+def test_concordancia_exige_todos_os_pares(funcoes, llm):
+    tm1 = tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])
+    tm2 = tension_map([trade_off("T1", "Licitações adiadas"), trade_off("T2", "Obras")])
+    assert funcoes.rodadas_concordam("anthropic/claude-sonnet-5-5", tm1, tm2, uso_lista=[])
+    llm.pareamento = {"pares": [{"anterior": "T1", "atual": "T1"}, {"anterior": "T2", "atual": "T9"}]}
+    assert not funcoes.rodadas_concordam("anthropic/claude-sonnet-5-5", tm1, tm2, uso_lista=[])
+    llm.pareamento = {"pares": [{"anterior": "T1", "atual": "T1"}, {"anterior": "T1", "atual": "T2"}]}
+    assert not funcoes.rodadas_concordam("anthropic/claude-sonnet-5-5", tm1, tm2, uso_lista=[])
+    # número diferente de trade-offs: nem chama o modelo
+    n = len(llm.chamadas)
+    assert not funcoes.rodadas_concordam("anthropic/claude-sonnet-5-5", tm1, tension_map([trade_off("T1", "x")]), uso_lista=[])
+    assert len(llm.chamadas) == n

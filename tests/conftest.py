@@ -134,15 +134,20 @@ class LLMFalso:
                   usage=NS(prompt_tokens=entrada, completion_tokens=saida))
 
     def __call__(self, model, messages, max_tokens, **kw):
-        nome = kw["tools"][0]["function"]["name"] if kw.get("tools") else None
+        texto = lambda c: c if isinstance(c, str) else " ".join(p["text"] for p in c)
+        ultimo = texto(messages[-1]["content"])
+        sistema = texto(messages[0]["content"])
+        # com o relatório em cache, as instruções da etapa vêm na primeira mensagem do usuário, depois do relatório
+        contexto = sistema + " " + (texto(messages[1]["content"]) if len(messages) > 1 else "")
+        nomes = [t["function"]["name"] for t in kw.get("tools") or []]
+        if len(nomes) > 1:          # conjunto comum de ferramentas: responde com a da etapa
+            nome = "registrar_diagnostico" if "analista da Equipe de Transição" in contexto else "registrar_tension_map"
+        else:
+            nome = nomes[0] if nomes else None
         with self.trava:
-            self.chamadas.append({"modelo": model, "ferramenta": nome, "mensagens": messages, "kw": kw})
+            self.chamadas.append({"modelo": model, "ferramenta": nome, "ferramentas": nomes, "mensagens": messages, "kw": kw})
         if nome and self.recusar_ferramentas:
             raise self.recusar_ferramentas
-        ultimo = messages[-1]["content"]
-        ultimo = ultimo if isinstance(ultimo, str) else " ".join(p["text"] for p in ultimo)
-        sistema = messages[0]["content"]
-        sistema = sistema if isinstance(sistema, str) else " ".join(p["text"] for p in sistema)
 
         if "Leia o relatório de transição" in ultimo or "Leia o relatório de transição" in sistema:
             if self.resposta_extracao_texto is not None or nome is None:
@@ -156,11 +161,11 @@ class LLMFalso:
             pedidos += [{"id": "Q99", "pedido": "Pedido de questão inexistente.", "materialidade": "critica"},
                         {"id": ids[0], "pedido": "Informar a dotação atualizada de 2026 por fonte de recurso.", "materialidade": "critica"}]
             return self._resp(json.dumps({"pedidos": pedidos}))
-        if "analista da Equipe de Transição" in sistema:
+        if "analista da Equipe de Transição" in contexto:
             self.mensagem_diagnostico = " ".join(p["text"] for p in messages[1]["content"]) if isinstance(messages[1]["content"], list) else messages[1]["content"]
             alvo = {"lacunas": self.lacunas, "atendimento": self.atendimento}
             return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(json.dumps(alvo))
-        if "Você participa de uma deliberação multiagente" in sistema:
+        if "Você participa de uma deliberação multiagente" in contexto:
             pid = re.search(r"VOCÊ É: \[([^\]]+)\]", ultimo).group(1)
             if "FASE 1 — PROPOSIÇÃO" in ultimo:
                 if pid in self.personas_mudas:
@@ -184,7 +189,7 @@ class LLMFalso:
             return self._resp(json.dumps({"avaliacoes": [{"plano": r, "notas": {"viabilidade_juridica": 3, "viabilidade_fiscal": 2,
                                                                                 "impacto_para_a_populacao": 4, "ancoragem_em_evidencias": 3},
                                                           "comentario": f"fraco em {r}"} for r in planos]}))
-        if "As Fases 1 a 3 JÁ ACONTECERAM" in sistema:
+        if "As Fases 1 a 3 JÁ ACONTECERAM" in contexto:
             self.historico_sintese = ultimo
             alvo = self.sintese or tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])
             return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(json.dumps(alvo))
@@ -264,6 +269,9 @@ def llm(monkeypatch):
     markitdown.MarkItDown = MarkItDown
     monkeypatch.setitem(sys.modules, "litellm", litellm)
     monkeypatch.setitem(sys.modules, "markitdown", markitdown)
+    import streamlit
+    streamlit.cache_resource.clear()     # respostas guardadas de um teste não vazam para o próximo
+    streamlit.cache_data.clear()
     return falso
 
 
