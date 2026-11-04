@@ -70,9 +70,11 @@ def _como_texto(valor):
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.header("0. Configuração de IA")
+    # Atualizado para o modelo atual e válido
     modelo = st.selectbox("Modelo Facilitador", [
-        "anthropic/claude-3-5-sonnet-20241022",   
-        "anthropic/claude-3-opus-20240229"
+        "anthropic/claude-sonnet-4-6", 
+        "anthropic/claude-sonnet-4-5-20250929",
+        "anthropic/claude-opus-4-6"
     ])
     
     st.markdown("---")
@@ -152,7 +154,6 @@ if botao_gerar:
         # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
         with st.spinner(f"Etapa 1/2: O conselho de agentes ({modelo}) está debatendo..."):
             
-            # REGRA DE CONCISÃO ADICIONADA AQUI
             instrucao_compacta = """
             Execute internamente as Fases 1 a 3 (Proposição, Crítica, Revisão e Avaliação).
             MAS NÃO RETORNE O HISTÓRICO DAS FASES 1 A 3 NO JSON. Retorne APENAS o Tension Map da Fase 4.
@@ -174,7 +175,7 @@ if botao_gerar:
                         {"role": "system", "content": prompt_fase_1_a_4}, 
                         {"role": "user", "content": user_prompt_1}
                     ],
-                    max_tokens=8192, # Aumentado para o máximo seguro
+                    max_tokens=8192,
                 )
                 texto_json = resp_1.choices[0].message.content
                 tension_map = extrair_json_limpo(texto_json)
