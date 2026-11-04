@@ -130,7 +130,38 @@ Retorne APENAS o JSON, neste formato:
   "lacunas": ["3 a 4 informações críticas que o relatório NÃO responde"]
 }
 As cinco primeiras personas são obrigatórias. As duas últimas você cria com base no relatório.
-Descreva o critério de decisão de cada uma em uma frase."""
+Descreva o critério de decisão de cada uma em uma frase.
+Registre o resultado chamando a ferramenta `registrar_insumos`. Se não puder usar a ferramenta,
+devolva somente o JSON acima, com exatamente estas chaves: problema, fatos, personas, lacunas."""
+
+FERRAMENTA_EXTRACAO = {
+    "type": "function",
+    "function": {
+        "name": "registrar_insumos",
+        "description": "Registra os insumos da deliberação extraídos do relatório de transição.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "problema": {"type": "string"},
+                "fatos": {"type": "array", "items": {"type": "string"}},
+                "personas": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}, "nome": {"type": "string"}, "criterio": {"type": "string"}},
+                    "required": ["id", "nome", "criterio"]}},
+                "lacunas": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["problema", "fatos", "personas", "lacunas"],
+        },
+    },
+}
+
+# Nomes alternativos que o modelo às vezes usa para cada campo
+SINONIMOS = {
+    "problema": ["problema", "problema_central", "dilema", "dilema_central", "cenario", "scenario", "problem"],
+    "fatos": ["fatos", "fatos_ancoradores", "fatos_chave", "fatos_principais", "facts"],
+    "personas": ["personas", "agentes", "personas_agentes", "agents"],
+    "lacunas": ["lacunas", "lacunas_de_dados", "dados_faltantes", "informacoes_faltantes", "gaps"],
+}
 
 _NIVEL = {"type": "integer", "minimum": 1, "maximum": 5}
 _POLO = {
@@ -304,6 +335,73 @@ def como_texto(valor):
     if isinstance(valor, dict):
         return json.dumps(valor, ensure_ascii=False, indent=2)
     return str(valor or "")
+
+
+def mapear_campos(dados):
+    """Encontra os quatro campos no JSON do extrator, aceitando nomes alternativos e um nível de aninhamento."""
+    if not isinstance(dados, dict):
+        return {}
+
+    def chaves_normalizadas(d):
+        return {re.sub(r"[^a-z0-9]+", "_", _norm(k)).strip("_"): v for k, v in d.items()}
+
+    candidatos = [chaves_normalizadas(dados)]
+    candidatos += [chaves_normalizadas(v) for v in dados.values() if isinstance(v, dict)]
+    encontrados = {}
+    for campo, nomes in SINONIMOS.items():
+        for d in candidatos:
+            valor = next((d[n] for n in nomes if d.get(n)), None)
+            if valor:
+                encontrados[campo] = valor
+                break
+    return encontrados
+
+
+def processar_extracao(modelo, arquivo, manter_editados):
+    """Lê o relatório, chama o extrator e preenche os campos. Devolve o status para a barra lateral."""
+    status = {"tipo": "erro", "mensagem": "", "avisos": [], "bruto": ""}
+    try:
+        texto = converter_arquivo(arquivo.name, arquivo.getvalue())
+    except Exception as e:
+        status["mensagem"] = f"Não foi possível ler o arquivo: {e}"
+        return status
+    if not texto or len(texto.strip()) < 200:
+        status["mensagem"] = ("Quase não há texto no arquivo. Se o PDF for digitalizado, use a versão com texto "
+                              "selecionável ou o .docx original.")
+        return status
+    texto, status["avisos"] = limpar_relatorio(texto)
+    try:
+        bruto, argumentos, motivo = chamar_modelo(
+            modelo, [{"role": "user", "content": PROMPT_EXTRATOR.replace("<<<RELATORIO>>>", texto)}],
+            8000, ferramenta=FERRAMENTA_EXTRACAO)
+    except Exception as e:
+        status["mensagem"] = f"Erro na chamada ao modelo: {e}"
+        return status
+    status["bruto"] = json.dumps(argumentos, ensure_ascii=False, indent=2) if argumentos else bruto
+    campos = mapear_campos(argumentos) or mapear_campos(extrair_json(bruto))
+    if not campos:
+        status["mensagem"] = ("O modelo respondeu, mas não encontrei os campos na resposta."
+                              + (" A resposta foi cortada pelo limite de tokens." if motivo == "length" else "")
+                              + " Veja a resposta bruta abaixo.")
+        return status
+    preenchidos, mantidos = [], []
+    for campo in CAMPOS:
+        if campo not in campos:
+            continue
+        if manter_editados and st.session_state.get(campo, "").strip():
+            mantidos.append(campo)
+            continue
+        st.session_state[campo] = como_texto(campos[campo])
+        preenchidos.append(campo)
+    faltando = [c for c in CAMPOS if c not in campos]
+    status["tipo"] = "aviso" if faltando else "ok"
+    partes = [f"Preenchidos: {', '.join(preenchidos)}." if preenchidos else "Nenhum campo foi alterado."]
+    if mantidos:
+        partes.append(f"Mantidos como você editou: {', '.join(mantidos)}.")
+    if faltando:
+        partes.append(f"O modelo não devolveu: {', '.join(faltando)}. Preencha à mão ou extraia de novo.")
+    status["mensagem"] = " ".join(partes)
+    return status
 
 
 def montar_cenario():
@@ -640,47 +738,26 @@ with st.sidebar:
     st.markdown("---")
     st.header("1. Upload do relatório")
     arquivo = st.file_uploader("Relatório (PDF, DOCX ou XLSX)", type=["pdf", "docx", "xlsx"])
-    preservar = st.checkbox("Não substituir campos que já editei", value=True,
-                            help="Com a opção marcada, a extração só preenche campos vazios.")
+    manter = st.checkbox("Manter campos que já editei", value=False,
+                         help="Marcado, a extração só preenche os campos que estiverem vazios.")
+    extrair_de_novo = st.button("🔄 Extrair novamente", use_container_width=True, disabled=arquivo is None)
 
-    if st.button("🔍 Extrair dados do relatório", use_container_width=True):
-        if arquivo is None:
-            st.warning("Faça o upload do arquivo primeiro.")
-        else:
-            with st.spinner("Lendo o relatório e estruturando os dados..."):
-                try:
-                    texto_relatorio = converter_arquivo(arquivo.name, arquivo.getvalue())
-                except Exception as e:
-                    st.error(f"Não foi possível ler o arquivo: {e}")
-                    st.stop()
-                texto_relatorio, avisos = limpar_relatorio(texto_relatorio)
-                try:
-                    bruto, _, motivo = chamar_modelo(
-                        modelo, [{"role": "user", "content": PROMPT_EXTRATOR.replace("<<<RELATORIO>>>", texto_relatorio)}], 4000)
-                except Exception as e:
-                    st.error(f"Erro na chamada ao modelo: {e}")
-                    st.stop()
-                dados = extrair_json(bruto)
-                if dados is None:
-                    st.error("O modelo não devolveu um JSON válido." + (" A resposta foi cortada pelo limite de tokens." if motivo == "length" else ""))
-                    with st.expander("Ver resposta bruta do extrator"):
-                        st.text(bruto)
-                    st.stop()
-                preenchidos, mantidos = [], []
-                for campo in CAMPOS:
-                    if preservar and st.session_state.get(campo, "").strip():
-                        mantidos.append(campo)
-                        continue
-                    st.session_state[campo] = como_texto(dados.get(campo, ""))
-                    preenchidos.append(campo)
-                st.session_state["avisos_extracao"] = avisos
-                msg = "Relatório lido."
-                if mantidos:
-                    msg += f" Mantive o que você já tinha em: {', '.join(mantidos)}."
-                st.success(msg)
+    # A extração roda sozinha quando um arquivo novo é carregado; o botão repete a extração
+    if arquivo is not None:
+        assinatura = hashlib.md5(arquivo.getvalue()).hexdigest()
+        if extrair_de_novo or st.session_state.get("arquivo_extraido") != assinatura:
+            with st.spinner("Lendo o relatório e preenchendo os campos..."):
+                st.session_state["status_extracao"] = processar_extracao(modelo, arquivo, manter)
+            st.session_state["arquivo_extraido"] = assinatura
 
-    for aviso in st.session_state.get("avisos_extracao", []):
-        st.caption(f"ℹ️ {aviso}")
+    status = st.session_state.get("status_extracao")
+    if status:
+        {"ok": st.success, "aviso": st.warning, "erro": st.error}[status["tipo"]](status["mensagem"])
+        for aviso in status["avisos"]:
+            st.caption(f"ℹ️ {aviso}")
+        if status["bruto"]:
+            with st.expander("Ver resposta do extrator"):
+                st.code(status["bruto"], language="json")
 
     st.markdown("---")
     st.header("2. Revisão e ajustes")
