@@ -103,6 +103,23 @@ class LLMFalso:
         self.personas_mudas = set()                # ids de personas que respondem sem JSON na Fase 1
         self.falhar_avaliador = False
         self.sintese = None                        # Tension Map da síntese do modo independente
+        self.base_projetos = None                  # texto de uma base de projetos (CSV) para o upload opcional
+        self.lacunas = [
+            {"tipo": "declarada", "secao": "1.2 Orçamento do exercício", "item": "Dotação atualizada",
+             "evidencia": "Dotação atualizada: [A complementar]", "por_que_falta": "sem a dotação não dá para medir o espaço fiscal",
+             "materialidade": "critica", "pedido": "Informar a dotação atualizada de 2026 por fonte de recurso.", "unidade": "Finanças"},
+            {"tipo": "omissao", "secao": "Base de projetos", "item": "Ponte do Rio Exemplo",
+             "evidencia": "Ponte do Rio Exemplo;Exemplópolis;em execução", "por_que_falta": "está na base e não no relatório",
+             "materialidade": "relevante", "pedido": "Informar a situação da obra da Ponte do Rio Exemplo.", "unidade": ""},
+            {"tipo": "evasiva", "secao": "3.2 Obras suspensas", "item": "Obra inventada",
+             "evidencia": "a obra do viaduto central foi abandonada em 2019", "por_que_falta": "x",
+             "materialidade": "critica", "pedido": "Explicar o viaduto central.", "unidade": ""},
+            {"tipo": "declarada", "secao": "1.2 Orçamento do exercício", "item": "Dotação (repetido)",
+             "evidencia": "Dotação atualizada: [A complementar]", "por_que_falta": "repetido",
+             "materialidade": "critica", "pedido": "Informar a dotação atualizada de 2026 por fonte de recurso.", "unidade": ""},
+            {"tipo": "evasiva", "secao": "3.3 Atas de registro de preços", "item": "Fonte das atas",
+             "evidencia": "Total estimado de cerca de R$ 800 milhões", "por_que_falta": "sem fonte",
+             "materialidade": "acessoria", "pedido": "Indicar a fonte de recursos das atas.", "unidade": ""}]
         self._n_tm = 0
 
     def _resp(self, conteudo="", nome=None, args=None, motivo="stop", entrada=10000, saida=2000):
@@ -125,6 +142,10 @@ class LLMFalso:
             if self.resposta_extracao_texto is not None or nome is None:
                 return self._resp(self.resposta_extracao_texto or json.dumps(self.insumos))
             return self._resp(nome=nome, args=self.insumos, motivo="tool_calls")
+        if "analista da Equipe de Transição" in sistema:
+            self.mensagem_diagnostico = " ".join(p["text"] for p in messages[1]["content"]) if isinstance(messages[1]["content"], list) else messages[1]["content"]
+            alvo = {"lacunas": self.lacunas}
+            return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(json.dumps(alvo))
         if "Você participa de uma deliberação multiagente" in sistema:
             pid = re.search(r"VOCÊ É: \[([^\]]+)\]", ultimo).group(1)
             if "FASE 1 — PROPOSIÇÃO" in ultimo:
@@ -194,6 +215,16 @@ class ArquivoFalso:
         return b"%PDF falso " + self.texto.encode("utf-8")
 
 
+class BaseFalsa:
+    name = "base_projetos.csv"
+
+    def __init__(self, texto):
+        self.texto = texto
+
+    def getvalue(self):
+        return self.texto.encode("utf-8")
+
+
 class RegistroFalso:
     name = "registro_anterior.json"
 
@@ -238,6 +269,8 @@ def app(llm, monkeypatch, tmp_path):
     from streamlit.testing.v1 import AppTest
 
     def uploader(rotulo, *a, **k):
+        if "base de projetos" in rotulo.lower():
+            return BaseFalsa(llm.base_projetos) if llm.base_projetos else None
         if "anterior" in rotulo.lower():
             return RegistroFalso(llm.registro_anterior) if llm.registro_anterior else None
         return ArquivoFalso(llm.texto_relatorio)

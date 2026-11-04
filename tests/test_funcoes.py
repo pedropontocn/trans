@@ -187,3 +187,60 @@ def test_ler_personas(funcoes):
 def test_mesma_familia(funcoes):
     assert funcoes.mesma_familia("anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5")
     assert not funcoes.mesma_familia("gemini/gemini-3.1-pro-preview", "anthropic/claude-sonnet-5-5")
+
+
+def test_dias_uteis_com_feriados(funcoes):
+    from datetime import date
+    assert funcoes._pascoa(2026) == date(2026, 4, 5)
+    assert funcoes.somar_dias_uteis(date(2026, 11, 4), 5) == date(2026, 11, 11)
+    assert funcoes.somar_dias_uteis(date(2026, 11, 18), 3) == date(2026, 11, 24)    # pula 20/11 e o fim de semana
+
+
+def test_secretaria_e_cargo(funcoes):
+    texto = "**GOVERNO DO ESTADO DO RIO DE JANEIRO**\n\nSecretaria de Estado das Cidades (SECID)\n"
+    assert funcoes.secretaria_do_relatorio(texto) == "Secretaria de Estado das Cidades"
+    assert funcoes.cargo_do_titular("Secretaria de Estado das Cidades", "Senhora") == "Secretária de Estado das Cidades"
+    assert funcoes.cargo_do_titular("Secretaria de Estado das Cidades", "Senhor") == "Secretário de Estado das Cidades"
+
+
+def test_pendencias_por_secao(funcoes):
+    texto, _ = funcoes.limpar_relatorio(RELATORIO)
+    secoes = [p["secao"][:3] for p in funcoes.pendencias_por_secao(texto)]
+    assert {"1.2", "2.1", "3.2"} <= set(secoes)
+
+
+BASE = "obra;municipio;situacao\nPonte do Rio Exemplo;Exemplópolis;em execução\n"
+
+
+def test_diagnostico_confere_evidencias(funcoes, llm):
+    texto, _ = funcoes.limpar_relatorio(RELATORIO)
+    d = funcoes.diagnosticar("anthropic/claude-opus-5-5", texto, BASE, "cenário")
+    itens = {i["item"]: i for i in d["itens"]}
+    assert "Dotação (repetido)" not in itens                                   # pedido repetido sai
+    assert itens["Dotação atualizada"]["verificado"] and itens["Dotação atualizada"]["onde"] == "relatório"
+    assert itens["Ponte do Rio Exemplo"]["onde"] == "base de projetos"
+    assert not itens["Obra inventada"]["verificado"] and not itens["Obra inventada"]["incluir"]
+    assert not itens["Fonte das atas"]["incluir"]                              # acessória não entra por padrão
+    assert d["itens"][0]["materialidade"] == "critica" and d["itens"][-1]["item"] == "Obra inventada"
+    assert "<base_projetos>" in llm.mensagem_diagnostico and "1.2" in llm.mensagem_diagnostico
+
+
+def test_oficio_em_word(funcoes):
+    import io
+    from datetime import date
+
+    import docx
+    itens = [{"secao": "1.2 Orçamento do exercício", "pedido": "Informar a dotação atualizada."},
+             {"secao": "1.2 Orçamento do exercício", "pedido": "Informar os restos a pagar."},
+             {"secao": "Base de projetos", "pedido": "Informar a situação da Ponte do Rio Exemplo."}]
+    dados = {"secretaria": "Secretaria de Estado das Cidades", "titular": "", "tratamento": "Senhora", "numero": "12/2026",
+             "referencia": "Relatório de transição.", "data_relatorio": "23/10/2026", "signatario": "", "cargo_signatario": "",
+             "canal": "", "prazo_dias": 5, "data_oficio": date(2026, 11, 4)}
+    conteudo, limite = funcoes.gerar_oficio_docx(dados, itens)
+    texto = "\n".join(p.text for p in docx.Document(io.BytesIO(conteudo)).paragraphs)
+    assert limite == date(2026, 11, 11)
+    for trecho in ("Ofício nº 12/2026 – Equipe de Transição", "A Sua Excelência a Senhora", "[Nome do(a) titular]",
+                   "Secretária de Estado das Cidades", "Senhora Secretária,", "5 (cinco) dias úteis, isto é, até 11/11/2026",
+                   "2. Seção 1.2 Orçamento do exercício:", "a) Informar a dotação atualizada.", "b) Informar os restos a pagar.",
+                   "3. Itens da base de projetos não mencionados no relatório:", "informado expressamente", "Atenciosamente,"):
+        assert trecho in texto, trecho

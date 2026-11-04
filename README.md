@@ -42,6 +42,31 @@ ANTHROPIC_API_KEY=...
    verificação, tokens e custo. A pasta não vai para o GitHub. No Streamlit Cloud ela é apagada quando o app
    reinicia, então use o botão **Registro (.json)** para baixar e guardar a trilha de cada análise.
 
+## Diagnóstico de lacunas e ofício (antes do debate)
+
+Relatórios podem chegar com informações faltando ou suprimidas. Antes do debate, o botão **Diagnosticar lacunas do
+relatório** procura quatro tipos de lacuna:
+
+| Tipo | Exemplo | Como é encontrada |
+|---|---|---|
+| Campo em branco | "Dotação atualizada: [A complementar]" | Por código, e o modelo agrupa por assunto |
+| Inconsistência | Números que não fecham; fontes que se contradizem | Pelo modelo |
+| Resposta evasiva | Obra "paralisada" sem causa, prazo ou contrato | Pelo modelo |
+| Omissão | Obra da base de projetos que não aparece no relatório; seção de órgãos de controle vazia | Pelo modelo, cruzando com a base de projetos (upload opcional, XLSX ou CSV) |
+
+Cada lacuna traz um trecho do relatório ou da base que a evidencia, e o código confere esse trecho. Lacuna sem
+evidência conferida fica fora do ofício. A materialidade (crítica, relevante, acessória) decide o que entra por
+padrão: críticas e relevantes. A tabela é editável: dá para incluir, excluir e reescrever cada pedido.
+
+O painel gera a **minuta de ofício** em Word, no padrão ofício, da Equipe de Transição ao titular da pasta, com os
+pedidos agrupados por seção, prazo de 5 dias úteis (com feriados nacionais e do RJ; confira o calendário oficial) e
+um parágrafo pedindo que o órgão declare expressamente o que não existir ou não puder ser enviado. Também baixa a
+matriz de lacunas em CSV.
+
+Se houver lacunas críticas, o painel avisa antes do debate. Dá para deliberar mesmo assim; nesse caso, as lacunas
+entram no contexto do debate como nível 5. Quando o órgão responder, a comparação com a análise anterior mostra o
+que foi preenchido.
+
 ## Modo "Personas independentes"
 
 No modo rápido, um único modelo simula todas as personas numa chamada, e as rodadas medem se ele é consistente.
