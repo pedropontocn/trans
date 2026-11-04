@@ -109,9 +109,12 @@ def gerar_docx(texto_markdown):
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.header("0. Configuração de IA")
+    # MODELOS ATUALIZADOS CONFORME CATÁLOGO DO LITELLM
     modelo = st.selectbox("Modelo Facilitador", [
-        "anthropic/claude-3-5-sonnet-20241022", 
-        "anthropic/claude-3-opus-20240229"
+        "anthropic/claude-sonnet-4-6",
+        "anthropic/claude-opus-4-6",
+        "anthropic/claude-sonnet-4-5-20250929",
+        "anthropic/claude-haiku-4-5"
     ])
     
     st.markdown("---")
@@ -136,7 +139,7 @@ with st.sidebar:
                 finally:
                     os.remove(tmp_path) 
 
-                # CORREÇÃO AQUI: FORÇANDO O MODELO HÍBRIDO DE PERSONAS
+                # MODELO HÍBRIDO DE PERSONAS FORÇADO
                 prompt_extrator = f"""Leia o relatório de transição abaixo e extraia as informações EXATAS no formato JSON.
                 Relatório: {texto_relatorio[:60000]}
 
