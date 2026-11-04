@@ -1,5 +1,5 @@
 streamlit
-litellm
+litellm>=1.60.0
 python-dotenv
 pypdf
 python-docx
