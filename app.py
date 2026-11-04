@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from litellm import completion
 from markitdown import MarkItDown
 
+# --- PROMPT DO SISTEMA (Embutido para evitar erro de importação) ---
 SYSTEM_PROMPT = """
 Você é um facilitador de deliberação multiagente. Seu objetivo é produzir um TENSION MAP (mapa de tensões) e um MEMORANDO EXECUTIVO para apoiar decisores humanos. Você NÃO decide e NÃO busca consenso. Você amplia a inteligência expondo trade-offs.
 
@@ -44,6 +45,11 @@ Formato de Saída Obrigatório:
 
 load_dotenv()
 
+st.set_page_config(page_title="Deliberação Multiagente", page_icon="🏛️", layout="wide")
+
+st.title("🏛️ Painel de Deliberação e Análise de Transição")
+
+# --- FUNÇÕES AUXILIARES ---
 def extrair_json_limpo(texto):
     texto_limpo = re.sub(r'```(?:json)?', '', texto)
     inicio = texto_limpo.find('{')
@@ -52,13 +58,8 @@ def extrair_json_limpo(texto):
         texto_limpo = texto_limpo[inicio:fim+1]
     try:
         return json.loads(texto_limpo)
-    except json.JSONDecodeError as e:
-        print("Erro ao decodificar JSON. Texto recebido:", texto_limpo[:200])
+    except json.JSONDecodeError:
         return None
-
-st.set_page_config(page_title="Deliberação Multiagente", page_icon="🏛️", layout="wide")
-
-st.title("🏛️ Painel de Deliberação e Análise de Transição")
 
 def _como_texto(valor):
     if isinstance(valor, list):
@@ -70,6 +71,7 @@ def _como_texto(valor):
         return json.dumps(valor, ensure_ascii=False, indent=2)
     return str(valor or "")
 
+# --- BARRA LATERAL ---
 with st.sidebar:
     st.header("1. Upload do Relatório")
     uploaded_file = st.file_uploader("Suba o relatório (PDF, DOCX ou XLSX)", type=["pdf", "docx", "xlsx"])
@@ -78,6 +80,7 @@ with st.sidebar:
         if uploaded_file is not None:
             with st.spinner("Lendo tabelas e estruturando os dados (Markdown)..."):
                 
+                # Salva temporariamente para o MarkItDown ler
                 with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp:
                     tmp.write(uploaded_file.getvalue())
                     tmp_path = tmp.name
@@ -90,7 +93,7 @@ with st.sidebar:
                     st.error(f"Erro ao ler o arquivo: {e}")
                     st.stop()
                 finally:
-                    os.remove(tmp_path)
+                    os.remove(tmp_path) 
 
                 prompt_extrator = f"""Leia o relatório de transição abaixo (que está em formato Markdown, com tabelas preservadas) e extraia as informações EXATAS no formato JSON.
 
@@ -106,9 +109,9 @@ with st.sidebar:
                 }}"""
 
                 try:
-                    # CORREÇÃO: Modelo válido e suportado pelo LiteLLM
+                    # Usando Claude 3.5 Sonnet (Versão estável de Out/2024)
                     resp_extrator = completion(
-                        model="anthropic/claude-3-5-sonnet-20240620",
+                        model="anthropic/claude-3-5-sonnet-20241022",
                         messages=[{"role": "user", "content": prompt_extrator}],
                     )
 
@@ -120,6 +123,7 @@ with st.sidebar:
                         with st.expander("Ver resposta bruta do extrator"):
                             st.text(texto_bruto)
                         st.stop()
+                        
                     st.session_state['problema'] = _como_texto(dados.get('problema', ''))
                     st.session_state['fatos'] = _como_texto(dados.get('fatos', ''))
                     st.session_state['personas'] = _como_texto(dados.get('personas', ''))
@@ -138,26 +142,20 @@ with st.sidebar:
     lacunas = st.text_area("Lacunas de Dados", value=st.session_state.get('lacunas', ''), height=100)
 
     st.markdown("---")
-    # CORREÇÃO: Modelos válidos e suportados
-    modelo = st.selectbox("Modelo Facilitador", ["anthropic/claude-sonnet-4-6", "anthropic/claude-3-opus-20240229"])
+    # Modelos validados no LiteLLM
+    modelo = st.selectbox("Modelo Facilitador", [
+        "anthropic/claude-3-5-sonnet-20241022", 
+        "anthropic/claude-3-opus-20240229",
+        "anthropic/claude-3-haiku-20240307"
+    ])
     botao_gerar = st.button("🚀 Iniciar Deliberação (2 Etapas)", use_container_width=True)
 
-def extrair_json(texto):
-    match = re.search(r'\[INÍCIO DO JSON\]\s*(.*?)\s*\[FIM DO JSON\]', texto, re.DOTALL)
-    if match:
-        bloco = re.sub(r'^```(?:json)?\s*|\s*```$', '', match.group(1).strip())
-        try: return json.loads(bloco)
-        except: pass
-    match = re.search(r'\{.*\}', texto, re.DOTALL)
-    if match:
-        try: return json.loads(match.group(0))
-        except: pass
-    return None
-
+# --- LÓGICA PRINCIPAL ---
 if botao_gerar:
     if not problema or not fatos:
         st.warning("Por favor, preencha os dados antes de iniciar.")
     else:
+        # --- ETAPA 1: GERAR O TENSION MAP (JSON) ---
         with st.spinner("Etapa 1/2: O conselho de agentes está debatendo e gerando o Tension Map..."):
             
             instrucao_compacta = """
@@ -177,14 +175,15 @@ if botao_gerar:
             """
             
             prompt_fase_1_a_4 = SYSTEM_PROMPT + "\n\n" + instrucao_compacta
-            
             user_prompt_1 = f"CENÁRIO: {problema}\nFATOS: {fatos}\nPERSONAS: {personas}\nLACUNAS: {lacunas}\n\nExecute o protocolo e retorne APENAS o JSON final entre [INÍCIO DO JSON] e [FIM DO JSON]."
             
             try:
-                # CORREÇÃO: Agora usa a variável 'modelo' que o usuário escolheu no menu
                 resp_1 = completion(
                     model=modelo,
-                    messages=[{"role": "system", "content": prompt_fase_1_a_4}, {"role": "user", "content": user_prompt_1}],
+                    messages=[
+                        {"role": "system", "content": prompt_fase_1_a_4}, 
+                        {"role": "user", "content": user_prompt_1}
+                    ],
                     max_tokens=8000,
                 )
                 texto_json = resp_1.choices[0].message.content
@@ -196,6 +195,7 @@ if botao_gerar:
                         st.text(texto_json)
                     st.stop()
 
+                # --- ETAPA 2: GERAR MEMORANDO E MATRIZ DE RISCO ---
                 with st.spinner("Etapa 2/2: Redigindo Memorando Executivo e Matriz de Risco..."):
                     prompt_memo = f"""
                     Com base no seguinte Tension Map, escreva o Memorando Executivo e a Matriz de Risco para o Secretário.
