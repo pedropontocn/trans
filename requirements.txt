@@ -1,5 +1,6 @@
 streamlit>=1.32
 litellm
+mcp
 markitdown[all]
 python-docx
 python-dotenv
