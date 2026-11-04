@@ -3,4 +3,4 @@ litellm
 python-dotenv
 pypdf
 python-docx
-markitdown
+markitdown[pdf]
