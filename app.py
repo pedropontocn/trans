@@ -11,6 +11,9 @@ A chave da API fica no arquivo .env, na mesma pasta:
 import hashlib
 import io
 import json
+import math
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 import os
 import re
 import tempfile
@@ -48,11 +51,13 @@ LIMITE_CARACTERES = 150_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "1.3"
+APP_VERSAO = "1.4"
 PASTA_REGISTROS = Path(__file__).resolve().parent / "registros"
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
-PRECOS = {"opus-5-5": (4, 20), "sonnet-5-5": (2, 10), "haiku-5-5": (0.10, 0.50), "sonnet-4-5": (3, 15)}
+# (entrada, saída, multiplicador da leitura de cache). Escrita de cache de 5 minutos custa 1,25x a entrada.
+PRECOS = {"opus-5-5": (4, 20, 0.05), "sonnet-5-5": (2, 10, 0.05), "haiku-5-5": (0.10, 0.50, 0.10), "sonnet-4-5": (3, 15, 0.10)}
+ESCRITA_CACHE = 1.25
 
 # --- PROMPTS ---------------------------------------------------------------
 
@@ -112,6 +117,8 @@ Não acrescente trade-offs, números ou fatos que não estejam nesses insumos. N
 apresente as opções, quem ganha e quem perde com cada uma e o que se sabe sobre cada argumento.
 
 Tamanho: o memorando inteiro, com a matriz, deve caber em 2 páginas (no máximo 1.100 palavras).
+Estabilidade: o Tension Map pode trazer "sinais_fracos", trade-offs que apareceram em poucas rodadas independentes.
+Não os trate como principais; cite-os, se forem relevantes, numa única linha em "Dados faltantes".
 Números: copie valores como aparecem nos insumos ou arredonde-os (ex.: R$ 236,4 mi). Se fizer uma conta,
 escreva "(cálculo)" logo depois do número. Os números do memorando são conferidos por código.
 Seja direto: frases curtas, sem repetir o que já está no Tension Map.
@@ -340,7 +347,7 @@ def extrair_json(texto):
     return None
 
 
-def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa=""):
+def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa="", uso_lista=None):
     """Chama o modelo e devolve (texto, argumentos da ferramenta ou None, motivo de parada)."""
     extras = {}
     if ferramenta:
@@ -357,9 +364,15 @@ def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa=""):
             raise
         resp = completion(model=modelo, messages=mensagens, max_tokens=max_tokens)
     uso = getattr(resp, "usage", None)
-    st.session_state.setdefault("uso_rodada", []).append({
-        "etapa": etapa, "modelo": modelo,
-        "entrada": int(getattr(uso, "prompt_tokens", 0) or 0), "saida": int(getattr(uso, "completion_tokens", 0) or 0)})
+    entrada = int(getattr(uso, "prompt_tokens", 0) or 0)
+    detalhes = getattr(uso, "prompt_tokens_details", None)
+    leitura = int(getattr(uso, "cache_read_input_tokens", 0) or getattr(detalhes, "cached_tokens", 0) or 0)
+    escrita = int(getattr(uso, "cache_creation_input_tokens", 0) or 0)
+    # O LiteLLM costuma somar os tokens de cache em prompt_tokens; se não somar, prompt_tokens já é só a parte sem cache.
+    normal = entrada - leitura - escrita if entrada >= leitura + escrita else entrada
+    registro = {"etapa": etapa, "modelo": modelo, "entrada": normal + leitura + escrita, "entrada_sem_cache": normal,
+                "cache_leitura": leitura, "cache_escrita": escrita, "saida": int(getattr(uso, "completion_tokens", 0) or 0)}
+    (uso_lista if uso_lista is not None else st.session_state.setdefault("uso_rodada", [])).append(registro)
     escolha = resp.choices[0]
     msg = escolha.message
     argumentos = None
@@ -411,6 +424,7 @@ def mapear_campos(dados):
 
 
 def processar_extracao(modelo, arquivo, manter_editados):
+    st.session_state["uso_extracao"] = []
     """Lê o relatório, chama o extrator e preenche os campos. Devolve o status para a barra lateral."""
     status = {"tipo": "erro", "mensagem": "", "avisos": [], "bruto": ""}
     try:
@@ -424,10 +438,11 @@ def processar_extracao(modelo, arquivo, manter_editados):
         return status
     texto, status["avisos"] = limpar_relatorio(texto)
     st.session_state["texto_relatorio"] = texto
+    st.session_state["completude"] = indice_completude(texto)
     try:
         bruto, argumentos, motivo = chamar_modelo(
             modelo, [{"role": "user", "content": PROMPT_EXTRATOR.replace("<<<RELATORIO>>>", texto)}],
-            8000, ferramenta=FERRAMENTA_EXTRACAO, etapa="extração")
+            8000, ferramenta=FERRAMENTA_EXTRACAO, etapa="extração", uso_lista=st.session_state["uso_extracao"])
     except Exception as e:
         status["mensagem"] = f"Erro na chamada ao modelo: {e}"
         return status
@@ -637,8 +652,10 @@ def custo_estimado(uso):
         if chave is None:
             desconhecido = True
             continue
-        preco_in, preco_out = PRECOS[chave]
-        total += u["entrada"] / 1e6 * preco_in + u["saida"] / 1e6 * preco_out
+        preco_in, preco_out, mult_leitura = PRECOS[chave]
+        sem_cache = u.get("entrada_sem_cache", u["entrada"])
+        total += (sem_cache * preco_in + u.get("cache_escrita", 0) * preco_in * ESCRITA_CACHE
+                  + u.get("cache_leitura", 0) * preco_in * mult_leitura + u["saida"] * preco_out) / 1e6
     return total, desconhecido
 
 
@@ -653,13 +670,26 @@ def salvar_registro(dados):
         return None
 
 
-def markdown_verificacao(ev, numeros, registro_id, modelo):
+def markdown_verificacao(ev, numeros, registro_id, modelo, confianca=None, completude=None, tm=None):
     """Seção que vai no fim do Word, para o leitor saber o que foi conferido."""
     nao_enc = [n for n in numeros if n["situacao"] == "não encontrado"]
     calc = [n for n in numeros if n["situacao"] == "cálculo declarado"]
     linhas = ["## Verificação automática",
               f"Documento elaborado com apoio de IA ({modelo}); registro {registro_id}. "
               "Os itens abaixo foram conferidos por código contra o relatório e os fatos informados."]
+    if confianca:
+        linhas.append(f"- **Confiança calculada: {confianca['nivel']}.** " + "; ".join(confianca["motivos"]) + ".")
+    if completude:
+        linhas.append(f"- **Completude do relatório:** {completude['completas']} de {completude['total_secoes']} seções completas "
+                      f"({completude['indice']:.0%}), {completude['total_pendencias']} campos pendentes.")
+    estab = (tm or {}).get("estabilidade")
+    if estab:
+        linhas.append(f"- **Estabilidade:** {estab['rodadas']} rodadas independentes; {estab['estaveis']} trade-off(s) "
+                      f"apareceram em pelo menos {estab['minimo_para_estavel']} delas.")
+        fracos = (tm or {}).get("sinais_fracos") or []
+        if fracos:
+            linhas.append("- **Sinais fracos (fora do memorando):** "
+                          + "; ".join(f"{f.get('titulo', '')} ({f.get('estabilidade', '')})" for f in fracos[:8]) + ".")
     linhas.append(f"- **Evidências de nível 1 e 2 conferidas no relatório:** {len(ev['conferidas']) + len(ev['calculos'])}.")
     if ev["rebaixadas"]:
         linhas.append(f"- **Rebaixadas para nível 5 (trecho não encontrado):** "
@@ -674,6 +704,205 @@ def markdown_verificacao(ev, numeros, registro_id, modelo):
     if nao_enc:
         linhas.append("- **Números não encontrados no relatório, a conferir:** " + "; ".join(n["valor"] for n in nao_enc[:10]) + ".")
     return "\n".join(linhas)
+
+
+# --- COMPLETUDE DO RELATÓRIO ---------------------------------------------------
+
+# Campos do modelo de relatório que ficaram por preencher: "[A complementar]", "[dd/mm/aaaa]", "[0,00]" etc.
+RE_PENDENCIA = re.compile(r"\\*\[(?!\()([^\[\]\n]{1,160}?)\\*\](?!\()|\bn[aã]o informad[oa]s?\b|\ba complementar\b|\ba especificar\b", re.I)
+RE_TITULO = re.compile(r"^#{1,4}\s+(.+)$", re.M)
+
+
+def indice_completude(texto):
+    """Parte das seções do relatório sem nenhum campo pendente. Calculado por código, não pelo modelo."""
+    titulos = list(RE_TITULO.finditer(texto or ""))
+    secoes = []
+    for i, m in enumerate(titulos):
+        corpo = texto[m.end(): titulos[i + 1].start() if i + 1 < len(titulos) else len(texto)]
+        titulo = re.sub(r"[*\\]", "", m.group(1)).strip()
+        if len(corpo.strip()) < 30:
+            continue
+        secoes.append({"secao": titulo[:90], "pendencias": len(RE_PENDENCIA.findall(corpo))})
+    # Em relatórios numerados, conta só as subseções (2.1, 4.2.3...): as seções "3.", "4." são só introdução.
+    subsecoes = [s for s in secoes if re.match(r"^\d+\.\d+", s["secao"])]
+    if len(subsecoes) >= 5:
+        secoes = subsecoes
+    if not secoes:
+        return None
+    completas = sum(1 for s in secoes if s["pendencias"] == 0)
+    return {"indice": completas / len(secoes), "total_secoes": len(secoes), "completas": completas,
+            "total_pendencias": sum(s["pendencias"] for s in secoes), "secoes": secoes}
+
+
+def resumo_completude(comp):
+    if not comp:
+        return ""
+    piores = sorted([s for s in comp["secoes"] if s["pendencias"]], key=lambda s: -s["pendencias"])[:8]
+    return (f"QUALIDADE DO RELATÓRIO (calculada por código): {comp['completas']} de {comp['total_secoes']} seções "
+            f"estão completas ({comp['indice']:.0%}); há {comp['total_pendencias']} campos pendentes. "
+            "Seções com mais pendências: " + "; ".join(f"{s['secao']} ({s['pendencias']})" for s in piores)
+            + ". Trate o que depende dessas seções como lacuna, não como fato.")
+
+
+# --- CACHE DE PROMPT ------------------------------------------------------------
+
+def _usa_cache(modelo):
+    return "claude" in modelo or modelo.startswith("anthropic/")
+
+
+def mensagens_com_cache(modelo, sistema, relatorio, texto_usuario):
+    """Monta as mensagens marcando o prompt de sistema e o relatório para cache (só em modelos da Anthropic).
+    Nas rodadas seguintes e na correção, essa parte é lida do cache por uma fração do preço."""
+    bloco_relatorio = f"<relatorio>\n{relatorio}\n</relatorio>" if relatorio else ""
+    if not _usa_cache(modelo):
+        return [{"role": "system", "content": sistema},
+                {"role": "user", "content": (bloco_relatorio + "\n\n" if bloco_relatorio else "") + texto_usuario}]
+    cache = {"type": "ephemeral"}
+    partes = []
+    if bloco_relatorio:
+        partes.append({"type": "text", "text": bloco_relatorio, "cache_control": cache})
+    partes.append({"type": "text", "text": texto_usuario})
+    return [{"role": "system", "content": [{"type": "text", "text": sistema, "cache_control": cache}]},
+            {"role": "user", "content": partes}]
+
+
+# --- RODADAS MÚLTIPLAS E ESTABILIDADE ---------------------------------------------
+
+PROMPT_CONSOLIDACAO = """Você recebeu Tension Maps produzidos de forma independente, a partir dos mesmos insumos,
+em rodadas identificadas como R1, R2, R3... Consolide-os sem acrescentar nada novo.
+
+- Agrupe trade-offs que têm o mesmo mecanismo causal, mesmo escritos com palavras diferentes.
+- Para cada grupo, escreva UM trade-off consolidado e liste em "origens" os trade-offs de origem no formato
+  "R<rodada>-<id>" (ex.: "R1-T2", "R3-T1"). Use só ids que existem nas rodadas. Não invente origens.
+- Mantenha TODOS os grupos, inclusive os que aparecem em uma única rodada. O sistema decide o que é estável.
+- Nos polos, copie a "fonte" (tipo, referencia, trecho) de um dos trade-offs de origem, sem alterar o trecho.
+- Baseline, convergências e questões não resolvidas: una as rodadas e remova repetições.
+- confidence_assessment: descreva o quanto as rodadas concordaram.
+Registre o resultado chamando a ferramenta `registrar_consolidacao`. Se não puder usar a ferramenta, devolva somente o JSON."""
+
+SCHEMA_CONSOLIDACAO = deepcopy(SCHEMA_TENSION_MAP)
+SCHEMA_CONSOLIDACAO["properties"]["trade_offs"].pop("maxItems", None)
+SCHEMA_CONSOLIDACAO["properties"]["trade_offs"]["items"]["properties"]["origens"] = {"type": "array", "items": {"type": "string"}}
+SCHEMA_CONSOLIDACAO["properties"]["trade_offs"]["items"]["required"].append("origens")
+FERRAMENTA_CONSOLIDACAO = {"type": "function", "function": {
+    "name": "registrar_consolidacao",
+    "description": "Registra o Tension Map consolidado a partir de várias rodadas.",
+    "parameters": SCHEMA_CONSOLIDACAO}}
+
+
+def validar(obj, schema):
+    if not isinstance(obj, dict):
+        return ["o resultado não é um objeto JSON"]
+    if jsonschema is not None:
+        erros = sorted(jsonschema.Draft202012Validator(schema).iter_errors(obj), key=lambda e: str(list(e.path)))
+        return [f"{'/'.join(map(str, e.path)) or 'raiz'}: {e.message}" for e in erros][:8]
+    erros = [f"falta o campo {k}" for k in schema["required"] if k not in obj]
+    if not isinstance(obj.get("trade_offs"), list) or not obj.get("trade_offs"):
+        erros.append("trade_offs vazio ou ausente")
+    return erros
+
+
+def chamar_com_validacao(modelo, mensagens, ferramenta, schema, etapa, max_tokens=12000):
+    """Chama, valida e, se precisar, pede uma correção listando o que faltou. Devolve (obj, texto, motivo, problemas)."""
+    texto, args, motivo = chamar_modelo(modelo, mensagens, max_tokens, ferramenta=ferramenta, etapa=etapa)
+    obj = args or extrair_json(texto)
+    problemas = validar(obj, schema)
+    if problemas and obj is not None:
+        correcao = ("O resultado anterior não segue o formato. Problemas encontrados:\n- " + "\n- ".join(problemas)
+                    + "\n\nDevolva o resultado COMPLETO e corrigido, no mesmo formato.")
+        texto_r, args_r, motivo = chamar_modelo(
+            modelo, mensagens + [{"role": "assistant", "content": json.dumps(obj, ensure_ascii=False)},
+                                 {"role": "user", "content": correcao}],
+            max_tokens, ferramenta=ferramenta, etapa=etapa + " (correção)")
+        corrigido = args_r or extrair_json(texto_r)
+        if corrigido is not None and len(validar(corrigido, schema)) <= len(problemas):
+            obj, texto = corrigido, texto_r
+        problemas = validar(obj, schema)
+    return obj, texto, motivo, problemas
+
+
+def rodar_rodadas(modelo, mensagens, n):
+    """Roda a etapa 1 n vezes. A primeira rodada grava o cache; as demais rodam em paralelo e leem dele."""
+    def uma(i, uso):
+        texto, args, motivo = chamar_modelo(modelo, mensagens, 12000, ferramenta=FERRAMENTA_TENSION_MAP,
+                                            etapa=f"tension map · rodada {i}", uso_lista=uso)
+        return args or extrair_json(texto), texto, motivo
+
+    usos = [[] for _ in range(n)]
+    resultados = [uma(1, usos[0])]
+    if n > 1:
+        with ThreadPoolExecutor(max_workers=n - 1) as ex:
+            resultados += list(ex.map(lambda i: uma(i, usos[i - 1]), range(2, n + 1)))
+    st.session_state.setdefault("uso_rodada", []).extend(u for lista in usos for u in lista)
+    return resultados
+
+
+def aplicar_estabilidade(consolidado, rodadas_validas, n):
+    """Calcula por código em quantas rodadas cada trade-off apareceu e separa os estáveis dos sinais fracos."""
+    ids_validos = {f"R{i}-{t.get('id')}" for i, tm in rodadas_validas for t in (tm.get("trade_offs") or []) if isinstance(t, dict)}
+    minimo = max(2, math.ceil(n / 2))
+    estaveis, fracos = [], []
+    for t in consolidado.get("trade_offs") or []:
+        if not isinstance(t, dict):
+            continue
+        origens = [o for o in (t.get("origens") or []) if o in ids_validos]
+        rodadas = sorted({o.split("-")[0] for o in origens}, key=lambda r: int(r[1:]))
+        t["origens"], t["rodadas"] = origens, rodadas
+        t["estabilidade"] = f"{len(rodadas)}/{n}"
+        (estaveis if len(rodadas) >= minimo else fracos).append(t)
+    if not any(t.get("rodadas") for t in estaveis + fracos):
+        # O consolidador não devolveu origens válidas: não dá para medir a estabilidade, mas não se perde a análise.
+        todos = [t for t in consolidado.get("trade_offs") or [] if isinstance(t, dict)]
+        for t in todos:
+            t["estabilidade"] = "não medida"
+        consolidado["trade_offs"], consolidado["sinais_fracos"] = todos[:4], []
+        consolidado["estabilidade"] = None
+        return consolidado
+
+    def ordem(t):
+        try:
+            nivel = int(t.get("nivel_evidencia", 5))
+        except (TypeError, ValueError):
+            nivel = 5
+        return (-len(t["rodadas"]), nivel)
+
+    estaveis.sort(key=ordem)
+    fracos.sort(key=ordem)
+    fracos = estaveis[4:] + fracos
+    consolidado["trade_offs"] = estaveis[:4]
+    consolidado["sinais_fracos"] = [{"id": t.get("id"), "titulo": t.get("titulo"), "estabilidade": t["estabilidade"],
+                                     "descricao": t.get("descricao", "")} for t in fracos]
+    consolidado["estabilidade"] = {"rodadas": n, "minimo_para_estavel": minimo,
+                                   "estaveis": len(estaveis), "sinais_fracos": len(fracos)}
+    return consolidado
+
+
+def confianca_calculada(completude, estab, ev):
+    """Confiança da análise calculada por regras explícitas, em vez de declarada pelo modelo."""
+    ordem = ["baixa", "média", "alta"]
+    nivel, motivos = 2, []
+    if completude:
+        c = completude["indice"]
+        motivos.append(f"{c:.0%} das seções do relatório estão completas")
+        nivel = min(nivel, 0 if c < 0.5 else 1 if c < 0.8 else 2)
+    else:
+        motivos.append("completude do relatório não medida")
+        nivel = min(nivel, 1)
+    total_ev = len(ev["conferidas"]) + len(ev["calculos"]) + len(ev["rebaixadas"])
+    if total_ev:
+        r = len(ev["rebaixadas"]) / total_ev
+        motivos.append(f"{len(ev['rebaixadas'])} de {total_ev} evidências de nível 1-2 não foram encontradas no relatório"
+                       if ev["rebaixadas"] else f"as {total_ev} evidências de nível 1-2 foram encontradas no relatório")
+        nivel = min(nivel, 0 if r > 0.4 else 1 if r > 0.15 else 2)
+    if not estab or estab.get("rodadas", 1) <= 1:
+        motivos.append("a estabilidade entre rodadas não foi medida")
+        nivel = min(nivel, 1)
+    else:
+        motivos.append(f"{estab['estaveis']} trade-off(s) se repetiram em pelo menos {estab['minimo_para_estavel']} "
+                       f"de {estab['rodadas']} rodadas")
+        if estab["estaveis"] == 0:
+            nivel = 0
+    return {"nivel": ordem[nivel], "motivos": motivos}
 
 
 # --- WORD -----------------------------------------------------------------
@@ -996,10 +1225,15 @@ st.title("🏛️ Painel de Deliberação e Análise de Transição")
 
 with st.sidebar:
     st.header("0. Configuração de IA")
-    modelo = st.selectbox("Modelo facilitador", MODELOS)
-    modelo_manual = st.text_input("Outro modelo (opcional)", placeholder="ex.: anthropic/claude-opus-5-5",
-                                  help="Se preenchido, substitui o modelo da lista. Use o nome no formato do LiteLLM.")
+    modelo_extracao = st.selectbox("Modelo da extração", MODELOS, index=0,
+                                   help="Ler o relatório e preencher os campos é tarefa mecânica: um modelo mais barato basta.")
+    modelo = st.selectbox("Modelo do debate e do memorando", MODELOS, index=1)
+    modelo_manual = st.text_input("Outro modelo para o debate (opcional)", placeholder="ex.: anthropic/claude-opus-5-5",
+                                  help="Se preenchido, substitui o modelo do debate. Use o nome no formato do LiteLLM.")
     modelo = modelo_manual.strip() or modelo
+    n_rodadas = st.slider("Rodadas independentes do debate", 1, 5, 3,
+                          help="Cada rodada refaz as Fases 1 a 4 do zero. Só entram no memorando os trade-offs que se "
+                               "repetem na maioria das rodadas. Mais rodadas = mais confiança e mais custo.")
 
     st.markdown("---")
     st.header("1. Upload do relatório")
@@ -1013,7 +1247,7 @@ with st.sidebar:
         assinatura = hashlib.md5(arquivo.getvalue()).hexdigest()
         if extrair_de_novo or st.session_state.get("arquivo_extraido") != assinatura:
             with st.spinner("Lendo o relatório e preenchendo os campos..."):
-                st.session_state["status_extracao"] = processar_extracao(modelo, arquivo, manter)
+                st.session_state["status_extracao"] = processar_extracao(modelo_extracao, arquivo, manter)
             st.session_state["arquivo_extraido"] = assinatura
             st.session_state["arquivo_nome"] = arquivo.name
 
@@ -1058,32 +1292,47 @@ if botao_gerar:
     else:
         cenario = montar_cenario()
         relatorio = st.session_state.get("texto_relatorio", "")
-        bloco_relatorio = f"\n\n<relatorio>\n{relatorio}\n</relatorio>" if relatorio else ""
+        completude = st.session_state.get("completude") or (indice_completude(relatorio) if relatorio else None)
+        texto_usuario = cenario + ("\n\n" + resumo_completude(completude) if completude else "") \
+            + "\n\nExecute o protocolo e registre o Tension Map."
+        mensagens1 = mensagens_com_cache(modelo, PROMPT_ETAPA_1, relatorio, texto_usuario)
         st.session_state["uso_rodada"] = []
-        tension_map, erro, texto1 = None, None, ""
+        tension_map, erro, texto1, problemas, rodadas_validas = None, None, "", [], []
         try:
-            with st.spinner(f"Etapa 1/2: o conselho de agentes ({modelo}) está debatendo..."):
-                mensagens1 = [{"role": "system", "content": PROMPT_ETAPA_1},
-                              {"role": "user", "content": cenario + bloco_relatorio
-                               + "\n\nExecute o protocolo e registre o Tension Map."}]
-                texto1, args1, motivo1 = chamar_modelo(modelo, mensagens1, 12000, ferramenta=FERRAMENTA_TENSION_MAP, etapa="tension map")
-                tension_map = args1 or extrair_json(texto1)
-                problemas = validar_tension_map(tension_map)
-                if problemas and tension_map is not None:
-                    # uma nova tentativa, dizendo exatamente o que faltou
-                    correcao = ("O Tension Map anterior não segue o formato. Problemas encontrados:\n- " + "\n- ".join(problemas)
-                                + "\n\nDevolva o Tension Map COMPLETO e corrigido, no mesmo formato.")
-                    texto_r, args_r, motivo1 = chamar_modelo(
-                        modelo, mensagens1 + [{"role": "assistant", "content": json.dumps(tension_map, ensure_ascii=False)},
-                                              {"role": "user", "content": correcao}],
-                        12000, ferramenta=FERRAMENTA_TENSION_MAP, etapa="tension map (correção)")
-                    corrigido = args_r or extrair_json(texto_r)
-                    if corrigido is not None and len(validar_tension_map(corrigido)) <= len(problemas):
-                        tension_map, texto1 = corrigido, texto_r
-                    problemas = validar_tension_map(tension_map)
-            if tension_map is None:
-                erro = ("O modelo não devolveu um Tension Map válido."
-                        + (" A resposta foi cortada pelo limite de tokens; reduza os fatos ou as personas." if motivo1 == "length" else ""))
+            if n_rodadas == 1:
+                with st.spinner(f"Etapa 1/2: o conselho de agentes ({modelo}) está debatendo..."):
+                    tension_map, texto1, motivo1, problemas = chamar_com_validacao(
+                        modelo, mensagens1, FERRAMENTA_TENSION_MAP, SCHEMA_TENSION_MAP, "tension map")
+                if tension_map is None:
+                    erro = ("O modelo não devolveu um Tension Map válido."
+                            + (" A resposta foi cortada pelo limite de tokens; reduza os fatos ou as personas." if motivo1 == "length" else ""))
+            else:
+                with st.spinner(f"Etapa 1/3: {n_rodadas} rodadas independentes do conselho de agentes ({modelo})..."):
+                    resultados = rodar_rodadas(modelo, mensagens1, n_rodadas)
+                rodadas_validas = [(i, tm) for i, (tm, _, _) in enumerate(resultados, 1)
+                                   if isinstance(tm, dict) and isinstance(tm.get("trade_offs"), list) and tm["trade_offs"]]
+                texto1 = "\n\n".join(f"--- rodada {i} ---\n{t}" for i, (_, t, _) in enumerate(resultados, 1))
+                if len(rodadas_validas) < 2:
+                    if rodadas_validas:
+                        tension_map = rodadas_validas[0][1]
+                        problemas = validar(tension_map, SCHEMA_TENSION_MAP) + ["só uma rodada válida: estabilidade não medida"]
+                    else:
+                        erro = "Nenhuma rodada devolveu um Tension Map válido."
+                else:
+                    with st.spinner("Etapa 2/3: consolidando as rodadas e medindo a estabilidade..."):
+                        rodadas_json = json.dumps({f"R{i}": tm for i, tm in rodadas_validas}, ensure_ascii=False)
+                        consolidado, texto_c, motivo_c, problemas = chamar_com_validacao(
+                            modelo, [{"role": "system", "content": PROMPT_CONSOLIDACAO},
+                                     {"role": "user", "content": "RODADAS:\n" + rodadas_json}],
+                            FERRAMENTA_CONSOLIDACAO, SCHEMA_CONSOLIDACAO, "consolidação", max_tokens=16000)
+                    if consolidado is None:
+                        tension_map = rodadas_validas[0][1]
+                        problemas = ["a consolidação falhou; usando a rodada 1 sem medir estabilidade"]
+                    else:
+                        tension_map = aplicar_estabilidade(consolidado, rodadas_validas, n_rodadas)
+                        problemas = validar(tension_map, SCHEMA_TENSION_MAP)
+                        if tension_map.get("estabilidade") is None:
+                            problemas.append("a consolidação não indicou de quais rodadas veio cada trade-off; estabilidade não medida")
         except Exception as e:
             erro = f"❌ Erro na API: {e}"
 
@@ -1096,7 +1345,8 @@ if botao_gerar:
             try:
                 base_verificacao = "\n".join([relatorio, st.session_state["fatos"], st.session_state["problema"], st.session_state["lacunas"]])
                 tension_map, evidencias = verificar_evidencias(tension_map, base_verificacao)
-                with st.spinner("Etapa 2/2: redigindo o memorando executivo e a matriz de risco..."):
+                etapa_memo = "Etapa 2/2" if n_rodadas == 1 else "Etapa 3/3"
+                with st.spinner(f"{etapa_memo}: redigindo o memorando executivo e a matriz de risco..."):
                     mensagens2 = [{"role": "system", "content": PROMPT_ETAPA_2},
                                   {"role": "user", "content": cenario + "\n\nTENSION MAP (Fase 4, já verificado):\n"
                                    + json.dumps(tension_map, ensure_ascii=False, indent=2)}]
@@ -1114,9 +1364,12 @@ if botao_gerar:
                         memorando = memorando.rstrip() + ("\n" if continuacao.lstrip().startswith(("|", "#", "-")) else " ") + continuacao.lstrip()
                 memorando = memorando.strip()
                 numeros = verificar_numeros(memorando, base_verificacao)
+                confianca = confianca_calculada(completude, tension_map.get("estabilidade"), evidencias)
                 uso = st.session_state.get("uso_rodada", [])
+                uso_extracao = st.session_state.get("uso_extracao", [])
                 custo, custo_parcial = custo_estimado(uso)
-                versao_prompt = hashlib.md5((PROMPT_EXTRATOR + PROMPT_ETAPA_1 + PROMPT_ETAPA_2).encode()).hexdigest()[:8]
+                custo_extracao, _ = custo_estimado(uso_extracao)
+                versao_prompt = hashlib.md5((PROMPT_EXTRATOR + PROMPT_ETAPA_1 + PROMPT_CONSOLIDACAO + PROMPT_ETAPA_2).encode()).hexdigest()[:8]
                 assinatura = hashlib.md5((cenario + relatorio).encode()).hexdigest()
                 registro_id = f"{versao_prompt}-{assinatura[:8]}"
                 resultado = {
@@ -1126,22 +1379,30 @@ if botao_gerar:
                     "problemas_formato": problemas,
                     "evidencias": evidencias,
                     "numeros": numeros,
+                    "completude": completude,
+                    "confianca": confianca,
+                    "n_rodadas": n_rodadas,
                     "uso": uso,
                     "custo": custo,
+                    "custo_extracao": custo_extracao,
                     "custo_parcial": custo_parcial,
                     "modelo": modelo,
+                    "modelo_extracao": modelo_extracao,
                     "data": _data_extenso(date.today()),
                     "assinatura_insumos": hashlib.md5(cenario.encode()).hexdigest(),
                     "registro_id": registro_id,
                 }
                 resultado["registro_caminho"] = salvar_registro({
                     "id": registro_id, "gerado_em": datetime.now().isoformat(timespec="seconds"),
-                    "versao_app": APP_VERSAO, "versao_prompt": versao_prompt, "modelo": modelo,
+                    "versao_app": APP_VERSAO, "versao_prompt": versao_prompt,
+                    "modelo_debate": modelo, "modelo_extracao": modelo_extracao, "rodadas": n_rodadas,
                     "arquivo": st.session_state.get("arquivo_nome", ""), "assinatura_relatorio": hashlib.md5(relatorio.encode()).hexdigest(),
                     "insumos": {c: st.session_state[c] for c in CAMPOS},
+                    "completude": completude, "confianca_calculada": confianca,
+                    "tension_maps_por_rodada": {f"R{i}": tm for i, tm in rodadas_validas},
                     "tension_map": tension_map, "memorando": memorando,
                     "verificacao": {"evidencias": evidencias, "numeros": numeros, "problemas_formato": problemas},
-                    "uso_tokens": uso, "custo_estimado_usd": round(custo, 4),
+                    "uso_tokens": uso_extracao + uso, "custo_estimado_usd": round(custo + custo_extracao, 4),
                 })
                 st.session_state["resultado"] = resultado
             except Exception as e:
@@ -1169,13 +1430,20 @@ else:
     nao_encontrados = [n for n in numeros if n["situacao"] == "não encontrado"]
     uso = resultado.get("uso") or []
     tokens_in, tokens_out = sum(u["entrada"] for u in uso), sum(u["saida"] for u in uso)
-    m1, m2, m3, m4 = st.columns(4)
+    confianca = resultado.get("confianca") or {"nivel": "—", "motivos": []}
+    estab = tm.get("estabilidade") or {}
+    m0, m1, m2, m3, m4 = st.columns(5)
+    m0.metric("Confiança calculada", str(confianca["nivel"]).capitalize(), help="; ".join(confianca["motivos"]))
     m1.metric("Evidências conferidas", len(ev["conferidas"]) + len(ev["calculos"]))
     m2.metric("Rebaixadas para nível 5", len(ev["rebaixadas"]))
     m3.metric("Números a conferir", len(nao_encontrados), help="Valores do memorando que não aparecem no relatório nem nos fatos.")
-    m4.metric("Custo estimado", f"US$ {resultado.get('custo', 0):.2f}".replace(".", ",") + ("*" if resultado.get("custo_parcial") else ""),
-              help=f"{tokens_in:,} tokens de entrada e {tokens_out:,} de saída nesta rodada (sem a extração).".replace(",", ".")
+    custo_total = resultado.get("custo", 0) + resultado.get("custo_extracao", 0)
+    m4.metric("Custo estimado", f"US$ {custo_total:.2f}".replace(".", ",") + ("*" if resultado.get("custo_parcial") else ""),
+              help=(f"Debate e memorando: US$ {resultado.get('custo', 0):.3f}".replace(".", ",")
+                    + f" | extração: US$ {resultado.get('custo_extracao', 0):.3f}".replace(".", ",")
+                    + f" | {tokens_in:,} tokens de entrada e {tokens_out:,} de saída no debate e no memorando".replace(",", "."))
               + (" *Modelo sem preço cadastrado; valor parcial." if resultado.get("custo_parcial") else ""))
+    st.caption("Confiança calculada por código: " + "; ".join(confianca["motivos"]) + ".")
 
     meta = {
         "orgao": st.session_state["orgao"].strip(),
@@ -1185,7 +1453,8 @@ else:
         "data": resultado["data"],
         "rodape_extra": f"apoio de IA, reg. {resultado.get('registro_id', '')}",
     }
-    memo_docx = memo + "\n\n" + markdown_verificacao(ev, numeros, resultado.get("registro_id", ""), resultado["modelo"])
+    memo_docx = memo + "\n\n" + markdown_verificacao(ev, numeros, resultado.get("registro_id", ""), resultado["modelo"],
+                                                         confianca, resultado.get("completude"), tm)
     col1, col2, col3 = st.columns(3)
     with col1:
         st.download_button("⬇️ Memorando (.docx)", data=gerar_docx(memo_docx, meta), file_name="memorando_transicao.docx",
@@ -1221,7 +1490,8 @@ else:
             with st.container(border=True):
                 st.markdown(f"**{t.get('id', '')} · {t.get('titulo', '')}**")
                 tipos = ", ".join(t.get("tipos_divergencia", []) or [])
-                st.caption(f"Divergência: {tipos or '—'} · Evidência nível {t.get('nivel_evidencia', '?')}")
+                st.caption(f"Divergência: {tipos or '—'} · Evidência nível {t.get('nivel_evidencia', '?')}"
+                           + (f" · apareceu em {t['estabilidade']} rodadas ({', '.join(t.get('rodadas', []))})" if t.get("estabilidade") else ""))
                 if t.get("descricao"):
                     st.write(t["descricao"])
                 if t.get("mecanismo_causal"):
@@ -1243,6 +1513,13 @@ else:
                     st.markdown(f"**Ganha:** {t.get('quem_ganha', '—')}  \n**Perde:** {t.get('quem_perde', '—')}")
                 if t.get("o_que_mudaria"):
                     st.caption(f"O que mudaria o equilíbrio: {t['o_que_mudaria']}")
+
+        fracos = tm.get("sinais_fracos") or []
+        if fracos:
+            st.subheader("Sinais fracos")
+            st.caption("Trade-offs que apareceram em poucas rodadas. Ficam fora do memorando, mas podem valer uma checagem.")
+            for f in fracos:
+                st.markdown(f"- **{f.get('titulo', '')}** ({f.get('estabilidade', '')} rodadas) — {f.get('descricao', '')}")
 
         conv = tm.get("convergencias") or []
         if conv:
@@ -1269,6 +1546,23 @@ else:
     with aba_verif:
         st.caption("Conferência feita por código contra o relatório e os campos da barra lateral. "
                    "Ela não diz se um argumento está certo, só se o que foi citado existe no texto.")
+        comp = resultado.get("completude")
+        st.subheader("Completude do relatório")
+        if comp:
+            st.markdown(f"**{comp['completas']} de {comp['total_secoes']} seções completas ({comp['indice']:.0%})**, "
+                        f"com {comp['total_pendencias']} campos pendentes (\"a complementar\", datas e valores em branco).")
+            pendentes = sorted([x for x in comp["secoes"] if x["pendencias"]], key=lambda x: -x["pendencias"])
+            if pendentes:
+                with st.expander(f"Ver as {len(pendentes)} seções com pendências"):
+                    st.table([{"Seção": x["secao"], "Campos pendentes": x["pendencias"]} for x in pendentes])
+        else:
+            st.markdown("Não medida: o relatório não foi carregado ou não tem seções numeradas.")
+        st.subheader("Estabilidade entre rodadas")
+        if estab:
+            st.markdown(f"{estab['rodadas']} rodadas independentes. Trade-off estável = aparece em pelo menos "
+                        f"{estab['minimo_para_estavel']} rodadas. Estáveis: **{estab['estaveis']}**; sinais fracos: **{estab['sinais_fracos']}**.")
+        else:
+            st.markdown("Rodada única: a estabilidade não foi medida. Use 3 rodadas para medir.")
         st.subheader("Evidências de nível 1 e 2")
         if ev["rebaixadas"]:
             st.markdown("**Rebaixadas para nível 5** (o trecho citado não está no relatório):")
