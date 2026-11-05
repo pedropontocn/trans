@@ -385,6 +385,8 @@ def app(llm, monkeypatch, tmp_path):
             return DossieFalso(llm.dossie_arquivo) if llm.dossie_arquivo else None
         if "anterior" in rotulo.lower():
             return RegistroFalso(llm.registro_anterior) if llm.registro_anterior else None
+        if "relatórios resumidos" in rotulo.lower():
+            return getattr(llm, "resumos_enviados", None)
         return None if llm.sem_relatorio else ArquivoFalso(llm.texto_relatorio)
 
     monkeypatch.setattr(streamlit, "file_uploader", uploader)

@@ -476,3 +476,71 @@ def test_segundo_orgao_reaproveita_a_pesquisa_do_estado(app, llm):
     assert any(i["camada"] == "estado" for i in segundo["itens"])
     assert len(segundo["uso"]) < len(primeiro["uso"])          # o custo do Estado não é cobrado de novo
     assert any("contexto do Estado veio de uma pesquisa anterior" in c.value for c in at.caption)
+
+
+def test_nomes_dos_orgaos_pelos_arquivos(funcoes):
+    n = funcoes.nome_do_orgao_pelo_arquivo
+    assert n("Resumo - Secretaria de Fazenda - SEFAZ.docx") == "Secretaria de Fazenda - SEFAZ"
+    assert n("Relatório resumido da SETUR.pdf") == "SETUR"
+    assert n("SEDEC_resumo_final.docx") == "SEDEC resumo final"
+    itens = funcoes.resumos_do_envio([("RESUMOS-20261105T140000Z-001.zip", _zip_bytes({
+        "RESUMOS/Resumo - SEFAZ.docx": "a", "RESUMOS/~$Resumo - SEFAZ.docx": "lixo", "RESUMOS/SETUR.pdf": "b",
+        "RESUMOS/planilha.xlsx": "c", "__MACOSX/RESUMOS/._SETUR.pdf": "d"})), ("SEDEC.docx", b"e")])
+    assert [(i["orgao"], i["arquivo"]) for i in itens] == [("SEDEC", "SEDEC.docx"), ("SEFAZ", "Resumo - SEFAZ.docx"),
+                                                          ("SETUR", "SETUR.pdf")]
+
+
+def test_varios_orgaos_em_segundo_plano(app, llm):
+    llm.sem_relatorio = True
+    llm.resumos_enviados = [_Enviado("RESUMOS-20261105T140000Z-001.zip", _zip_bytes({
+        "RESUMOS/Resumo - Secretaria de Fazenda - SEFAZ.docx": "resumo sefaz",
+        "RESUMOS/Resumo - Secretaria de Turismo - SETUR.pdf": "resumo setur"}))]
+    at = app.run()
+    assert not at.exception, at.exception
+    tabela = at.session_state["varios_itens"]
+    assert [i["orgao"] for i in tabela] == ["Secretaria de Fazenda - SEFAZ", "Secretaria de Turismo - SETUR"]
+    at.checkbox(key="varios_economico").uncheck().run()
+    at.slider[0].set_value(1).run()
+    next(b for b in at.button if "Analisar 2 órgão" in b.label).click().run()
+    assert not at.exception, at.exception
+    # espera o trabalho em segundo plano terminar
+    import threading
+    fio = next(t for t in threading.enumerate() if t.name == "analise-varios-orgaos")
+    fio.join(timeout=120)
+    at.run()
+    assert not at.exception, at.exception
+    assert any("Análise concluída" in s.value and "2 de 2" in s.value for s in at.success)
+    assert any("Baixar os resultados" in b.label for b in at.get("download_button"))
+
+
+def test_debate_sem_personas_suficientes_mostra_o_motivo(app, llm, monkeypatch):
+    class ErroDeAutenticacao(Exception):
+        pass
+
+    original = llm.__class__.__call__
+
+    def chamada(self, model, messages, max_tokens, **kw):
+        if "Você participa de uma deliberação multiagente" in str(messages[1:2]):
+            raise ErroDeAutenticacao("invalid x-api-key")
+        return original(self, model, messages, max_tokens, **kw)
+
+    monkeypatch.setattr(llm.__class__, "__call__", chamada)
+    at = _modo_independente(_preparar(app.run()))
+    next(b for b in at.button if "deliber" in b.label.lower()).click().run()
+    erros = " ".join(e.value for e in at.error)
+    assert "0 de 4 personas responderam" in erros and "ErroDeAutenticacao: invalid x-api-key" in erros
+
+
+def test_limite_por_minuto_tenta_de_novo(funcoes, monkeypatch):
+    monkeypatch.setattr(funcoes.time, "sleep", lambda s: None) if hasattr(funcoes, "time") else None
+    tentativas = []
+
+    def chamada():
+        tentativas.append(1)
+        if len(tentativas) < 3:
+            raise RuntimeError("litellm.RateLimitError: AnthropicException - 429 rate_limit_error")
+        return "ok"
+
+    assert funcoes._com_novas_tentativas(chamada) == "ok" and len(tentativas) == 3
+    with __import__("pytest").raises(ValueError):
+        funcoes._com_novas_tentativas(lambda: (_ for _ in ()).throw(ValueError("invalid x-api-key")))
