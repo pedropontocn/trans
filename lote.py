@@ -432,6 +432,9 @@ def processar_orgao(app, drive, orgao, cfg, saida):
         anexo = resultado.get("anexo_debate") or ""
         (pasta / "memorando.docx").write_bytes(app["gerar_docx"](memo + "\n\n" + anexo + "\n\n" + verificacao, meta))
         (pasta / "memorando.md").write_text(memo, encoding="utf-8")
+        (pasta / "dossie.docx").write_bytes(app["dossie_docx"](
+            dossie, resultado.get("confronto"), {"orgao": cfg["orgao_emissor"], "unidade": cfg["unidade"],
+                                                 "data": resultado["data"]}))
         (pasta / "tension_map.json").write_text(json.dumps(tm, ensure_ascii=False, indent=2), encoding="utf-8")
         (pasta / "registro.json").write_text(resultado["registro_json"], encoding="utf-8")
         linha.update(situacao="concluído", trade_offs=len(tm.get("trade_offs") or []),

@@ -57,7 +57,7 @@ LIMITE_RELATORIO = 400_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas", "sem_voz"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "2.9"
+APP_VERSAO = "3.0"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -2509,8 +2509,41 @@ def _campo(par, instrucao, tamanho, cor):
     _run_com(fim)
 
 
+LINK = RGBColor(0x2E, 0x5F, 0xA8)
+
+
+def _link(par, texto, url, tamanho, cor=LINK):
+    """Hiperlink de verdade no Word (clicável), azul e sublinhado."""
+    rid = par.part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+                             is_external=True)
+    hiper = OxmlElement("w:hyperlink")
+    hiper.set(qn("r:id"), rid)
+    run = OxmlElement("w:r")
+    props = OxmlElement("w:rPr")
+    for nome, valor in (("w:color", str(cor)), ("w:u", "single"), ("w:sz", str(int(tamanho.pt * 2)))):
+        e = OxmlElement(nome)
+        e.set(qn("w:val"), valor)
+        props.append(e)
+    run.append(props)
+    t = OxmlElement("w:t")
+    t.text = texto
+    t.set(qn("xml:space"), "preserve")
+    run.append(t)
+    hiper.append(run)
+    par._p.append(hiper)
+
+
 def _texto_inline(par, texto, tamanho=Pt(10.5), cor=TEXTO, negrito=False):
     texto = re.sub(r"`([^`]+)`", r"\1", texto)
+    partes = re.split(r"(\[[^\]]+\]\(https?://[^)\s]+\))", texto)
+    if len(partes) > 1:                         # tem link: cada pedaço vai na ordem, o link como hiperlink
+        for pedaco in partes:
+            m = re.fullmatch(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", pedaco)
+            if m:
+                _link(par, m.group(1), m.group(2), tamanho)
+            elif pedaco:
+                _texto_inline(par, pedaco, tamanho, cor, negrito)
+        return
     texto = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", texto)
     for pedaco in re.split(r"(\*\*[^*]+\*\*)", texto):
         if not pedaco:
@@ -2672,7 +2705,7 @@ def gerar_docx(memorando_md, meta):
     p = doc.add_paragraph()
     p.paragraph_format.space_before = Pt(10)
     p.paragraph_format.space_after = Pt(2)
-    run = p.add_run("MEMORANDO EXECUTIVO")
+    run = p.add_run((meta.get("tipo") or "Memorando executivo").upper())
     run.bold, run.font.size, run.font.color.rgb = True, Pt(8.5), ACENTO
     blocos = _ler_markdown(memorando_md)
     titulo_memo = ""
@@ -2718,7 +2751,8 @@ def gerar_docx(memorando_md, meta):
     # Rodapé com numeração de páginas
     rodape = secao.footer.paragraphs[0]
     rodape.paragraph_format.tab_stops.add_tab_stop(Cm(17), WD_TAB_ALIGNMENT.RIGHT)
-    origem = " · ".join(x for x in [meta.get("orgao"), "Memorando executivo", meta.get("data"), meta.get("rodape_extra")] if x)
+    origem = " · ".join(x for x in [meta.get("orgao"), meta.get("tipo") or "Memorando executivo", meta.get("data"),
+                                    meta.get("rodape_extra")] if x)
     r = rodape.add_run(origem + "\tPágina ")
     r.font.size, r.font.color.rgb = Pt(8), CINZA
     _campo(rodape, "PAGE", Pt(8), CINZA)
@@ -3029,6 +3063,84 @@ def tabela_para_itens(linhas, anteriores):
 
 def slug_arquivo(texto):
     return re.sub(r"[^a-z0-9]+", "_", _norm(texto)).strip("_")[:40] or "orgao"
+
+
+SELO_CHECAGEM = {"conferido": "✔ conferido na fonte", "trecho_nao_encontrado": "⚠ trecho não encontrado na página",
+                 "inacessivel": "⚠ página inacessível", "sem_trecho": "⚠ sem trecho para conferir",
+                 "nao_conferido": "⚠ não conferido"}
+
+
+def _titulo_bloco(bloco):
+    if bloco in BLOCOS:
+        return BLOCOS[bloco].split(":")[0]
+    return "Outros"
+
+
+def markdown_dossie(dossie, confronto=None):
+    """O dossiê do órgão como documento para leitura: fatos por tema, com a fonte clicável e o selo da conferência.
+    Montado por código a partir dos itens (sem chamada a modelo)."""
+    itens = itens_incluidos(dossie)
+    res = resumo_dossie(dossie)
+    orgao = (dossie or {}).get("orgao") or "órgão"
+    linhas = [f"# Dossiê – {orgao}",
+              "## Sobre este dossiê",
+              f"Fatos sobre o órgão e o contexto do Estado reunidos com apoio de IA em fontes públicas, com data de corte em "
+              f"{(dossie or {}).get('data_corte') or 'data não informada'}. São {res['itens']} itens, {res['conferidos']} "
+              f"conferidos na fonte e {res['oficiais']} de fonte oficial. \"Conferido na fonte\" quer dizer que o sistema "
+              "abriu o link e encontrou nele o trecho citado. Item sem esse selo deve ser checado antes de ser usado. "
+              "O dossiê não inclui o que o órgão informou: isso aparece só na comparação, ao final.",
+              "## Visão geral",
+              "| Tema | Itens | Conferidos na fonte | De fonte oficial |", "|---|---|---|---|"]
+    ordem = [("orgao", b) for b in BLOCOS_ORGAO] + [("orgao", "outro_orgao")] + \
+            [("estado", b) for b in BLOCOS_ESTADO] + [("estado", "outro_estado")]
+    for camada, bloco in ordem:
+        grupo = [i for i in itens if i["camada"] == camada and i["bloco"] == bloco]
+        if grupo:
+            conf = sum(1 for i in grupo if i["checagem"] == "conferido" or i.get("conferido_pela_equipe"))
+            ofi = sum(1 for i in grupo if i["tipo_fonte"] in TIPOS_OFICIAIS)
+            linhas.append(f"| {'Estado · ' if camada == 'estado' else ''}{_titulo_bloco(bloco)} | {len(grupo)} | {conf} | {ofi} |")
+    for camada, titulo in (("orgao", f"O órgão"), ("estado", "Contexto do Estado")):
+        blocos_camada = [b for c, b in ordem if c == camada]
+        if not any(i["camada"] == camada for i in itens):
+            continue
+        linhas.append(f"## {titulo}")
+        for bloco in blocos_camada:
+            grupo = [i for i in itens if i["camada"] == camada and i["bloco"] == bloco]
+            if not grupo:
+                continue
+            linhas.append(f"### {_titulo_bloco(bloco)}")
+            for i in grupo:
+                selo = "✔ conferido pela equipe" if i.get("conferido_pela_equipe") else SELO_CHECAGEM.get(i["checagem"], "")
+                fonte = (i["fonte"] or "fonte") + (f", {i['data_fonte']}" if i["data_fonte"] else "")
+                fonte = f"[{fonte}]({i['url']})" if i["url"] else fonte
+                linhas.append(f"- {i['afirmacao']} — {fonte} · {TIPOS_FONTE[i['tipo_fonte']].lower()} · {selo}")
+    divs = (confronto or {}).get("divergencias") or []
+    if divs:
+        linhas.append("## O que o órgão informou e o que as fontes mostram")
+        por_id = {i["id"]: i for i in itens}
+        for d in divs:
+            item = por_id.get(d["item"], {})
+            fonte = f" ([fonte]({item['url']}))" if item.get("url") else ""
+            if d["situacao"] == "contradiz":
+                linhas.append(f"- **O órgão informa:** {d['o_orgao_declara'] or d['trecho_relatorio']} "
+                              f"**As fontes mostram:** {d['as_fontes_mostram']}{fonte}")
+            else:
+                linhas.append(f"- **Não mencionado pelo órgão:** {d['as_fontes_mostram']}{fonte}")
+    nao = [n for n in (dossie or {}).get("nao_encontrado") or [] if n.get("procurado")]
+    if nao:
+        linhas.append("## Procurado e não encontrado em fonte confiável")
+        linhas.append("A pesquisa procurou estes pontos e não achou fonte pública confiável. Não quer dizer que não "
+                      "existam: são lacunas a cobrir com o órgão ou com outras bases.")
+        linhas += [f"- {_titulo_bloco(n.get('bloco')) if n.get('bloco') in BLOCOS else (n.get('bloco') or 'Outros')}: "
+                   f"{n['procurado']}" for n in nao]
+    return "\n".join(linhas)
+
+
+def dossie_docx(dossie, confronto=None, meta=None):
+    meta = dict(meta or {})
+    meta.setdefault("tipo", "Dossiê do órgão")
+    meta.setdefault("data", _data_extenso(date.today()))
+    return gerar_docx(markdown_dossie(dossie, confronto), meta)
 
 
 def dossie_para_json(dossie):
@@ -3737,6 +3849,17 @@ if dossie_painel:
         with b2:
             st.download_button("⬇️ Baixar o dossiê (.json)", data=dossie_para_json(dossie_painel),
                                file_name=f"dossie_{slug_arquivo(dossie_painel.get('orgao') or 'orgao')}.json", width="stretch")
+        confronto_painel = ((st.session_state.get("resultado") or {}).get("confronto")
+                            if (st.session_state.get("resultado") or {}).get("dossie", {}).get("orgao") == dossie_painel.get("orgao")
+                            else None)
+        st.download_button("📄 Dossiê do órgão em Word (.docx)", width="stretch",
+                           data=dossie_docx(dossie_painel, confronto_painel,
+                                            {"orgao": st.session_state["orgao"].strip(),
+                                             "unidade": st.session_state["unidade"].strip()}),
+                           file_name=f"dossie_{slug_arquivo(dossie_painel.get('orgao') or 'orgao')}.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                           help="Fatos por tema, com a fonte clicável e o selo da conferência. Depois da deliberação, "
+                                "inclui a comparação com o que o órgão informou.")
 
 # --- RESULTADO (fica na tela mesmo depois dos downloads) -----------------------
 
