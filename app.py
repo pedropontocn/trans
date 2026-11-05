@@ -204,6 +204,7 @@ BLOCOS_ORGAO = {
                            "100 dias de governo.",
 }
 BLOCOS = {**BLOCOS_ESTADO, **BLOCOS_ORGAO}
+OPCOES_BLOCO = list(BLOCOS_ESTADO) + ["outro_estado"] + list(BLOCOS_ORGAO) + ["outro_orgao"]
 TIPOS_FONTE = {"documento_oficial": "Documento oficial", "dado_oficial": "Dado oficial",
                "decisao_controle_judicial": "Decisão de controle ou judicial", "estudo": "Estudo",
                "imprensa": "Imprensa", "declaracao_politica": "Declaração política", "hipotese": "Hipótese"}
@@ -495,8 +496,12 @@ def extrair_json(texto):
 
 def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa="", uso_lista=None, busca_web=False):
     """Chama o modelo e devolve (texto, argumentos da ferramenta ou None, motivo de parada).
-    Com busca_web, liga a busca na web do provedor (Anthropic ou Gemini) pelo parâmetro padrão do LiteLLM."""
-    extras = {"web_search_options": {"search_context_size": "high"}} if busca_web else {}
+    Com busca_web, liga a busca na web do provedor (Anthropic ou Gemini) pelo parâmetro padrão do LiteLLM; o valor
+    ("low", "medium", "high") limita quantas buscas a Anthropic faz na chamada (1, 5 ou 10)."""
+    if busca_web:
+        extras = {"web_search_options": {"search_context_size": busca_web if isinstance(busca_web, str) else "medium"}}
+    else:
+        extras = {}
     if ferramenta:
         # "auto" em vez de forçar a ferramenta: alguns modelos (ex.: Opus 5.5) não aceitam uso forçado.
         # Os prompts já mandam chamar a ferramenta e, se o modelo responder em texto, o JSON é lido do texto.
@@ -750,57 +755,109 @@ def conferir_itens(itens):
     return itens
 
 
-def pesquisar_camada(modelo, camada, orgao, data_corte, foco=""):
-    """Uma camada do dossiê (Estado ou órgão), com busca na web. Devolve (itens, não encontrados, uso, texto bruto)."""
-    blocos = BLOCOS_ESTADO if camada == "estado" else BLOCOS_ORGAO
+# A pesquisa é dividida em grupos pequenos de blocos, rodando em paralelo: cada chamada faz menos buscas e devolve
+# um JSON menor. Isso reduz respostas cortadas e turnos pausados pela API (a Anthropic pausa turnos longos com busca
+# e devolve "pause_turn", que o LiteLLM entrega como se a resposta tivesse terminado).
+GRUPOS_PESQUISA = [
+    ("estado", ["situacao_fiscal", "regime_divida", "previdencia"]),
+    ("estado", ["calendario_legal", "cenario_politico", "compromissos_governo"]),
+    ("orgao", ["mandato_estrutura", "orcamento_execucao", "pessoal"]),
+    ("orgao", ["contratos_convenios", "entregas_indicadores"]),
+    ("orgao", ["controle_judicializacao", "riscos_continuidade"]),
+]
+SEM_JSON = "a resposta não trouxe o JSON do dossiê"
+PEDIDO_CONTINUACAO = ("Você parou antes de entregar o resultado. Entregue agora SOMENTE o JSON pedido, entre "
+                      "[INÍCIO DO JSON] e [FIM DO JSON], com o que já encontrou. Faça novas buscas só se faltar um "
+                      "bloco inteiro.")
+
+
+def _itens_da_resposta(texto, camada, blocos):
+    dados = extrair_json(texto)
+    if not isinstance(dados, dict) or not isinstance(dados.get("itens"), list):
+        return None, []
+    itens = [x for x in (normalizar_item(b, camada) for b in dados["itens"]) if x]
+    for i in itens:
+        if i["bloco"] not in blocos:
+            i["bloco"] = "outro_estado" if camada == "estado" else "outro_orgao"
+    nao = [{"camada": camada, "bloco": str(n.get("bloco", "")), "procurado": str(n.get("procurado", "")).strip()}
+           for n in (dados.get("nao_encontrado") or []) if isinstance(n, dict) and str(n.get("procurado", "")).strip()]
+    return itens, nao
+
+
+def pesquisar_grupo(modelo, camada, blocos, orgao, data_corte, foco=""):
+    """Um grupo de blocos do dossiê, com busca na web. Nunca levanta exceção: devolve (itens, não encontrados, uso,
+    diagnóstico), e o diagnóstico diz o que aconteceu (erro, resposta sem JSON, resposta cortada, continuação)."""
+    descricoes = BLOCOS_ESTADO if camada == "estado" else BLOCOS_ORGAO
     alvo = ("Alvo: o Estado do Rio de Janeiro como um todo, no contexto da transição de governo."
             if camada == "estado" else f"Alvo: o órgão {orgao}, do Governo do Estado do Rio de Janeiro.")
     if foco:
         alvo += f"\nFoco indicado pela equipe (use para priorizar a busca, não como fato): {foco}"
     prompt = (PROMPT_PESQUISA.replace("<<<CAMADA>>>", "Estado" if camada == "estado" else "órgão")
               .replace("<<<DATA>>>", data_corte).replace("<<<ALVO>>>", alvo)
-              .replace("<<<BLOCOS>>>", "\n".join(f"- {k}: {v}" for k, v in blocos.items())))
-    uso = []
-    texto, _, motivo = chamar_modelo(modelo, [{"role": "user", "content": prompt}], 16000,
-                                     etapa=f"pesquisa · {camada}", uso_lista=uso, busca_web=True)
-    dados = extrair_json(texto) or {}
-    itens = [x for x in (normalizar_item(b, camada) for b in (dados.get("itens") or [])) if x]
-    for i in itens:
-        if i["bloco"] not in blocos:
-            i["bloco"] = "outro_estado" if camada == "estado" else "outro_orgao"
-    nao = [{"camada": camada, "bloco": str(n.get("bloco", "")), "procurado": str(n.get("procurado", "")).strip()}
-           for n in (dados.get("nao_encontrado") or []) if isinstance(n, dict) and str(n.get("procurado", "")).strip()]
-    if motivo == "length":
-        nao.append({"camada": camada, "bloco": "", "procurado": "a resposta da pesquisa foi cortada; pode faltar item"})
-    return itens, nao, uso, texto
+              .replace("<<<BLOCOS>>>", "\n".join(f"- {b}: {descricoes[b]}" for b in blocos)))
+    uso, diag = [], {"camada": camada, "blocos": blocos, "erro": None, "motivo": None, "continuacao": False,
+                     "itens": 0, "resposta": ""}
+    mensagens = [{"role": "user", "content": prompt}]
+    etapa = f"pesquisa · {camada} · {', '.join(blocos)}"
+    try:
+        texto, _, motivo = chamar_modelo(modelo, mensagens, 16000, etapa=etapa, uso_lista=uso, busca_web="medium")
+        diag["motivo"] = motivo
+        itens, nao = _itens_da_resposta(texto, camada, blocos)
+        if itens is None:
+            # sem JSON: turno pausado, resposta cortada ou o modelo só narrou a busca. Pede para terminar.
+            diag["continuacao"] = True
+            texto2, _, motivo2 = chamar_modelo(
+                modelo, mensagens + [{"role": "assistant", "content": texto or "(sem texto)"},
+                                     {"role": "user", "content": PEDIDO_CONTINUACAO}],
+                16000, etapa=etapa + " (continuação)", uso_lista=uso, busca_web="low")
+            diag["motivo"] = f"{motivo} → {motivo2}"
+            texto = (texto or "") + "\n\n--- continuação ---\n\n" + (texto2 or "")
+            itens, nao = _itens_da_resposta(texto2, camada, blocos)
+        if itens is None:
+            itens, nao = [], []
+            diag["erro"] = SEM_JSON
+        if diag["motivo"] and "length" in str(diag["motivo"]):
+            nao.append({"camada": camada, "bloco": "", "procurado": f"resposta cortada em {', '.join(blocos)}; pode faltar item"})
+        diag["itens"], diag["resposta"] = len(itens), (texto or "")[:3000]
+        return itens, nao, uso, diag
+    except Exception as e:
+        diag["erro"] = f"{type(e).__name__}: {e}"[:600]
+        return [], [], uso, diag
 
 
 def montar_dossie(modelo, orgao, data_corte, foco="", reaproveitar=True):
-    """Pesquisa as duas camadas em paralelo, numera os itens e confere os links por código."""
-    chave = chave_guardada("dossiê", modelo, PROMPT_PESQUISA, orgao, data_corte, foco)
+    """Pesquisa os grupos em paralelo, numera os itens e confere os links por código.
+    Se todos os grupos falharem com erro, levanta RuntimeError com as mensagens, para a tela mostrar o motivo."""
+    chave = chave_guardada("dossiê", modelo, PROMPT_PESQUISA, GRUPOS_PESQUISA, orgao, data_corte, foco)
     guardada = resposta_guardada(chave) if reaproveitar else None
     if guardada:
         dossie = deepcopy(guardada)
         dossie["reaproveitado"] = True
         return dossie
-    resultados = _em_paralelo([lambda c=c: pesquisar_camada(modelo, c, orgao, data_corte, foco)
-                               for c in ("estado", "orgao")])
-    itens, nao, uso, brutos = [], [], [], []
-    for it, n, u, b in resultados:
+    resultados = _em_paralelo([lambda c=c, b=b: pesquisar_grupo(modelo, c, b, orgao, data_corte, foco)
+                               for c, b in GRUPOS_PESQUISA])
+    itens, nao, uso, diagnostico = [], [], [], []
+    for it, n, u, d in resultados:
         itens += it
         nao += n
         uso += u
-        brutos.append(b)
+        diagnostico.append(d)
+    # todos os grupos deram erro na chamada (chave, modelo, parâmetro): não há dossiê a montar
+    if not itens and all(d["erro"] and d["erro"] != SEM_JSON for d in diagnostico):
+        raise RuntimeError("todas as buscas falharam: " + " | ".join(sorted({d["erro"] for d in diagnostico})))
     vistos, unicos = set(), []
     for i in itens:
         chave_item = (i["url"], _comparavel(i["afirmacao"])[:120])
         if chave_item not in vistos:
             vistos.add(chave_item)
             unicos.append(i)
+    # ids estáveis: Estado antes do órgão e, dentro de cada camada, a ordem fixa dos blocos (não a ordem de chegada)
+    ordem = {b: k for k, b in enumerate(OPCOES_BLOCO)}
+    unicos.sort(key=lambda i: (i["camada"] != "estado", ordem.get(i["bloco"], len(ordem))))
     dossie = {"orgao": orgao, "data_corte": data_corte, "foco": foco, "modelo": modelo, "origem": "pesquisa",
               "gerado_em": datetime.now().isoformat(timespec="seconds"),
               "itens": conferir_itens(numerar_itens(unicos)), "nao_encontrado": nao, "uso": uso,
-              "brutos": brutos, "reaproveitado": False}
+              "diagnostico": diagnostico, "reaproveitado": False}
     if dossie["itens"]:
         guardar_resposta(chave, deepcopy(dossie))
     return dossie
@@ -820,7 +877,7 @@ def ler_dossie_arquivo(conteudo):
     return {"orgao": str(dados.get("orgao", "")), "data_corte": str(dados.get("data_corte", "")),
             "foco": str(dados.get("foco", "")), "modelo": str(dados.get("modelo", "")), "origem": "arquivo",
             "gerado_em": str(dados.get("gerado_em", "")), "itens": conferir_itens(numerar_itens(itens)),
-            "nao_encontrado": nao, "uso": [], "brutos": [], "reaproveitado": False}
+            "nao_encontrado": nao, "uso": [], "diagnostico": [], "reaproveitado": False}
 
 
 def itens_incluidos(dossie):
@@ -2396,7 +2453,6 @@ def _data_extenso(d):
 
 ROTULO_CAMADA = {"estado": "Estado", "orgao": "Órgão"}
 ROTULO_TIPO_INV = {v: k for k, v in TIPOS_FONTE.items()}
-OPCOES_BLOCO = list(BLOCOS) + ["outro_estado", "outro_orgao"]
 
 
 def _valor(x):
@@ -2448,7 +2504,7 @@ def slug_arquivo(texto):
 
 
 def dossie_para_json(dossie):
-    campos = ("orgao", "data_corte", "foco", "modelo", "origem", "gerado_em", "itens", "nao_encontrado")
+    campos = ("orgao", "data_corte", "foco", "modelo", "origem", "gerado_em", "itens", "nao_encontrado", "diagnostico")
     return json.dumps({k: dossie.get(k) for k in campos}, ensure_ascii=False, indent=2)
 
 
@@ -2555,8 +2611,8 @@ with st.sidebar:
                     st.session_state["foco"].strip(), reaproveitar=not refazer_pesquisa)
                 reiniciar_tabela_dossie()
                 if not st.session_state["dossie"]["itens"]:
-                    st.warning("A pesquisa não trouxe nenhum item com fonte. Tente outro modelo da pesquisa ou carregue "
-                               "um dossiê pronto.")
+                    st.warning("A pesquisa não trouxe nenhum item com fonte. O motivo de cada busca está em "
+                               "\"Diagnóstico da pesquisa\", no painel do dossiê.")
             except Exception as e:
                 st.error(f"Não foi possível pesquisar: {e}. Você pode carregar um dossiê pronto logo abaixo.")
     if (st.session_state.get("dossie") or {}).get("reaproveitado"):
@@ -2883,6 +2939,22 @@ if dossie_painel:
             st.caption(f"Pesquisa feita por {dossie_painel['modelo']} · data de corte {dossie_painel['data_corte']} · "
                        f"{buscas} busca(s) · custo estimado US$ {custo_pesquisa:.2f}".replace(".", ",", 1)
                        + ("*" if parcial_pesquisa else ""))
+        diag_pesq = dossie_painel.get("diagnostico") or []
+        com_problema = [d for d in diag_pesq if d.get("erro") or d.get("continuacao")]
+        if diag_pesq:
+            with st.expander("Diagnóstico da pesquisa"
+                             + (f" ({len(com_problema)} de {len(diag_pesq)} buscas com problema)" if com_problema else ""),
+                             expanded=bool(com_problema) and not resumo_painel["itens"]):
+                st.caption("A pesquisa roda em grupos de blocos, em paralelo. \"Parada\" é o motivo informado pela API: "
+                           "stop (terminou), length (cortada pelo limite de tokens) ou o erro da chamada.")
+                for d in diag_pesq:
+                    icone = "🔴" if d.get("erro") else ("🟡" if d.get("continuacao") else "🟢")
+                    st.markdown(f"{icone} **{ROTULO_CAMADA.get(d['camada'], d['camada'])} · {', '.join(d['blocos'])}**: "
+                                f"{d['itens']} item(ns) · parada: {d.get('motivo') or '—'}"
+                                + (" · precisou pedir que o modelo terminasse" if d.get("continuacao") else "")
+                                + (f" · **{d['erro']}**" if d.get("erro") else ""))
+                    if d.get("erro") and d.get("resposta"):
+                        st.code(d["resposta"][:1500], language=None)
         import pandas as pd
         editada = st.data_editor(
             pd.DataFrame(st.session_state["dossie_tabela_base"],

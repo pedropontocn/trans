@@ -121,7 +121,9 @@ do órgão nas duas análises, as seções do relatório e os valores em R$ que 
 
 ## Custo aproximado
 
-- **Pesquisa:** duas chamadas com busca na web, até 10 buscas cada. Com o Sonnet 5.5, a Anthropic cobra US$ 10 por mil
+- **Pesquisa:** cinco chamadas em paralelo, uma por grupo de blocos, com até 5 buscas cada. Se uma resposta parar
+  antes do JSON (turno pausado pela API ou resposta cortada), o painel pede que o modelo termine; o motivo de cada
+  chamada aparece em "Diagnóstico da pesquisa", no painel do dossiê. Com o Sonnet 5.5, a Anthropic cobra US$ 10 por mil
   buscas além dos tokens; o painel soma as buscas no custo. Uma pesquisa repetida com os mesmos insumos é
   reaproveitada sem nova busca enquanto o app não reinicia ("Pesquisar de novo do zero" força uma nova).
 - **Debate e memorando:** com o Opus 5.5 no debate e 3 rodadas, cerca de US$ 0,50 a 0,60. O dossiê fica em cache por

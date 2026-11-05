@@ -100,7 +100,7 @@ def test_deliberacao_com_uma_rodada(app, llm):
     assert "[O1]" not in partes[2]["text"].split("DIVERGÊNCIAS")[0]      # o dossiê não vai duas vezes
     assert chamada["ferramentas"] == ["registrar_tension_map"]
     # o confronto entra no resultado e no memorando; o memorando abre com o quadro de proveniência
-    assert [d["item"] for d in r["confronto"]["divergencias"]] == ["O2", "O1"]
+    assert [d["item"] for d in r["confronto"]["divergencias"]] == ["O4", "O3"]
     assert r["memorando"].splitlines()[2] == "## Sobre este documento"
     memo_call = next(c for c in llm.chamadas if "NESTA ETAPA: escreva a Fase 5" in str(c["mensagens"][0]["content"]))
     assert "[O1]" in memo_call["mensagens"][1]["content"] and "DIVERGÊNCIAS" in memo_call["mensagens"][1]["content"]
@@ -334,11 +334,25 @@ def test_dossie_reaproveitado_em_nova_sessao(app, llm):
     from streamlit.testing.v1 import AppTest
     _preparar(app.run())
     pesquisas = lambda: len([c for c in llm.chamadas if c["kw"].get("web_search_options")])
-    assert pesquisas() == 2
+    assert pesquisas() == 5
     outra = AppTest.from_file(app._script_path, default_timeout=120).run()      # outra sessão, mesma pesquisa
     outra.text_input(key="orgao_analisado").input("Secretaria de Exemplo").run()
     _botao(outra, "Pesquisar e montar o dossiê")
-    assert pesquisas() == 2 and outra.session_state["dossie"]["reaproveitado"]
+    assert pesquisas() == 5 and outra.session_state["dossie"]["reaproveitado"]
     assert any("reaproveitado" in c.value for c in outra.caption)
     _botao(outra, "Pesquisar de novo do zero")
-    assert pesquisas() == 4 and not outra.session_state["dossie"]["reaproveitado"]
+    assert pesquisas() == 10 and not outra.session_state["dossie"]["reaproveitado"]
+
+
+def test_dossie_vazio_mostra_o_diagnostico(app, llm):
+    from conftest import GRUPOS
+    llm.grupos_sem_json = {g[0] for g in GRUPOS}
+    llm.continuacao_sem_json = True
+    at = app.run()
+    at.text_input(key="orgao_analisado").input("Secretaria de Exemplo").run()
+    _botao(at, "Pesquisar e montar o dossiê")
+    assert any("Diagnóstico da pesquisa" in w.value for w in at.warning)
+    diag = next(e for e in at.expander if e.label.startswith("Diagnóstico da pesquisa"))
+    assert "5 de 5 buscas com problema" in diag.label
+    assert any("a resposta não trouxe o JSON do dossiê" in m.value for m in at.markdown)
+    assert any("Fiz as buscas" in c.value for c in at.code)
