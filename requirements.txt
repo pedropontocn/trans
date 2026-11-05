@@ -5,3 +5,5 @@ markitdown[all]
 python-docx
 python-dotenv
 jsonschema
+google-api-python-client
+google-auth

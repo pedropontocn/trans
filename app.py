@@ -51,7 +51,7 @@ LIMITE_CARACTERES = 150_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas", "sem_voz"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "2.0"
+APP_VERSAO = "2.1"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -615,6 +615,80 @@ def ler_relatorio(arquivo):
     status["tipo"] = "ok"
     status["mensagem"] = ("Relatório lido. Ele entra no debate como a versão do órgão e será confrontado com o "
                           "dossiê; não preenche os campos do debate.")
+    return status
+
+
+# --- GOOGLE DRIVE -----------------------------------------------------------------------
+# O app lê as pastas das secretarias no Drive com a mesma conta de serviço e as mesmas regras do lote.py:
+# subpasta que repete o nome da secretaria é juntada a ela; as demais são órgãos vinculados.
+
+def _modulo_lote():
+    import sys
+    raiz = str(Path(__file__).resolve().parent)
+    if raiz not in sys.path:
+        sys.path.insert(0, raiz)
+    import lote
+    return lote
+
+
+def credenciais_drive():
+    """Devolve (JSON da conta de serviço, ID da pasta DOCUMENTOS RECEBIDOS), dos Secrets do Streamlit ou do ambiente.
+    Qualquer um ausente volta como None: o app segue sem o Drive."""
+    cred = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    pasta = os.environ.get("DRIVE_PASTA_ID", "")
+    try:
+        segredos = st.secrets
+        if not cred and "gcp_service_account" in segredos:
+            cred = json.dumps(dict(segredos["gcp_service_account"]))
+        cred = cred or str(segredos.get("GOOGLE_SERVICE_ACCOUNT_JSON", "") or "")
+        pasta = pasta or str(segredos.get("DRIVE_PASTA_ID", "") or "")
+    except Exception:
+        pass                                   # sem arquivo de Secrets (ex.: rodando no computador)
+    return (cred.strip() or None), (pasta.strip() or None)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def listar_orgaos_drive(credenciais, pasta_id):
+    """Secretarias e órgãos vinculados encontrados na pasta do Drive. Fica guardado por 10 minutos."""
+    lote = _modulo_lote()
+    orgaos = lote.planejar_orgaos(lote.Drive(credenciais), pasta_id)
+    return [{"nome": o["nome"], "sigla": o["sigla"], "vinculada_a": o["vinculada_a"],
+             "pastas": [{"id": p["id"], "name": p["name"]} for p in o["pastas"]]} for o in orgaos]
+
+
+def nome_para_pesquisa(orgao):
+    return orgao["nome"] + (f" (vinculado à {orgao['vinculada_a']})" if orgao.get("vinculada_a") else "")
+
+
+def rotulo_orgao_drive(orgao):
+    return ("↳ " if orgao.get("vinculada_a") else "") + orgao["nome"]
+
+
+def ler_relatorio_drive(credenciais, orgao):
+    """Baixa e lê os documentos da pasta do órgão no Drive, como o lote faz. Entra como autodeclaração, igual ao
+    relatório enviado à mão. Arquivos com dados pessoais no nome não são baixados; CPFs e telefones são apagados."""
+    status = {"tipo": "erro", "mensagem": "", "avisos": []}
+    lote = _modulo_lote()
+    try:
+        texto, manifesto = lote.ler_documentos(lote.Drive(credenciais), orgao, converter_arquivo, LIMITE_CARACTERES)
+    except Exception as e:
+        status["mensagem"] = f"Não foi possível ler a pasta no Drive: {e}"
+        return status
+    st.session_state["manifesto_drive"] = manifesto
+    if not texto or len(texto.strip()) < 200:
+        status["mensagem"] = (f"A pasta tem pouco ou nenhum texto legível ({len(manifesto['lidos'])} arquivo(s) lido(s), "
+                              f"{len(manifesto['pulados'])} pulado(s)). Veja a lista de arquivos abaixo.")
+        return status
+    texto, status["avisos"] = limpar_relatorio(texto)
+    st.session_state["texto_relatorio"] = texto
+    st.session_state["completude"] = indice_completude(texto)
+    n_lidos, n_pulados, n_erros = len(manifesto["lidos"]), len(manifesto["pulados"]), len(manifesto["erros"])
+    status["tipo"] = "aviso" if n_erros or manifesto["cortados"] else "ok"
+    status["mensagem"] = (f"{n_lidos} arquivo(s) lido(s) da pasta no Drive"
+                          + (f", {n_pulados} pulado(s)" if n_pulados else "")
+                          + (f", {n_erros} com erro" if n_erros else "")
+                          + (f"; {len(manifesto['cortados'])} cortado(s) para caber no limite" if manifesto["cortados"] else "")
+                          + ". Os documentos entram no debate como a versão do órgão e são confrontados com o dossiê.")
     return status
 
 
@@ -2843,6 +2917,35 @@ with st.sidebar:
 
     st.markdown("---")
     st.header("1. Órgão e pesquisa")
+    cred_drive, pasta_drive = credenciais_drive()
+    orgao_drive = None
+    if cred_drive and pasta_drive:
+        try:
+            with st.spinner("Lendo as pastas do Drive..."):
+                orgaos_drive = listar_orgaos_drive(cred_drive, pasta_drive)
+        except Exception as e:
+            orgaos_drive = []
+            st.error(f"Não foi possível listar as pastas do Drive: {e}")
+        if orgaos_drive:
+            por_rotulo = {rotulo_orgao_drive(o): o for o in orgaos_drive}
+
+            def _ao_escolher_orgao():
+                escolhido = por_rotulo.get(st.session_state.get("orgao_drive"))
+                if escolhido:
+                    st.session_state["orgao_analisado"] = nome_para_pesquisa(escolhido)
+                if st.session_state.get("fonte_relatorio") == "drive":   # documentos do órgão anterior saem
+                    for chave in ("texto_relatorio", "completude", "status_relatorio", "manifesto_drive",
+                                  "arquivo_nome", "fonte_relatorio"):
+                        st.session_state.pop(chave, None)
+
+            st.selectbox("Órgão (pastas do Drive)", ["—"] + list(por_rotulo), key="orgao_drive",
+                         on_change=_ao_escolher_orgao,
+                         help="Secretarias e, com ↳, os órgãos vinculados, lidos da pasta DOCUMENTOS RECEBIDOS.")
+            orgao_drive = por_rotulo.get(st.session_state.get("orgao_drive"))
+            st.button("Atualizar a lista do Drive", on_click=listar_orgaos_drive.clear)
+    else:
+        st.caption("Para escolher o órgão direto das pastas do Drive, configure a conta de serviço nos Secrets "
+                   "(veja \"Drive no app\" no README).")
     st.text_input("Órgão analisado", key="orgao_analisado", placeholder="ex.: Secretaria de Estado das Cidades")
     st.text_area("Foco da análise (opcional)", key="foco", height=80,
                  help="O que a equipe quer entender. Orienta a pesquisa e os insumos; não é tratado como fato.")
@@ -2883,21 +2986,43 @@ with st.sidebar:
     st.markdown("---")
     st.header("2. Relatório do órgão (opcional)")
     st.caption("Entra como autodeclaração: é confrontado com o dossiê e não preenche nenhum campo do debate.")
-    arquivo = st.file_uploader("Relatório (PDF, DOCX ou XLSX)", type=["pdf", "docx", "xlsx"])
+    if orgao_drive:
+        if st.button(f"📥 Ler os documentos de {orgao_drive['sigla'] or orgao_drive['nome']} no Drive", width="stretch"):
+            with st.spinner("Baixando e lendo os arquivos da pasta no Drive..."):
+                st.session_state["status_relatorio"] = ler_relatorio_drive(cred_drive, orgao_drive)
+            st.session_state["fonte_relatorio"] = "drive"
+            st.session_state["arquivo_nome"] = f"Drive: {orgao_drive['nome']}"
+            st.session_state.pop("arquivo_lido", None)
+    arquivo = st.file_uploader("Relatório (PDF, DOCX ou XLSX)" + (", em vez do Drive" if orgao_drive else ""),
+                               type=["pdf", "docx", "xlsx"])
     if arquivo is None:
-        for chave in ("texto_relatorio", "completude", "arquivo_lido", "arquivo_nome", "status_relatorio"):
-            st.session_state.pop(chave, None)
+        if st.session_state.get("fonte_relatorio") != "drive":
+            for chave in ("texto_relatorio", "completude", "arquivo_lido", "arquivo_nome", "status_relatorio"):
+                st.session_state.pop(chave, None)
     else:
         assinatura_rel = hashlib.md5(arquivo.getvalue()).hexdigest()
         if st.session_state.get("arquivo_lido") != assinatura_rel:
             st.session_state["status_relatorio"] = ler_relatorio(arquivo)
             st.session_state["arquivo_lido"] = assinatura_rel
             st.session_state["arquivo_nome"] = arquivo.name
+            st.session_state["fonte_relatorio"] = "upload"
+            st.session_state.pop("manifesto_drive", None)
     status = st.session_state.get("status_relatorio")
     if status:
         {"ok": st.success, "aviso": st.warning, "erro": st.error}[status["tipo"]](status["mensagem"])
         for aviso in status["avisos"]:
             st.caption(f"ℹ️ {aviso}")
+    manifesto = st.session_state.get("manifesto_drive")
+    if manifesto and st.session_state.get("fonte_relatorio") == "drive":
+        with st.expander(f"Arquivos do Drive ({len(manifesto['lidos'])} lidos)"):
+            for rotulo_m, chave_m, campo_m in [("Lidos", "lidos", None), ("Pulados", "pulados", "motivo"),
+                                               ("Com erro", "erros", "erro"), ("Cortados", "cortados", None)]:
+                if manifesto.get(chave_m):
+                    st.markdown(f"**{rotulo_m}**")
+                    for m in manifesto[chave_m]:
+                        st.caption(f"- {m['arquivo']}" + (f" — {m[campo_m]}" if campo_m else "")
+                                   + (f" (usados {m['usados']:,} de {m['caracteres']:,} caracteres)".replace(",", ".")
+                                      if chave_m == "cortados" else ""))
     if st.session_state.get("texto_relatorio"):
         with st.expander("Ver texto do relatório"):
             st.caption("Confira se as tabelas vieram com os valores nas colunas certas.")
