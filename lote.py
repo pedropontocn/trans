@@ -378,7 +378,7 @@ def processar_orgao(app, drive, orgao, cfg, saida):
     pasta.mkdir(parents=True, exist_ok=True)
     linha = {"orgao": orgao["nome"], "sigla": orgao["sigla"], "vinculada_a": orgao["vinculada_a"], "situacao": "erro",
              "arquivos_lidos": 0, "arquivos_pulados": 0, "itens_dossie": 0, "conferidos": 0, "trade_offs": 0,
-             "confianca": "", "custo_usd": 0.0, "minutos": 0.0, "observacao": ""}
+             "confianca": "", "eventos_calendario": 0, "custo_usd": 0.0, "minutos": 0.0, "observacao": ""}
     app["st"].session_state.clear()
     try:
         if orgao.get("documentos") is not None:          # texto já lido (ex.: relatório resumido enviado no app)
@@ -432,6 +432,16 @@ def processar_orgao(app, drive, orgao, cfg, saida):
         anexo = resultado.get("anexo_debate") or ""
         (pasta / "memorando.docx").write_bytes(app["gerar_docx"](memo + "\n\n" + anexo + "\n\n" + verificacao, meta))
         (pasta / "memorando.md").write_text(memo, encoding="utf-8")
+        cal = resultado.get("calendario") or {}
+        eventos = cal.get("eventos") or []
+        descartados = [dict(d, orgao=orgao["nome"]) for d in cal.get("descartados") or []]
+        (pasta / "calendario.json").write_text(json.dumps(
+            {"eventos": [{**e, "data": e["data"].isoformat()} for e in eventos], "descartados": descartados},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+        if eventos:
+            (pasta / "calendario.xlsx").write_bytes(app["calendario_xlsx"](
+                eventos, descartados, f"Calendário de vencimentos críticos – {orgao['nome']}", cfg["data_corte"]))
+        linha["eventos_calendario"] = len(eventos)
         (pasta / "dossie.docx").write_bytes(app["dossie_docx"](
             dossie, resultado.get("confronto"), {"orgao": cfg["orgao_emissor"], "unidade": cfg["unidade"],
                                                  "data": resultado["data"]}))
@@ -453,6 +463,26 @@ def processar_orgao(app, drive, orgao, cfg, saida):
 
 def _reais(valor):
     return f"{valor:.2f}".replace(".", ",")
+
+
+def gravar_calendario_consolidado(app, saida, data_corte=""):
+    """Junta os calendários de todos os órgãos já concluídos numa planilha só, ordenada por data."""
+    eventos, descartados = [], []
+    for arquivo in sorted(Path(saida).glob("*/calendario.json")):
+        try:
+            dados = json.loads(arquivo.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for e in dados.get("eventos") or []:
+            try:
+                eventos.append({**e, "data": date.fromisoformat(e["data"])})
+            except (KeyError, ValueError):
+                continue
+        descartados += dados.get("descartados") or []
+    if eventos:
+        (Path(saida) / "calendario_consolidado.xlsx").write_bytes(app["calendario_xlsx"](
+            eventos, descartados, "Calendário consolidado de vencimentos críticos – todos os órgãos", data_corte))
+    return len(eventos)
 
 
 def gravar_resumo(saida, linhas, custo_estado=0.0):
@@ -581,6 +611,7 @@ def rodar_orgaos(app, drive, orgaos, cfg, saida, economico=False, cliente_batch=
             log(f"  → {linha['situacao']}" + (f": {linha['observacao']}" if linha["observacao"] else "")
                 + f" ({linha['minutos']} min, US$ {linha['custo_usd']:.2f})")
             gravar_resumo(saida, linhas, custo_estado)   # grava a cada órgão: se a execução cair, o que já foi feito fica
+            gravar_calendario_consolidado(app, saida, cfg.get("data_corte", ""))
         return linhas
 
     # modo econômico: os órgãos em paralelo; o resumo é regravado a cada órgão concluído, na ordem original
@@ -592,6 +623,7 @@ def rodar_orgaos(app, drive, orgaos, cfg, saida, economico=False, cliente_batch=
         with trava:
             prontas[k] = linha
             gravar_resumo(saida, [prontas[i] for i in sorted(prontas)], custo_estado)
+            gravar_calendario_consolidado(app, saida, cfg.get("data_corte", ""))
         log(f"[{k}/{len(orgaos)}] {o['nome']} → {linha['situacao']}"
             + (f": {linha['observacao']}" if linha["observacao"] else "")
             + f" ({linha['minutos']} min, US$ {linha['custo_usd']:.2f})")
