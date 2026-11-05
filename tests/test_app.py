@@ -1,6 +1,5 @@
 """Testes do app inteiro, com a interface do Streamlit e o modelo falso."""
 import json
-from pathlib import Path
 
 from conftest import FONTE_FALSA, tension_map, trade_off
 
@@ -11,40 +10,112 @@ def _deliberar(at):
     return at.session_state["resultado"]
 
 
-def test_upload_preenche_os_campos_sozinho(app, llm):
-    at = app.run()
+def _botao(at, texto):
+    next(b for b in at.button if texto in b.label).click().run()
     assert not at.exception, at.exception
-    assert at.session_state["problema"] == "Carteira travada na transição."
-    assert at.session_state["fatos"].startswith("- Quatro concorrências")
-    assert any("Preenchidos" in m.value for m in at.success)
-    extracoes = [c for c in llm.chamadas if c["ferramenta"] == "registrar_insumos"]
-    assert len(extracoes) == 1 and extracoes[0]["modelo"].endswith("sonnet-5-5")   # modelo da extração
-    at.run()                                                                       # nova execução: não extrai de novo
-    assert len([c for c in llm.chamadas if c["ferramenta"] == "registrar_insumos"]) == 1
+    return at
 
 
-def test_extracao_em_texto_com_nomes_diferentes(app, llm):
-    llm.resposta_extracao_texto = json.dumps({"Problema Central": "X", "Fatos Ancoradores": ["F"],
-                                              "Personas": ["P"], "Lacunas de Dados": ["L"]})
-    llm.recusar_ferramentas = ModuleNotFoundError("No module named 'mcp'")
+def _preparar(at, orgao="Secretaria de Exemplo"):
+    """Pesquisa o dossiê e prepara os insumos, como a equipe faria antes de deliberar."""
+    at.text_input(key="orgao_analisado").input(orgao).run()
+    _botao(at, "Pesquisar e montar o dossiê")
+    _botao(at, "Preparar insumos")
+    return at
+
+
+def test_relatorio_nao_preenche_os_campos(app, llm):
     at = app.run()
     assert not at.exception, at.exception
-    assert at.session_state["problema"] == "X" and at.session_state["lacunas"] == "- L"
+    assert at.session_state["problema"] == "" and at.session_state["personas"] == ""
+    assert any("autodeclaração" in m.value for m in at.caption)
+    assert any("não preenche os campos" in m.value for m in at.success)
+    assert not llm.chamadas                                   # ler o relatório não chama o modelo
+
+
+def test_pesquisa_monta_o_dossie_e_confere_os_links(app, llm):
+    at = app.run()
+    at.text_input(key="orgao_analisado").input("Secretaria de Exemplo").run()
+    _botao(at, "Pesquisar e montar o dossiê")
+    d = at.session_state["dossie"]
+    assert d["orgao"] == "Secretaria de Exemplo" and len(d["itens"]) == 9
+    assert {i["id"]: i["checagem"] for i in d["itens"]}["O5"] == "inacessivel"
+    assert all(c["kw"].get("web_search_options") for c in llm.chamadas)
+    assert any("Dossiê: 9 itens incluídos, 6 conferidos" in e.label for e in at.expander)
+    assert [m.value for m in at.metric][:4] == ["9", "6", "7", "2"]
+
+
+def test_falha_na_pesquisa_mostra_erro_e_aceita_dossie_pronto(app, llm):
+    llm.falhar_pesquisa = True
+    at = app.run()
+    at.text_input(key="orgao_analisado").input("Secretaria de Exemplo").run()
+    _botao(at, "Pesquisar e montar o dossiê")
+    assert any("Não foi possível pesquisar" in e.value for e in at.error)
+    assert "dossie" not in at.session_state
+
+
+def test_dossie_pronto_carregado(app, llm):
+    from conftest import ITENS_ESTADO, ITENS_ORGAO
+    llm.dossie_arquivo = json.dumps({"orgao": "Secretaria de Exemplo", "itens": ITENS_ESTADO + ITENS_ORGAO}).encode("utf-8")
+    at = app.run()
+    assert not at.exception, at.exception
+    d = at.session_state["dossie"]
+    assert d["origem"] == "arquivo" and len(d["itens"]) == 9
+    assert [c for c in llm.chamadas] == []                   # carregar o dossiê não chama o modelo
+    llm.dossie_arquivo = b"isto nao e json"
+    at2 = app.__class__.from_file(app._script_path, default_timeout=120).run()
+    assert any("não é um dossiê válido" in e.value for e in at2.error)
+
+
+def test_insumos_vem_do_dossie(app, llm):
+    at = _preparar(app.run())
+    assert at.session_state["problema"].startswith("Carteira de licitações")
+    assert "[baseline]" not in at.session_state["personas"] and "[controle] Controle externo" in at.session_state["personas"]
+    assert "terceirizados" in at.session_state["sem_voz"]
+    assert "Cinco obras" not in llm.mensagem_insumos
+
+
+def test_deliberar_exige_dossie(app, llm):
+    at = app.run()
+    at.session_state["problema"] = "x"
+    at.session_state["personas"] = "- [a] A: b"
+    next(b for b in at.button if "deliber" in b.label.lower()).click().run()
+    assert "resultado" not in at.session_state
+    assert any("Monte o dossiê antes de deliberar" in w.value for w in at.warning)
 
 
 def test_deliberacao_com_uma_rodada(app, llm):
-    at = app.run()
+    at = _preparar(app.run())
     at.slider[0].set_value(1).run()
     r = _deliberar(at)
     assert r["n_rodadas"] == 1 and r["confianca"]["nivel"] in ("baixa", "média")
     assert [c["ferramenta"] for c in llm.chamadas].count("registrar_tension_map") == 1
-    # o relatório vai para o debate, marcado para cache de 1 hora, antes das instruções da etapa
+    # o dossiê e a autodeclaração vão juntos para o debate, em cache de 1 hora, antes das instruções da etapa
     chamada = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
     partes = chamada["mensagens"][1]["content"]
-    assert partes[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"} and "<relatorio>" in partes[0]["text"]
+    assert partes[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert partes[0]["text"].startswith("<dossie>") and "<relatorio>\nAUTODECLARAÇÃO DO ÓRGÃO" in partes[0]["text"]
     assert "<instrucoes>" in partes[1]["text"] and partes[1]["cache_control"] == {"type": "ephemeral"}
-    assert "QUALIDADE DO RELATÓRIO" in partes[2]["text"]
-    assert chamada["ferramentas"] == ["registrar_tension_map", "registrar_diagnostico"]
+    assert "QUALIDADE DO RELATÓRIO" in partes[2]["text"] and "DIVERGÊNCIAS ENTRE A AUTODECLARAÇÃO" in partes[2]["text"]
+    assert "[O1]" not in partes[2]["text"].split("DIVERGÊNCIAS")[0]      # o dossiê não vai duas vezes
+    assert chamada["ferramentas"] == ["registrar_tension_map"]
+    # o confronto entra no resultado e no memorando; o memorando abre com o quadro de proveniência
+    assert [d["item"] for d in r["confronto"]["divergencias"]] == ["O2", "O1"]
+    assert r["memorando"].splitlines()[2] == "## Sobre este documento"
+    memo_call = next(c for c in llm.chamadas if "NESTA ETAPA: escreva a Fase 5" in str(c["mensagens"][0]["content"]))
+    assert "[O1]" in memo_call["mensagens"][1]["content"] and "DIVERGÊNCIAS" in memo_call["mensagens"][1]["content"]
+    assert any("O que o órgão declarou" in s.value for s in at.subheader)
+
+
+def test_deliberacao_sem_relatorio(app, llm):
+    llm.sem_relatorio = True
+    at = _preparar(app.run())
+    at.slider[0].set_value(1).run()
+    r = _deliberar(at)
+    chamada = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
+    assert "<relatorio>" not in chamada["mensagens"][1]["content"][0]["text"]
+    assert r["confronto"]["divergencias"] == [] and r["completude"] is None
+    assert not any("Você confronta" in str(c["mensagens"][0]) for c in llm.chamadas)
 
 
 def test_tres_rodadas_com_estabilidade(app, llm):
@@ -55,7 +126,7 @@ def test_tres_rodadas_com_estabilidade(app, llm):
                                     trade_off("C2", "Atas", origens=["R1-T2", "R3-T1"]),
                                     trade_off("C3", "Obras", 1, FONTE_FALSA, origens=["R2-T2"])])
     llm.pareamento = {"pares": [{"anterior": "T1", "atual": "T1"}]}     # rodadas 1 e 2 divergem: roda a 3ª
-    at = app.run()
+    at = _preparar(app.run())
     r = _deliberar(at)
     tm = r["tension_map"]
     assert [(t["id"], t["estabilidade"]) for t in tm["trade_offs"]] == [("C1", "3/3"), ("C2", "2/3")]
@@ -70,7 +141,7 @@ def test_para_na_segunda_rodada_quando_as_duas_concordam(app, llm):
                    tension_map([trade_off("T1", "Licitações adiadas"), trade_off("T2", "Atas SRP")])]
     llm.consolidacao = tension_map([trade_off("C1", "Licitações", origens=["R1-T1", "R2-T1"]),
                                     trade_off("C2", "Atas", origens=["R1-T2", "R2-T2"])])
-    at = app.run()
+    at = _preparar(app.run())
     r = _deliberar(at)
     tm = r["tension_map"]
     assert [c["ferramenta"] for c in llm.chamadas].count("registrar_tension_map") == 2
@@ -84,7 +155,7 @@ def test_para_na_segunda_rodada_quando_as_duas_concordam(app, llm):
 
 
 def test_sem_parada_antecipada_roda_todas(app, llm):
-    at = app.run()
+    at = _preparar(app.run())
     at.checkbox(key="parar_cedo").uncheck().run()
     r = _deliberar(at)
     assert [c["ferramenta"] for c in llm.chamadas].count("registrar_tension_map") == 3
@@ -92,7 +163,7 @@ def test_sem_parada_antecipada_roda_todas(app, llm):
 
 
 def test_resultado_continua_na_tela_depois_de_um_download(app, llm):
-    at = app.run()
+    at = _preparar(app.run())
     _deliberar(at)
     at.run()                                   # o clique num download faz o Streamlit rodar de novo
     assert not at.exception, at.exception
@@ -100,7 +171,7 @@ def test_resultado_continua_na_tela_depois_de_um_download(app, llm):
 
 
 def test_verificacao_e_registro(app, llm, tmp_path):
-    at = app.run()
+    at = _preparar(app.run())
     r = _deliberar(at)
     situacoes = {n["valor"]: n["situacao"] for n in r["numeros"]}
     assert situacoes["R$ 999,9 mi"] == "não encontrado"
@@ -115,7 +186,7 @@ def test_tension_map_incompleto_pede_correcao(app, llm):
     completo = tension_map([trade_off("T1", "Licitações")])
     incompleto = tension_map([trade_off("T1", "Licitações")], confidence_assessment=True)
     llm.rodadas = [incompleto, completo]
-    at = app.run()
+    at = _preparar(app.run())
     at.slider[0].set_value(1).run()
     r = _deliberar(at)
     assert r["problemas_formato"] == []
@@ -124,7 +195,7 @@ def test_tension_map_incompleto_pede_correcao(app, llm):
 
 def test_memorando_cortado_e_continuado(app, llm):
     llm.memorando_cortado_uma_vez = True
-    at = app.run()
+    at = _preparar(app.run())
     at.slider[0].set_value(1).run()
     r = _deliberar(at)
     assert not r["memorando_cortado"]
@@ -132,7 +203,7 @@ def test_memorando_cortado_e_continuado(app, llm):
 
 
 def test_revisao_de_neutralidade_confere_trechos(app, llm):
-    at = app.run()
+    at = _preparar(app.run())
     at.slider[0].set_value(1).run()
     r = _deliberar(at)
     n = r["neutralidade"]
@@ -149,14 +220,14 @@ def test_revisao_de_neutralidade_confere_trechos(app, llm):
 
 def test_falha_na_neutralidade_nao_derruba_a_analise(app, llm):
     llm.falhar_neutralidade = True
-    at = app.run()
+    at = _preparar(app.run())
     at.slider[0].set_value(1).run()
     r = _deliberar(at)
     assert "erro" in r["neutralidade"] and r["memorando"]
 
 
 def test_registro_pode_ser_baixado(app, llm):
-    at = app.run()
+    at = _preparar(app.run())
     at.slider[0].set_value(1).run()
     r = _deliberar(at)
     registro = json.loads(r["registro_json"])
@@ -171,7 +242,7 @@ def test_comparacao_com_analise_anterior(app, llm):
     from streamlit.testing.v1 import AppTest
 
     from test_funcoes import RELATORIO_NOVO
-    at = app.run()
+    at = _preparar(app.run())
     at.slider[0].set_value(1).run()
     primeiro = _deliberar(at)
     assert "retrato_relatorio" in json.loads(primeiro["registro_json"])
@@ -179,8 +250,7 @@ def test_comparacao_com_analise_anterior(app, llm):
     # segunda análise: relatório atualizado + registro da primeira
     llm.texto_relatorio = RELATORIO_NOVO
     llm.registro_anterior = primeiro["registro_json"].encode("utf-8")
-    at2 = AppTest.from_file(app._script_path, default_timeout=120).run()
-    assert not at2.exception, at2.exception
+    at2 = _preparar(AppTest.from_file(app._script_path, default_timeout=120).run())
     at2.slider[0].set_value(1).run()
     r = _deliberar(at2)
     c = r["comparacao"]
@@ -211,7 +281,7 @@ def _modo_independente(at, personas=PERSONAS_4):
 def test_modo_independente_completo(app, llm):
     llm.sintese = tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])
     llm.sintese["trade_offs"][1]["polo_b"]["defendido_por"] = ["p9"]            # persona que não existe
-    at = _modo_independente(app.run())
+    at = _modo_independente(_preparar(app.run()))
     r = _deliberar(at)
     d = r["debate"]
     fases = [c for c in llm.chamadas if "Você participa" in str(c["mensagens"][1:2])]
@@ -238,7 +308,7 @@ def test_modo_independente_completo(app, llm):
 
 def test_persona_que_nao_responde_fica_de_fora(app, llm):
     llm.personas_mudas = {"p3"}
-    at = _modo_independente(app.run())
+    at = _modo_independente(_preparar(app.run()))
     r = _deliberar(at)
     assert r["debate"]["ausentes"] == ["p3"]
     assert any("p3" in prob and "Fase 1" in prob for prob in r["problemas_formato"])
@@ -246,7 +316,7 @@ def test_persona_que_nao_responde_fica_de_fora(app, llm):
 
 def test_falha_do_avaliador_limita_a_confianca(app, llm):
     llm.falhar_avaliador = True
-    at = _modo_independente(app.run())
+    at = _modo_independente(_preparar(app.run()))
     r = _deliberar(at)
     assert "GEMINI_API_KEY" in r["debate"]["erro_avaliacao"]
     assert r["confianca"]["nivel"] in ("baixa", "média")
@@ -254,97 +324,21 @@ def test_falha_do_avaliador_limita_a_confianca(app, llm):
 
 
 def test_modo_independente_exige_tres_personas(app, llm):
-    at = _modo_independente(app.run(), personas="- [p1] Fazenda\n- [p2] Controle")
+    at = _modo_independente(_preparar(app.run()), personas="- [p1] Fazenda\n- [p2] Controle")
     next(b for b in at.button if "deliber" in b.label.lower()).click().run()
     assert not at.exception, at.exception
     assert any("pelo menos 3 personas" in e.value for e in at.error)
 
 
-def _diagnosticar(at):
-    next(b for b in at.button if "Diagnosticar" in b.label).click().run()
-    assert not at.exception, at.exception
-    return at.session_state["diagnostico"]
-
-
-def test_diagnostico_com_base_e_oficio(app, llm):
-    llm.base_projetos = "obra;municipio;situacao\nPonte do Rio Exemplo;Exemplópolis;em execução\n"
-    at = app.run()
-    d = _diagnosticar(at)
-    assert d["com_base"] and any(i["onde"] == "base de projetos" for i in d["itens"])
-    assert [m.value for m in at.metric][:1] == ["2"]                    # dotação + pedido 07.1 não atendido
-    assert "07.1 (Ofício nº 07/2026)" in llm.mensagem_diagnostico          # itens dos ofícios vão para o modelo
-    assert any("Minuta de ofício" in getattr(b, "proto", b).label for b in at.get("download_button"))
-
-
-def test_lacuna_critica_segura_o_debate_ate_confirmar(app, llm):
-    at = app.run()
-    _diagnosticar(at)
-    next(b for b in at.button if "deliber" in b.label.lower()).click().run()
-    assert "resultado" not in at.session_state
-    assert any("lacunas críticas sem resposta" in w.value for w in at.warning)
-    # marcando "deliberar mesmo assim", o debate roda e recebe as lacunas como contexto
-    next(c for c in at.checkbox if "mesmo assim" in c.label).check().run()
-    at.slider[0].set_value(1).run()
-    r = _deliberar(at)
-    debate = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
-    assert "LACUNAS IDENTIFICADAS NO DIAGNÓSTICO PRÉVIO" in debate["mensagens"][1]["content"][-1]["text"]
-    assert json.loads(r["registro_json"])["diagnostico_lacunas"]["itens"]
-
-
-def test_questoes_do_debate_viram_pedidos_sem_travar_nova_deliberacao(app, llm):
-    tm = tension_map([trade_off("T1", "Licitações")])
-    tm["unresolved_questions"] = [{"id": "Q1", "questao": "Qual o motivo do adiamento?", "quem_responde": "Licitações", "afeta": ["T1"]}]
-    llm.rodadas = [tm]
-    at = app.run()
-    at.slider[0].set_value(1).run()
-    r = _deliberar(at)
-    assert r["pedidos_do_debate"] == 2                                 # uma questão pode gerar mais de um pedido
-    d = at.session_state["diagnostico"]
-    assert d.get("so_debate") and {i["origem_id"] for i in d["itens"]} == {"Q1"}
-    assert any("viraram pedidos ao órgão" in m.value for m in at.info)
-    # rodar o diagnóstico depois mantém os pedidos do debate
-    next(b for b in at.button if "Diagnosticar" in b.label).click().run()
-    assert any(i["tipo"] == "questao_debate" for i in at.session_state["diagnostico"]["itens"])
-    # e esses pedidos não travam uma nova deliberação (só as lacunas críticas do relatório travam)
-    next(c for c in at.checkbox if "mesmo assim" in c.label).check().run()
-    _deliberar(at)
-
-
-def test_diagnostico_e_debate_compartilham_o_prefixo_do_cache(app, llm):
-    at = app.run()
-    _diagnosticar(at)
-    next(c for c in at.checkbox if "mesmo assim" in c.label).check().run()
-    _deliberar(at)
-    diag = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_diagnostico")
-    debate = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
-    # mesmas ferramentas, mesmo sistema e mesmo bloco do relatório: o debate lê do cache o que o diagnóstico gravou
-    assert diag["kw"]["tools"] == debate["kw"]["tools"]
-    assert diag["mensagens"][0] == debate["mensagens"][0]
-    assert diag["mensagens"][1]["content"][0] == debate["mensagens"][1]["content"][0]
-
-
-def test_diagnostico_repetido_reaproveita_a_resposta(app, llm):
-    at = app.run()
-    _diagnosticar(at)
-    d2 = _diagnosticar(at)
-    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_diagnostico") == 1
-    assert d2["reaproveitado"] and d2["uso"] == [] and d2["itens"]
-    assert any("reaproveitado" in c.value for c in at.caption)
-    # "Refazer do zero" chama o modelo de novo
-    next(b for b in at.button if "Refazer o diagnóstico" in b.label).click().run()
-    assert not at.exception, at.exception
-    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_diagnostico") == 2
-    assert not at.session_state["diagnostico"]["reaproveitado"]
-
-
-def test_extracao_reaproveitada_em_nova_sessao(app, llm):
+def test_dossie_reaproveitado_em_nova_sessao(app, llm):
     from streamlit.testing.v1 import AppTest
-    app.run()
-    outra = AppTest.from_file(app._script_path, default_timeout=120).run()     # outra sessão, mesmo relatório
-    assert not outra.exception, outra.exception
-    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_insumos") == 1
-    assert outra.session_state["problema"] == "Carteira travada na transição."
-    assert outra.session_state["uso_extracao"] == []
-    # "Extrair novamente" chama o modelo de novo
-    next(b for b in outra.button if "Extrair novamente" in b.label).click().run()
-    assert [c["ferramenta"] for c in llm.chamadas].count("registrar_insumos") == 2
+    _preparar(app.run())
+    pesquisas = lambda: len([c for c in llm.chamadas if c["kw"].get("web_search_options")])
+    assert pesquisas() == 2
+    outra = AppTest.from_file(app._script_path, default_timeout=120).run()      # outra sessão, mesma pesquisa
+    outra.text_input(key="orgao_analisado").input("Secretaria de Exemplo").run()
+    _botao(outra, "Pesquisar e montar o dossiê")
+    assert pesquisas() == 2 and outra.session_state["dossie"]["reaproveitado"]
+    assert any("reaproveitado" in c.value for c in outra.caption)
+    _botao(outra, "Pesquisar de novo do zero")
+    assert pesquisas() == 4 and not outra.session_state["dossie"]["reaproveitado"]

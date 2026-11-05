@@ -1,7 +1,5 @@
 """Testes das funções do app, sem a interface."""
-import json
-
-from conftest import FONTE_FALSA, FONTE_OK, RELATORIO, SEM_FONTE, tension_map, trade_off
+from conftest import FONTE_AUTO, FONTE_FALSA, FONTE_OK, RELATORIO, SEM_FONTE, dossie_exemplo, tension_map, trade_off
 
 
 def test_limpeza_tira_orientacoes_e_dados_pessoais(funcoes):
@@ -21,10 +19,12 @@ def test_extrair_json_ignora_lixo_e_respeita_marcadores(funcoes):
 
 
 def test_mapear_campos_aceita_nomes_alternativos_e_aninhamento(funcoes):
-    variante = {"Problema Central": "x", "Fatos Ancoradores": ["f"], "Personas": ["p"], "Lacunas de Dados": ["l"]}
-    assert set(funcoes.mapear_campos(variante)) == {"problema", "fatos", "personas", "lacunas"}
-    aninhado = {"dados": {"problema": "x", "fatos": ["f"], "personas": ["p"], "lacunas": ["l"]}}
-    assert set(funcoes.mapear_campos(aninhado)) == {"problema", "fatos", "personas", "lacunas"}
+    variante = {"Problema Central": "x", "Personas": ["p"], "Lacunas de Dados": ["l"], "Grupos sem voz": ["g"]}
+    assert set(funcoes.mapear_campos(variante)) == {"problema", "personas", "lacunas", "sem_voz"}
+    aninhado = {"dados": {"problema": "x", "personas": ["p"], "lacunas": ["l"]}}
+    assert set(funcoes.mapear_campos(aninhado)) == {"problema", "personas", "lacunas"}
+    # fatos não são mais extraídos: vêm do dossiê
+    assert "fatos" not in funcoes.mapear_campos({"fatos": ["f"], "problema": "x"})
 
 
 def test_completude_conta_campos_pendentes(funcoes):
@@ -37,20 +37,32 @@ def test_completude_conta_campos_pendentes(funcoes):
     assert 0 < comp["indice"] < 1
 
 
-def test_evidencia_sem_trecho_no_relatorio_e_rebaixada(funcoes):
+def test_evidencias_conferidas_no_dossie_e_na_autodeclaracao(funcoes):
+    dossie = dossie_exemplo(funcoes)
+    item_inexistente = {"tipo": "dossie", "referencia": "O77", "trecho": "qualquer coisa escrita aqui mesmo"}
+    pdf_nao_conferido = {"tipo": "dossie", "referencia": "O5", "trecho": "contrato de manutenção do sistema de folha"}
     tm = tension_map([trade_off("T1", "ok", 1, FONTE_OK), trade_off("T2", "falsa", 1, FONTE_FALSA),
-                      trade_off("T3", "sem fonte", 2, SEM_FONTE)])
-    tm, ev = funcoes.verificar_evidencias(tm, RELATORIO)
-    assert [r["onde"] for r in ev["rebaixadas"]] == ["T2 · Polo A", "T3 · Polo A"]
-    assert tm["trade_offs"][1]["polo_a"]["evidencia"] == 5
-    assert tm["trade_offs"][1]["polo_a"]["evidencia_declarada"] == 1
-    # o trade-off não pode ter evidência mais forte que seu polo mais bem apoiado
-    assert tm["trade_offs"][1]["nivel_evidencia"] == 4
+                      trade_off("T3", "sem fonte", 2, SEM_FONTE), trade_off("T4", "autodeclaração", 1, FONTE_AUTO),
+                      trade_off("T5", "item inexistente", 1, item_inexistente),
+                      trade_off("T6", "não conferido", 1, pdf_nao_conferido)])
+    tm, ev = funcoes.verificar_evidencias(tm, funcoes.texto_dossie(dossie), dossie, RELATORIO)
+    t = {x["id"]: x for x in tm["trade_offs"]}
+    assert [r["onde"] for r in ev["rebaixadas"]] == ["T2 · Polo A", "T3 · Polo A", "T5 · Polo A"]
+    assert t["T1"]["polo_a"]["evidencia"] == 1                         # dado oficial conferido sustenta nível 1
+    assert t["T2"]["polo_a"]["evidencia"] == 5 and t["T2"]["polo_a"]["evidencia_declarada"] == 1
+    assert t["T2"]["nivel_evidencia"] == 4      # o trade-off não pode ser mais forte que seu polo mais bem apoiado
+    # o que vem só do órgão vale no máximo nível 4
+    assert t["T4"]["polo_a"]["evidencia"] == 4 and "autodeclaração" in t["T4"]["polo_a"]["verificacao"]
+    assert [r["referencia"] for r in ev["autodeclaracoes"]] == ["3.2"]
+    # item oficial cujo link não abriu: no máximo nível 3 até alguém conferir
+    assert t["T6"]["polo_a"]["evidencia"] == 3 and "O5" in t["T6"]["polo_a"]["verificacao"]
+    assert "não existe no dossiê" in ev["rebaixadas"][2]["motivo"]
 
 
 def test_normas_vao_para_revisao_juridica(funcoes):
     norma = {"tipo": "norma", "referencia": "Lei 14.133/2021, art. 71", "trecho": ""}
-    _, ev = funcoes.verificar_evidencias(tension_map([trade_off("T1", "x", 2, norma)]), RELATORIO)
+    dossie = dossie_exemplo(funcoes)
+    _, ev = funcoes.verificar_evidencias(tension_map([trade_off("T1", "x", 2, norma)]), RELATORIO, dossie, RELATORIO)
     assert ev["normas"][0]["referencia"] == "Lei 14.133/2021, art. 71"
     assert not ev["rebaixadas"]
 
@@ -95,11 +107,18 @@ def test_estabilidade_sem_origens_nao_perde_a_analise(funcoes):
 
 
 def test_confianca_calculada(funcoes):
-    vazio = {"conferidas": [1, 2, 3], "calculos": [], "rebaixadas": [], "normas": []}
-    alta = funcoes.confianca_calculada({"indice": 0.9}, {"rodadas": 3, "estaveis": 3, "minimo_para_estavel": 2}, vazio)
-    assert alta["nivel"] == "alta"
-    assert funcoes.confianca_calculada({"indice": 0.3}, {"rodadas": 3, "estaveis": 3, "minimo_para_estavel": 2}, vazio)["nivel"] == "baixa"
-    assert funcoes.confianca_calculada({"indice": 0.9}, None, vazio)["nivel"] == "média"   # estabilidade não medida
+    vazio = {"conferidas": [1, 2, 3], "calculos": [], "rebaixadas": [], "normas": [], "autodeclaracoes": []}
+    estavel = {"rodadas": 3, "estaveis": 3, "minimo_para_estavel": 2}
+    bom = {"itens": 10, "conferidos": 9, "oficiais": 8}
+    assert funcoes.confianca_calculada(bom, estavel, vazio)["nivel"] == "alta"
+    assert funcoes.confianca_calculada(dict(bom, conferidos=3), estavel, vazio)["nivel"] == "baixa"   # dossiê mal conferido
+    assert funcoes.confianca_calculada(None, estavel, vazio)["nivel"] == "baixa"                       # sem dossiê
+    assert funcoes.confianca_calculada(bom, None, vazio)["nivel"] == "média"                           # estabilidade não medida
+    # a completude do relatório só é informada: o relatório é autodeclaração
+    c = funcoes.confianca_calculada(bom, estavel, vazio, completude={"indice": 0.2})
+    assert c["nivel"] == "alta" and any("20%" in m for m in c["motivos"])
+    so_orgao = dict(vazio, conferidas=[1], autodeclaracoes=[1, 2, 3])
+    assert funcoes.confianca_calculada(bom, estavel, so_orgao)["nivel"] == "média"
 
 
 def test_validacao_aponta_campos_faltantes(funcoes):
@@ -116,6 +135,8 @@ def test_custo_considera_cache(funcoes):
                   "cache_leitura": 1_000_000, "cache_escrita": 0, "saida": 0}]
     assert round(funcoes.custo_estimado(sem_cache)[0], 2) == 4.00
     assert round(funcoes.custo_estimado(com_cache)[0], 2) == 0.20
+    # busca na web da Anthropic: US$ 10 por mil buscas
+    assert round(funcoes.custo_estimado([dict(com_cache[0], buscas=20)])[0], 2) == 0.40
 
 
 def test_word_gerado_abre_e_tem_matriz(funcoes):
@@ -189,143 +210,6 @@ def test_mesma_familia(funcoes):
     assert not funcoes.mesma_familia("gemini/gemini-3.1-pro-preview", "anthropic/claude-sonnet-5-5")
 
 
-def test_dias_uteis_com_feriados(funcoes):
-    from datetime import date
-    assert funcoes._pascoa(2026) == date(2026, 4, 5)
-    assert funcoes.somar_dias_uteis(date(2026, 11, 4), 5) == date(2026, 11, 11)
-    assert funcoes.somar_dias_uteis(date(2026, 11, 18), 3) == date(2026, 11, 24)    # pula 20/11 e o fim de semana
-
-
-def test_secretaria_e_cargo(funcoes):
-    texto = "**GOVERNO DO ESTADO DO RIO DE JANEIRO**\n\nSecretaria de Estado das Cidades (SECID)\n"
-    assert funcoes.secretaria_do_relatorio(texto) == "Secretaria de Estado das Cidades"
-    assert funcoes.cargo_do_titular("Secretaria de Estado das Cidades", "Senhora") == "Secretária de Estado das Cidades"
-    assert funcoes.cargo_do_titular("Secretaria de Estado das Cidades", "Senhor") == "Secretário de Estado das Cidades"
-
-
-def test_pendencias_por_secao(funcoes):
-    texto, _ = funcoes.limpar_relatorio(RELATORIO)
-    secoes = [p["secao"][:3] for p in funcoes.pendencias_por_secao(texto)]
-    assert {"1.2", "2.1", "3.2"} <= set(secoes)
-
-
-BASE = "obra;municipio;situacao\nPonte do Rio Exemplo;Exemplópolis;em execução\n"
-
-
-def test_diagnostico_confere_evidencias(funcoes, llm):
-    texto, _ = funcoes.limpar_relatorio(RELATORIO)
-    d = funcoes.diagnosticar("anthropic/claude-opus-5-5", texto, BASE, "cenário")
-    itens = {i["item"]: i for i in d["itens"]}
-    assert "Dotação (repetido)" not in itens                                   # pedido repetido sai
-    assert itens["Dotação atualizada"]["verificado"] and itens["Dotação atualizada"]["onde"] == "relatório"
-    assert itens["Ponte do Rio Exemplo"]["onde"] == "base de projetos"
-    assert not itens["Obra inventada"]["verificado"] and not itens["Obra inventada"]["incluir"]
-    assert not itens["Fonte das atas"]["incluir"]                              # acessória não entra por padrão
-    assert d["itens"][0]["materialidade"] == "critica" and d["itens"][-1]["item"] == "Obra inventada"
-    assert "<base_projetos>" in llm.mensagem_diagnostico and "1.2" in llm.mensagem_diagnostico
-
-
-def test_oficio_em_word(funcoes):
-    import io
-    from datetime import date
-
-    import docx
-    itens = [{"secao": "1.2 Orçamento do exercício", "pedido": "Informar a dotação atualizada."},
-             {"secao": "1.2 Orçamento do exercício", "pedido": "Informar os restos a pagar."},
-             {"secao": "Base de projetos", "pedido": "Informar a situação da Ponte do Rio Exemplo."}]
-    dados = {"secretaria": "Secretaria de Estado das Cidades", "titular": "", "tratamento": "Senhora", "numero": "12/2026",
-             "referencia": "Relatório de transição.", "data_relatorio": "23/10/2026", "signatario": "", "cargo_signatario": "",
-             "canal": "", "prazo_dias": 5, "data_oficio": date(2026, 11, 4)}
-    conteudo, limite = funcoes.gerar_oficio_docx(dados, itens)
-    texto = "\n".join(p.text for p in docx.Document(io.BytesIO(conteudo)).paragraphs)
-    assert limite == date(2026, 11, 11)
-    for trecho in ("Ofício nº 12/2026 – Equipe de Transição", "A Sua Excelência a Senhora", "[Nome do(a) titular]",
-                   "Secretária de Estado das Cidades", "Senhora Secretária,", "5 (cinco) dias úteis, isto é, até 11/11/2026",
-                   "2. Seção 1.2 Orçamento do exercício:", "a) Informar a dotação atualizada.", "b) Informar os restos a pagar.",
-                   "3. Itens da base de projetos não mencionados no relatório:", "informado expressamente", "Atenciosamente,"):
-        assert trecho in texto, trecho
-
-
-def test_oficios_aplicaveis_e_referencia(funcoes):
-    assert funcoes.oficios_aplicaveis("Secretaria de Estado das Cidades") == ["02", "06", "07", "08"]
-    assert {"03", "04"} <= set(funcoes.oficios_aplicaveis("Secretaria de Estado de Fazenda"))
-    assert "09" in funcoes.oficios_aplicaveis("Secretaria de Estado de Defesa Civil")
-    ref = funcoes.referencia_oficios(["07", "02"], "23/10/2026")
-    assert ref.startswith("Ofícios nº 02 e 07/2026 – Equipe de Transição, encaminhados pelo Ofício Circular SECC/CHEGAB nº 10/2026")
-    assert ref.endswith("posicionadas em 23/10/2026.")
-
-
-def test_diagnostico_confere_atendimento_aos_oficios(funcoes, llm):
-    texto, _ = funcoes.limpar_relatorio(RELATORIO)
-    d = funcoes.diagnosticar("anthropic/claude-opus-5-5", texto, "", "cenário", ["02", "06", "07", "08"])
-    at = {a["item_id"]: a for a in d["atendimento"]}
-    assert len(at) == 25
-    assert at["02.2"]["situacao"] == "atendido" and at["02.2"]["evidencia"]
-    assert at["02.3"]["situacao"] == "parcial" and "não foi encontrada" in at["02.3"]["alerta"]   # evidência falsa
-    assert at["07.1"]["situacao"] == "nao_atendido" and not at["07.1"]["alerta"]
-    assert at["06.4"]["situacao"] == "nao_atendido" and "concorrencia" in at["06.4"]["alerta"]   # o relatório fala de concorrências
-    assert at["08.6"]["situacao"] == "nao_avaliado"
-    itens = {i.get("item_id"): i for i in d["itens"] if i["tipo"] == "nao_atendido"}
-    assert itens["07.1"]["materialidade"] == "critica" and itens["07.1"]["incluir"]
-    assert not itens["06.4"]["incluir"]                                    # não reitera o que pode ter sido respondido
-    assert d["itens"][0]["tipo"] == "nao_atendido"                         # reiterações primeiro
-
-
-def test_oficio_reitera_pedidos_nao_atendidos(funcoes):
-    import io
-    from datetime import date
-
-    import docx
-    itens = [{"oficio": "07", "item_id": "07.1", "secao": "Ofício nº 07/2026",
-              "pedido": "Informar as ações judiciais com potencial de bloqueio financeiro."},
-             {"secao": "1.2 Orçamento do exercício", "pedido": "Informar a dotação atualizada."}]
-    dados = {"secretaria": "Secretaria de Estado das Cidades", "tratamento": "Senhor", "prazo_dias": 5,
-             "referencia": funcoes.referencia_oficios(["07"], "23/10/2026"), "data_relatorio": "23/10/2026",
-             "data_oficio": date(2026, 11, 4)}
-    conteudo, _ = funcoes.gerar_oficio_docx(dados, itens)
-    texto = "\n".join(p.text for p in docx.Document(io.BytesIO(conteudo)).paragraphs)
-    for trecho in ("Referência: Ofício nº 07/2026 – Equipe de Transição", "em resposta aos ofícios em referência",
-                   "2. Reiteramos o solicitado no Ofício nº 07/2026 – Equipe de Transição (ações judiciais, auditorias e "
-                   "órgãos de controle), em especial:", "a) Informar as ações judiciais com potencial de bloqueio financeiro.",
-                   "3. Seção 1.2 Orçamento do exercício:"):
-        assert trecho in texto, trecho
-
-
-def test_prompt_pede_desdobramentos_com_lista_de_verificacao(funcoes):
-    assert '"desdobramento"' in funcoes.PROMPT_DIAGNOSTICO
-    assert "percentual de execução física e financeira" in funcoes.PROMPT_DIAGNOSTICO
-    enum = funcoes.FERRAMENTA_DIAGNOSTICO["function"]["parameters"]["properties"]["lacunas"]["items"]["properties"]["tipo"]["enum"]
-    assert "desdobramento" in enum and "nao_atendido" not in enum and "questao_debate" not in enum
-
-
-def test_desdobramento_usa_o_fato_como_evidencia(funcoes, llm):
-    llm.lacunas = [{"tipo": "desdobramento", "secao": "3.2 Obras suspensas", "item": "Dados das cinco obras suspensas",
-                    "evidencia": "Cinco obras estão com execução suspensa aguardando decisão da Casa Civil",
-                    "por_que_falta": "sem contrato e percentual executado não dá para avaliar o custo de esperar",
-                    "materialidade": "critica", "pedido": "Informar, para cada uma das cinco obras suspensas, o contrato, a "
-                    "contratada, o percentual executado e a data e o ato da suspensão."},
-                   {"tipo": "nao_atendido", "secao": "x", "item": "tipo reservado ao código", "evidencia": "Cinco obras estão "
-                    "com execução suspensa", "por_que_falta": "x", "materialidade": "relevante", "pedido": "Outro pedido."}]
-    texto, _ = funcoes.limpar_relatorio(RELATORIO)
-    d = funcoes.diagnosticar("anthropic/claude-opus-5-5", texto, "", "cenário", [])
-    itens = {i["item"]: i for i in d["itens"]}
-    obra = itens["Dados das cinco obras suspensas"]
-    assert obra["tipo"] == "desdobramento" and obra["verificado"] and obra["incluir"]
-    assert itens["tipo reservado ao código"]["tipo"] == "evasiva"       # o modelo não cria "pedido não atendido"
-
-
-def test_pedidos_do_debate(funcoes, llm):
-    tm = tension_map([trade_off("T1", "a")])
-    tm["unresolved_questions"] = [{"id": "Q1", "questao": "Qual a dotação atualizada?", "quem_responde": "ASSPLO", "afeta": ["T1"]},
-                                  {"id": "Q2", "questao": "Quando as obras foram suspensas?", "quem_responde": "SUBGFISO", "afeta": ["T2"]}]
-    itens, _ = funcoes.pedidos_do_debate("anthropic/claude-sonnet-5-5", tm,
-                                         ["Informar a dotação atualizada de 2026 por fonte de recurso."])
-    assert [i["origem_id"] for i in itens] == ["Q1", "Q2"]              # Q99 inexistente e o repetido saem
-    assert all(i["tipo"] == "questao_debate" and i["incluir"] for i in itens)
-    assert itens[1]["unidade"] == "SUBGFISO" and "afeta T2" in itens[1]["por_que_falta"]
-    assert "Informar a dotação atualizada" in llm.mensagem_pedidos_debate        # a lista de já pedidos vai ao modelo
-
-
 def test_custo_da_escrita_de_cache_de_uma_hora(funcoes):
     base = {"modelo": "anthropic/claude-opus-5-5", "entrada": 1_000_000, "entrada_sem_cache": 0, "cache_leitura": 0,
             "cache_escrita": 1_000_000, "saida": 0}
@@ -334,10 +218,19 @@ def test_custo_da_escrita_de_cache_de_uma_hora(funcoes):
 
 
 def test_mensagens_sem_cache_para_outros_modelos(funcoes):
-    msgs = funcoes.mensagens_com_cache("gemini/gemini-3.8-flash", "INSTRUÇÕES", "texto do relatório", "pergunta",
-                                       dados_extra="<base_projetos>x</base_projetos>")
+    msgs = funcoes.mensagens_com_cache("gemini/gemini-3.8-flash", "INSTRUÇÕES", "<dossie>\nx\n</dossie>", "pergunta")
     assert msgs[0] == {"role": "system", "content": "INSTRUÇÕES"}
-    assert msgs[1]["content"].startswith("<relatorio>") and msgs[1]["content"].endswith("pergunta")
+    assert msgs[1]["content"].startswith("<dossie>") and msgs[1]["content"].endswith("pergunta")
+
+
+def test_material_de_referencia_marca_o_relatorio_como_autodeclaracao(funcoes):
+    dossie = dossie_exemplo(funcoes)
+    m = funcoes.material_referencia(dossie, "texto do órgão")
+    assert m.startswith("<dossie>") and "<relatorio>\nAUTODECLARAÇÃO DO ÓRGÃO" in m and m.endswith("</relatorio>")
+    assert "<relatorio>" not in funcoes.material_referencia(dossie, "")
+    texto = funcoes.texto_dossie(dossie)
+    assert "[E1] (situacao_fiscal)" in texto and "nível máximo 1" in texto
+    assert "PROCURADO E NÃO ENCONTRADO" in texto and "terceirizados" in texto
 
 
 def test_concordancia_exige_todos_os_pares(funcoes, llm):
@@ -352,3 +245,128 @@ def test_concordancia_exige_todos_os_pares(funcoes, llm):
     n = len(llm.chamadas)
     assert not funcoes.rodadas_concordam("anthropic/claude-sonnet-5-5", tm1, tension_map([trade_off("T1", "x")]), uso_lista=[])
     assert len(llm.chamadas) == n
+
+
+# --- FUNDAMENTAÇÃO (DOSSIÊ) ---------------------------------------------------------
+
+def test_itens_normalizados_e_numerados(funcoes):
+    bruto = {"bloco": "Situação fiscal", "afirmacao": "x", "url": "javascript:alert(1)", "tipo_fonte": "opiniao",
+             "confianca": "Alta"}
+    i = funcoes.normalizar_item(bruto, "estado")
+    assert i["url"] == "" and i["tipo_fonte"] == "hipotese" and i["confianca"] == "alta"
+    assert i["bloco"] == "situacao_fiscal"
+    assert funcoes.normalizar_item({"bloco": "pessoal"}, "orgao") is None            # sem afirmação
+    assert funcoes.normalizar_item({"bloco": "nada", "afirmacao": "y"}, "orgao")["bloco"] == "outro_orgao"
+    itens = [funcoes.normalizar_item({"afirmacao": a, "id": ident}, c)
+             for a, ident, c in [("a", "E1", "estado"), ("b", "E1", "estado"), ("c", "", "orgao"), ("d", "E9", "orgao")]]
+    assert [x["id"] for x in funcoes.numerar_itens(itens)] == ["E1", "E2", "O1", "O2"]
+
+
+def test_nivel_maximo_por_tipo_de_fonte(funcoes):
+    item = lambda tipo, chec="conferido", equipe=False: {"tipo_fonte": tipo, "checagem": chec, "conferido_pela_equipe": equipe}
+    assert funcoes.nivel_maximo(item("documento_oficial")) == 1
+    assert funcoes.nivel_maximo(item("documento_oficial", "inacessivel")) == 3
+    assert funcoes.nivel_maximo(item("documento_oficial", "inacessivel", True)) == 1     # a equipe conferiu
+    assert funcoes.nivel_maximo(item("estudo")) == 2
+    assert funcoes.nivel_maximo(item("imprensa")) == 3
+    assert funcoes.nivel_maximo(item("declaracao_politica")) == 3                        # promessa nunca é fato
+    assert funcoes.nivel_maximo(item("hipotese")) == 4
+
+
+def test_links_conferidos_por_codigo(funcoes, llm):
+    d = dossie_exemplo(funcoes)
+    chec = {i["id"]: i["checagem"] for i in d["itens"]}
+    assert chec["O1"] == "conferido"                       # o script da página é ignorado e o trecho é achado
+    assert chec["O4"] == "trecho_nao_encontrado"           # a página abre, mas não tem o trecho
+    assert chec["O5"] == "inacessivel"
+    assert chec["O6"] == "sem_trecho"
+    # cada página é aberta uma vez só, mesmo citada por dois itens
+    assert llm.paginas_abertas.count("https://transparencia.exemplo.gov.br/licitacoes") == 1
+    r = funcoes.resumo_dossie(d)
+    assert (r["itens"], r["estado"], r["orgao"], r["nao_encontrado"]) == (9, 3, 6, 2)
+    assert r["conferidos"] == 6
+
+
+def test_enderecos_internos_nao_sao_abertos(funcoes, llm):
+    for url in ("http://localhost/x", "http://127.0.0.1/x", "http://169.254.169.254/latest", "http://10.0.0.5/a",
+                "http://servidor.internal/a"):
+        llm.paginas[url] = "<p>segredo</p>"
+        assert funcoes.baixar_pagina(url) is None
+    assert not any(u.startswith("http://") for u in getattr(llm, "paginas_abertas", []))     # nem chegou a abrir
+    assert "Quatro concorrências" in funcoes.baixar_pagina("https://transparencia.exemplo.gov.br/licitacoes")
+
+
+def test_html_vira_texto(funcoes):
+    assert funcoes._html_para_texto("<p>a &amp; b</p><script>x()</script><style>p{}</style>").split() == ["a", "&", "b"]
+
+
+def test_tabela_editada_volta_para_os_itens(funcoes):
+    d = dossie_exemplo(funcoes)
+    linhas = funcoes.itens_para_tabela(d["itens"])
+    linhas[0]["Incluir"] = False                                                  # excluído do debate
+    linhas[3]["Link"] = "https://outro.exemplo/pagina"                            # mudou o link: checagem refeita
+    linhas[4]["Conferido pela equipe"] = True
+    linhas.append({"Incluir": None, "ID": None, "Camada": "Órgão", "Bloco": "pessoal", "Afirmação": "Nova linha",
+                   "Tipo": "Imprensa", "Confiança": float("nan")})                # linha nova, com vazios do editor
+    linhas.append({"Afirmação": float("nan")})                                    # linha vazia: ignorada
+    del linhas[5]                                                                 # linha apagada
+    itens = funcoes.tabela_para_itens(linhas, d["itens"])
+    assert len(itens) == 9 and not itens[0]["incluir"]
+    assert itens[3]["checagem"] == "nao_conferido" and itens[1]["checagem"] == d["itens"][1]["checagem"]
+    assert itens[4]["conferido_pela_equipe"]
+    nova = itens[-1]
+    assert nova["id"] == "O7" and nova["incluir"] and nova["tipo_fonte"] == "imprensa" and nova["confianca"] == "baixa"
+    assert len({i["id"] for i in itens}) == len(itens)
+
+
+def test_dossie_pronto_e_lido_e_reconferido(funcoes):
+    d = dossie_exemplo(funcoes)
+    for i in d["itens"]:
+        i["checagem"] = "conferido"                                              # o arquivo diz que tudo foi conferido...
+    lido = funcoes.ler_dossie_arquivo(funcoes.dossie_para_json(d).encode("utf-8"))
+    assert lido["origem"] == "arquivo" and len(lido["itens"]) == 9
+    assert {i["id"]: i["checagem"] for i in lido["itens"]}["O5"] == "inacessivel"  # ...mas o código confere de novo
+    import pytest
+    with pytest.raises(ValueError):
+        funcoes.ler_dossie_arquivo(b'{"nada": 1}')
+    with pytest.raises(ValueError):
+        funcoes.ler_dossie_arquivo(b'{"itens": [{"bloco": "x"}]}')
+
+
+def test_pesquisa_usa_busca_na_web_e_monta_o_dossie(funcoes, llm):
+    d = funcoes.montar_dossie("anthropic/claude-sonnet-5-5", "Secretaria de Exemplo", "04/11/2026", "licitações")
+    pesquisas = [c for c in llm.chamadas if "Monte a camada" in str(c["mensagens"])]
+    assert len(pesquisas) == 2 and all(c["kw"]["web_search_options"] == {"search_context_size": "high"} for c in pesquisas)
+    assert any("Foco indicado pela equipe" in str(c["mensagens"]) for c in pesquisas)
+    assert [i["id"] for i in d["itens"]][:4] == ["E1", "E2", "E3", "O1"]
+    assert sum(u["buscas"] for u in d["uso"]) == 8
+    # mesma pesquisa de novo: reaproveitada, sem nova busca
+    de_novo = funcoes.montar_dossie("anthropic/claude-sonnet-5-5", "Secretaria de Exemplo", "04/11/2026", "licitações")
+    assert de_novo["reaproveitado"] and len([c for c in llm.chamadas if "Monte a camada" in str(c["mensagens"])]) == 2
+
+
+def test_insumos_saem_do_dossie_e_sem_baseline(funcoes, llm):
+    campos, uso, _ = funcoes.preparar_insumos("anthropic/claude-sonnet-5-5", dossie_exemplo(funcoes), "foco x")
+    assert "<dossie>" in llm.mensagem_insumos and "FOCO INDICADO PELA EQUIPE: foco x" in llm.mensagem_insumos
+    assert "Cinco obras" not in llm.mensagem_insumos                              # o relatório do órgão não entra
+    assert [p["id"] for p in campos["personas"]] == ["planejamento", "controle", "gradual"]
+    assert campos["sem_voz"] == ["Trabalhadores terceirizados dos contratos de custeio"]
+
+
+def test_confronto_descarta_o_que_nao_confere(funcoes, llm):
+    texto_rel, _ = funcoes.limpar_relatorio(RELATORIO)
+    c = funcoes.confrontar("anthropic/claude-sonnet-5-5", dossie_exemplo(funcoes), texto_rel)
+    assert [(d["item"], d["situacao"]) for d in c["divergencias"]] == [("O2", "nao_mencionado"), ("O1", "contradiz")]
+    assert c["descartadas"] == 3      # item inexistente, trecho que não está no relatório e item que o relatório menciona
+    assert "<relatorio>" in llm.mensagem_confronto and "<dossie>" in llm.mensagem_confronto
+    assert "sem atribuir intenção" in funcoes.texto_confronto(c)
+    assert funcoes.confrontar("m", dossie_exemplo(funcoes), "")["divergencias"] == []
+
+
+def test_quadro_sobre_o_documento(funcoes):
+    quadro = funcoes.sobre_o_documento({"itens": 9, "conferidos": 6}, "04/11/2026", {"nivel": "média"}, 4)
+    memo = funcoes.inserir_sobre_documento("# Memorando Executivo\n## Em síntese\n- x", quadro)
+    linhas = memo.splitlines()
+    assert linhas[0] == "# Memorando Executivo" and linhas[2] == "## Sobre este documento"
+    assert "4 papéis institucionais simulados" in memo and "não recomenda" in memo
+    assert funcoes.inserir_sobre_documento("sem título", quadro).startswith("## Sobre este documento")
