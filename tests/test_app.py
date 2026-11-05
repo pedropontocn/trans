@@ -103,7 +103,7 @@ def test_deliberacao_com_uma_rodada(app, llm):
     # o confronto entra no resultado e no memorando; o memorando abre com o quadro de proveniência
     assert [d["item"] for d in r["confronto"]["divergencias"]] == ["O4", "O3"]
     assert r["memorando"].splitlines()[2] == "## Sobre este documento"
-    memo_call = next(c for c in llm.chamadas if "NESTA ETAPA: escreva a Fase 5" in str(c["mensagens"][0]["content"]))
+    memo_call = next(c for c in llm.chamadas if "NESTA ETAPA: escreva o memorando para um ALTO GESTOR" in str(c["mensagens"][0]["content"]))
     assert "[O1]" in memo_call["mensagens"][1]["content"] and "DIVERGÊNCIAS" in memo_call["mensagens"][1]["content"]
     assert any("O que o órgão declarou" in s.value for s in at.subheader)
 

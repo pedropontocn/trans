@@ -57,7 +57,7 @@ LIMITE_RELATORIO = 400_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas", "sem_voz"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "2.8"
+APP_VERSAO = "2.9"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -148,49 +148,49 @@ Regras de concisão (para caber no limite de tokens; a resposta inteira cabe em 
 """
 
 PROMPT_ETAPA_2 = METODOLOGIA + """
-NESTA ETAPA: escreva a Fase 5 a partir do cenário, do Tension Map e das divergências entre a autodeclaração e o
-dossiê, todos fornecidos. Não acrescente trade-offs, números ou fatos que não estejam nesses insumos. Não recomende um
-caminho: apresente as opções, quem ganha e quem perde com cada uma e o que se sabe sobre cada argumento.
+NESTA ETAPA: escreva o memorando para um ALTO GESTOR, que tem poucos minutos para ler. Use o cenário, o Tension Map e
+as divergências entre o que o órgão informou e as fontes, todos fornecidos. Não acrescente dilemas, números ou fatos que
+não estejam nesses insumos. Não recomende um caminho: apresente as opções com o mesmo peso e o que se ganha e se arrisca
+com cada uma. O detalhamento técnico do debate vai num anexo montado à parte; aqui, só o que o gestor precisa.
 
-Tamanho: o memorando inteiro, com a matriz, no máximo 900 palavras.
-Estabilidade: o Tension Map pode trazer "sinais_fracos", trade-offs que apareceram em poucas rodadas independentes.
-Não os trate como principais; cite-os, se forem relevantes, numa única linha em "Dados que faltam".
-Números: copie valores como aparecem nos insumos ou arredonde-os (ex.: R$ 236,4 mi). Se fizer uma conta,
-escreva "(cálculo)" logo depois do número. Os números do memorando são conferidos por código.
-Não crie prazos, datas ou números que não estejam nos insumos.
-Seja direto: frases curtas, sem repetir o que já está no Tension Map.
+LINGUAGEM (obrigatório):
+- Português claro, de gestão pública. Frases de até 25 palavras. Comece cada item pelo que importa.
+- NÃO use estes termos: trade-off, polo, persona, baseline, Tension Map, nível de evidência (nem "Nível 1" a "Nível 5"),
+  autodeclaração, dossiê, divergência epistêmica/normativa/distributiva/causal/temporal/factual, mecanismo causal.
+  Em vez deles: "dilema" ou "decisão"; "opção"; "quem defende"; "se nada for feito"; "a Secretaria informou";
+  "a pesquisa em fontes públicas"; "confirmado"/"não confirmado".
+- Não cite ids (T1, O12, E3) nem nomes de papéis simulados.
+- Para dizer quão firme é uma informação, use só estes rótulos: "confirmado em fonte oficial", "cálculo ou norma",
+  "só na imprensa", "só informado pelo órgão", "sem comprovação".
+- Valores: arredonde (R$ 2,49 bi, R$ 998 mi). Se fizer uma conta, escreva "(cálculo)" logo depois do número. Os números
+  são conferidos por código. Não crie prazos, datas ou números que não estejam nos insumos.
+- Informado x confirmado: nunca diga que o órgão não enviou algo que está no CONTEÚDO DA AUTODECLARAÇÃO. Separe "o órgão
+  não informou" de "o órgão informou, falta confirmar em fonte oficial".
+
+TAMANHO: no máximo 650 palavras, com a tabela de riscos.
 
 Entregue somente o Markdown abaixo, nesta ordem, sem texto antes ou depois:
 
-# Memorando Executivo
-## Em síntese
-(3 a 5 tópicos com o que está em jogo)
-## Os 3 principais trade-offs
-(1 linha dizendo o critério de escolha: maior irreversibilidade e evidência mais forte; depois um ### por trade-off:
-o dilema, quem ganha e quem perde com cada polo, tipo de divergência e nível de evidência)
-## Perguntas que o decisor precisa responder
-(lista numerada; cada item diz a pergunta e quem tem competência para respondê-la hoje. Separe perguntas de
-processo, que destravam a análise, de escolhas de mérito, que pertencem a um trade-off. Não sugira resposta nem prazo)
-## O que o órgão declarou e o que as fontes mostram
-(só se houver divergências nos insumos; uma linha por divergência, sem atribuir intenção. Sem divergências, omita a seção)
-## Dados que faltam
-(lista: o dado, onde ele pode estar ou quem o tem, e qual trade-off ele afeta)
-
-DECLARADO x CONFIRMADO (obrigatório): os insumos trazem o CONTEÚDO DA AUTODECLARAÇÃO, com o que o órgão enviou.
-Nunca escreva que o órgão não enviou ou não informou algo que está lá. Separe sempre dois casos:
-- o órgão NÃO informou: o dado não está na autodeclaração. Vai em "Dados que faltam" como o próprio dado;
-- o órgão informou, mas NÃO HÁ CONFIRMAÇÃO em fonte independente: escreva "informado pelo órgão; sem confirmação
-  independente" e, em "Dados que faltam", peça a confirmação (ex.: "Confirmação da relação de contratos, que o órgão
-  enviou, em fonte oficial: Compras RJ, SIAFE-Rio"), nunca o dado como se ele não existisse.
-"Não localizado no dossiê" quer dizer que a pesquisa não achou fonte independente, não que o órgão omitiu.
-## Custo de não decidir
-(1 parágrafo, a partir do baseline)
-## Custo de decidir errado
-(1 parágrafo, com o mesmo peso do anterior: o que se perde se cada trade-off for resolvido do lado errado)
-## Matriz de Risco
-| Risco | Probabilidade | Impacto | Ação mitigadora | Responsável |
+# (título: a questão central, com o nome do órgão, em até 14 palavras)
+## O essencial
+(3 ou 4 tópicos de uma linha: o que está em jogo, os números que importam e o prazo mais urgente)
+## Decisões a tomar
+(os 3 dilemas principais, escolhidos por maior irreversibilidade e informação mais firme. Um ### por dilema, escrito
+como pergunta direta ao gestor. Embaixo, exatamente estes itens:
+- **Opção 1 – (verbo):** o que significa, em uma frase. Ganha: (quem/o quê). Arrisca: (o quê).
+- **Opção 2 – (verbo):** idem, com o mesmo peso da opção 1.
+- **Quem decide:** (competência) e até quando, se houver prazo nos insumos.
+- **Informação disponível:** um dos rótulos acima e, em meia frase, que dado mudaria a balança.)
+## Antes de decidir, obter
+(até 5 itens numerados: o dado, com quem está e qual decisão ele destrava)
+## Prazos
+(só datas que estão nos insumos, uma por linha; sem datas, omita a seção)
+## Se nada for feito
+(2 ou 3 frases: o que acontece se ninguém decidir, e o risco de decidir rápido demais, com o mesmo peso)
+## Principais riscos
+| Risco | Chance | Impacto | Como reduzir | Responsável |
 |---|---|---|---|---|
-(5 a 8 linhas; Probabilidade e Impacto só com Alta/Média/Baixa ou Alto/Médio/Baixo)
+(4 a 6 linhas; Chance e Impacto só com Alta/Média/Baixa ou Alto/Médio/Baixo)
 """
 
 # --- FUNDAMENTAÇÃO: blocos do dossiê ---------------------------------------------
@@ -1525,7 +1525,7 @@ def markdown_verificacao(ev, numeros, registro_id, modelo, confianca=None, compl
     """Seção que vai no fim do Word, para o leitor saber o que foi conferido."""
     nao_enc = [n for n in numeros if n["situacao"] == "não encontrado"]
     calc = [n for n in numeros if n["situacao"] == "cálculo declarado"]
-    linhas = ["## Verificação automática",
+    linhas = ["## Anexo 2 – Como este documento foi feito",
               f"Documento elaborado com apoio de IA ({modelo}); registro {registro_id}. "
               "Os itens abaixo foram conferidos por código contra o dossiê de fontes e o relatório do órgão."]
     if dossie:
@@ -2674,8 +2674,13 @@ def gerar_docx(memorando_md, meta):
     p.paragraph_format.space_after = Pt(2)
     run = p.add_run("MEMORANDO EXECUTIVO")
     run.bold, run.font.size, run.font.color.rgb = True, Pt(8.5), ACENTO
+    blocos = _ler_markdown(memorando_md)
+    titulo_memo = ""
+    if blocos and blocos[0][0] == "h" and blocos[0][1] == 1:
+        titulo_memo = "" if "memorando" in _norm(blocos[0][2]) and len(blocos[0][2]) < 30 else blocos[0][2]
+        blocos = blocos[1:]
     p = doc.add_paragraph()
-    _texto_inline(p, meta.get("assunto") or "Memorando executivo", Pt(17), AZUL, negrito=True)
+    _texto_inline(p, meta.get("assunto") or titulo_memo or "Memorando executivo", Pt(17), AZUL, negrito=True)
     dados = [("PARA", meta.get("para")), ("DE", meta.get("unidade") or meta.get("orgao")), ("DATA", meta.get("data"))]
     for rotulo, valor in [d for d in dados if d[1]]:
         p = doc.add_paragraph()
@@ -2686,14 +2691,13 @@ def gerar_docx(memorando_md, meta):
         _texto_inline(p, valor, Pt(10))
     _linha_inferior(p)
 
-    # Corpo: "Em síntese" vai num quadro; o resto segue em ordem
-    blocos = _ler_markdown(memorando_md)
-    if blocos and blocos[0][0] == "h" and "memorando" in _norm(blocos[0][2]):
-        blocos = blocos[1:]
+    # Corpo: "O essencial" (ou "Em síntese") vai num quadro; os anexos começam em página nova
     i = 0
     while i < len(blocos):
         b = blocos[i]
-        if b[0] == "h" and b[1] <= 2 and "sintese" in _norm(b[2]):
+        if b[0] == "h" and b[1] == 2 and _norm(b[2]).startswith("anexo") and i > 0:
+            doc.add_page_break()
+        if b[0] == "h" and b[1] <= 2 and ("sintese" in _norm(b[2]) or "essencial" in _norm(b[2])):
             j = i + 1
             while j < len(blocos) and not (blocos[j][0] == "h" and blocos[j][1] <= 2):
                 j += 1
@@ -2913,6 +2917,7 @@ def deliberar(insumos, dossie, relatorio, completude, cfg, progresso=None, anter
         assinatura = hashlib.md5((cenario_completo + relatorio).encode()).hexdigest()
         registro_id = f"{versao_prompt}-{assinatura[:8]}"
         resultado = {
+            "anexo_debate": anexo_debate(tension_map, insumos.get("personas", "")),
             "tension_map": tension_map,
             "memorando": memorando,
             "memorando_cortado": motivo2 == "length",
@@ -3032,16 +3037,69 @@ def dossie_para_json(dossie):
 
 
 def sobre_o_documento(resumo, data_corte, confianca, n_personas=None, revisado=True):
-    """Quadro de proveniência que abre o memorando. Escrito por código, para não depender do modelo."""
-    personas = f"{n_personas} papéis institucionais simulados" if n_personas else "papéis institucionais simulados"
+    """Nota curta de proveniência que abre o memorando. Escrita por código, para não depender do modelo.
+    O detalhe (fontes, verificação, debate) fica nos anexos."""
     return ("## Sobre este documento\n"
-            f"Material gerado com apoio de IA a partir de {personas}. As posições descritas não representam a opinião "
-            "de pessoas ou órgãos. A base factual é um dossiê de fontes independentes com "
-            f"{resumo['itens']} itens, {resumo['conferidos']} deles conferidos na fonte, com data de corte em "
-            f"{data_corte or 'data não informada'}. O relatório do órgão, quando houver, foi tratado como "
-            f"autodeclaração. Confiança calculada: {confianca['nivel']}. O documento não recomenda decisões."
-            + ("" if revisado else " Gerado em processamento automático: o dossiê e os insumos não passaram por revisão "
-               "da equipe antes do debate."))
+            "Apoio à decisão gerado com IA a partir de pesquisa em fontes públicas"
+            f" (data de corte: {data_corte or 'não informada'}) e do que o órgão informou. Não recomenda decisões. "
+            f"Confiança da análise: {confianca['nivel']}."
+            + ("" if revisado else " Gerado em processamento automático, sem revisão da equipe.")
+            + " Detalhes do debate e da verificação nos anexos.")
+
+
+ROTULO_EVIDENCIA = {1: "confirmado em fonte oficial", 2: "cálculo, norma ou estudo", 3: "só na imprensa ou fonte não conferida",
+                    4: "só informado pelo órgão", 5: "sem comprovação"}
+
+
+def _rotulo_nivel(nivel):
+    try:
+        n = int(nivel)
+    except (TypeError, ValueError):
+        return "não informado"
+    return f"{ROTULO_EVIDENCIA.get(n, 'não informado')} (nível {n})"
+
+
+def anexo_debate(tm, personas_txt=""):
+    """Anexo técnico do memorando, montado por código a partir do Tension Map: todo o detalhe do debate (posições,
+    quem defende, evidência, tipo de divergência, mecanismo, o que mudaria) sem gastar tokens nem depender do modelo."""
+    nomes = {p["id"]: p["nome"] for p in ler_personas(personas_txt)} if personas_txt else {}
+    nome = lambda pid: nomes.get(pid, pid)
+    linhas = ["## Anexo 1 – O debate em detalhe",
+              "Os dilemas abaixo saíram de um debate entre papéis institucionais simulados (não são opiniões de pessoas "
+              "ou órgãos reais). O memorando traz os três principais; aqui estão todos, com o detalhe técnico."]
+    estab = tm.get("estabilidade") or {}
+    for t in tm.get("trade_offs") or []:
+        if not isinstance(t, dict):
+            continue
+        linhas.append(f"### {t.get('titulo', '')}")
+        if t.get("descricao"):
+            linhas.append(str(t["descricao"]))
+        for rotulo, chave in (("Opção A", "polo_a"), ("Opção B", "polo_b")):
+            polo = t.get(chave) or {}
+            quem = ", ".join(nome(x) for x in (polo.get("defendido_por") or []))
+            linhas.append(f"- **{rotulo}:** {polo.get('posicao', '')}" + (f" Defendida por: {quem}." if quem else "")
+                          + (f" Argumento: {polo.get('argumento')}" if polo.get("argumento") else "")
+                          + f" Informação: {_rotulo_nivel(polo.get('evidencia'))}.")
+        detalhes = [("Quem ganha", t.get("quem_ganha")), ("Quem perde", t.get("quem_perde")),
+                    ("Por que as duas opções não cabem juntas", t.get("mecanismo_causal")),
+                    ("Natureza do desacordo", ", ".join(t.get("tipos_divergencia") or [])),
+                    ("O que mudaria a balança", t.get("o_que_mudaria")),
+                    ("Estabilidade", f"apareceu em {t['estabilidade']} rodadas independentes" if t.get("estabilidade") else "")]
+        linhas += [f"- **{r}:** {v}" for r, v in detalhes if v]
+    if tm.get("convergencias"):
+        linhas.append("### Pontos em que todos concordaram")
+        linhas += [f"- {c.get('tema', '')}" for c in tm["convergencias"] if isinstance(c, dict)]
+    fracos = tm.get("sinais_fracos") or []
+    if fracos:
+        linhas.append("### Dilemas que apareceram em poucas rodadas (sinais fracos)")
+        linhas += [f"- {f.get('titulo', '')} ({f.get('estabilidade', '')})" for f in fracos if isinstance(f, dict)]
+    if tm.get("questoes_juridicas"):
+        linhas.append("### Dúvidas jurídicas com resposta na norma")
+        linhas += [f"- {q.get('questao', '')} ({q.get('norma', '')})" for q in tm["questoes_juridicas"] if isinstance(q, dict)]
+    if estab.get("rodadas"):
+        linhas.append(f"_Debate repetido em {estab['rodadas']} rodadas independentes; {estab.get('estaveis', 0)} "
+                      "dilema(s) apareceram na maioria delas._")
+    return "\n".join(linhas)
 
 
 def inserir_sobre_documento(memorando, quadro):
@@ -3721,7 +3779,7 @@ else:
         "orgao": st.session_state["orgao"].strip(),
         "unidade": st.session_state["unidade"].strip(),
         "para": st.session_state["para"].strip(),
-        "assunto": st.session_state["assunto"].strip() or _assunto_padrao(),
+        "assunto": st.session_state["assunto"].strip(),          # vazio: o título vem do próprio memorando
         "data": resultado["data"],
         "rodape_extra": f"apoio de IA, reg. {resultado.get('registro_id', '')}",
     }
@@ -3736,7 +3794,7 @@ else:
     neutralidade = resultado.get("neutralidade") or {}
     if comparacao:
         memo = memo + "\n\n" + markdown_comparacao(comparacao)
-    memo_docx = memo + "\n\n" + markdown_verificacao(ev, numeros, resultado.get("registro_id", ""), resultado["modelo"],
+    memo_docx = memo + "\n\n" + (resultado.get("anexo_debate") or "") + "\n\n" + markdown_verificacao(ev, numeros, resultado.get("registro_id", ""), resultado["modelo"],
                                                          confianca, resultado.get("completude"), tm, neutralidade,
                                                          resultado.get("resumo_dossie"), resultado.get("confronto"))
     col1, col2, col3, col4 = st.columns(4)

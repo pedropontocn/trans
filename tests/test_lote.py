@@ -136,7 +136,7 @@ def test_lote_completo_sem_parar(tmp_path, llm):
     registro = json.loads((pasta / "registro.json").read_text(encoding="utf-8"))
     assert registro["origem"] == "lote" and registro["dossie_revisado"] is False
     memo = (pasta / "memorando.md").read_text(encoding="utf-8")
-    assert "não passaram por revisão da equipe" in memo
+    assert "sem revisão da equipe" in memo
     # o órgão vinculado é pesquisado com o nome da secretaria-mãe
     pesquisas = [str(c["mensagens"]) for c in llm.chamadas if "Monte a camada" in str(c["mensagens"])]
     assert any("RIOPREV (vinculado à Secretaria de Fazenda - SEFAZ)" in p for p in pesquisas)
