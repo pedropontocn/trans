@@ -289,7 +289,7 @@ def test_modo_independente_completo(app, llm):
     assert len(fases) == 12                                                  # 4 personas × 3 fases
     assert all(c["modelo"].endswith("sonnet-5-5") for c in fases)
     aval = next(c for c in llm.chamadas if c["modelo"].startswith("gemini/"))
-    assert aval["modelo"] == "gemini/gemini-3.1-pro-preview"
+    assert aval["modelo"] == "gemini/gemini-3.8-flash"           # o Flash funciona na cota gratuita do Gemini
     # avaliação cega: o avaliador não vê nomes nem ids das personas
     for nome in ("Fazenda", "Controle externo", "p1", "p2"):
         assert nome not in llm.planos_vistos_pelo_avaliador.split("PLANOS:")[1]
@@ -301,10 +301,19 @@ def test_modo_independente_completo(app, llm):
     # a síntese recebe o histórico real e o código confere quem defendeu cada polo
     assert "Plano final de p2" in llm.historico_sintese
     assert any("p9" in prob for prob in r["problemas_formato"])
-    assert r["tension_map"]["modo_debate"]["avaliador"] == "gemini/gemini-3.1-pro-preview"
+    assert r["tension_map"]["modo_debate"]["avaliador"] == "gemini/gemini-3.8-flash"
     assert any("de outra família" in m for m in r["confianca"]["motivos"])
     assert [t.label for t in at.tabs][-1] == "🗣️ Debate"
     assert json.loads(r["registro_json"])["modo_debate"] == "personas independentes"
+
+
+def test_persona_cortada_responde_de_novo_mais_curta(app, llm):
+    llm.personas_prolixas = {"p1", "p2"}
+    at = _modo_independente(_preparar(app.run()))
+    r = _deliberar(at)
+    assert r["debate"]["ausentes"] == []                       # as duas voltaram com a resposta curta
+    etapas = [u["etapa"] for u in r["uso"]]
+    assert "fase 1 · p1 (mais curta)" in etapas and "fase 1 · p3 (mais curta)" not in etapas
 
 
 def test_persona_que_nao_responde_fica_de_fora(app, llm):
