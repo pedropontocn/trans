@@ -54,7 +54,7 @@ LIMITE_CARACTERES = 150_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas", "sem_voz"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "2.5"
+APP_VERSAO = "2.6"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -113,6 +113,8 @@ DIRETRIZES INVIOLÁVEIS:
    contra a inércia, procure também um em que agir da forma proposta deu errado, e diga a causa dominante de cada um.
 7. Personas são papéis institucionais, nunca pessoas reais. Não atribua posições a pessoas nomeadas.
 8. Dúvida jurídica que tem resposta na norma não é trade-off: registre-a em "questoes_juridicas".
+9. Declarado x confirmado: ao apontar lacunas, diga se o órgão NÃO informou o dado ou se informou e falta
+   confirmação independente. Nunca trate como ausente o que está no relatório do órgão.
 """
 
 REGRAS_FONTES = """- Item do dossiê: tipo "dossie"; referencia = id do item (ex.: "O3"); trecho = cópia LITERAL de até 30 palavras
@@ -168,6 +170,14 @@ processo, que destravam a análise, de escolhas de mérito, que pertencem a um t
 (só se houver divergências nos insumos; uma linha por divergência, sem atribuir intenção. Sem divergências, omita a seção)
 ## Dados que faltam
 (lista: o dado, onde ele pode estar ou quem o tem, e qual trade-off ele afeta)
+
+DECLARADO x CONFIRMADO (obrigatório): os insumos trazem o CONTEÚDO DA AUTODECLARAÇÃO, com o que o órgão enviou.
+Nunca escreva que o órgão não enviou ou não informou algo que está lá. Separe sempre dois casos:
+- o órgão NÃO informou: o dado não está na autodeclaração. Vai em "Dados que faltam" como o próprio dado;
+- o órgão informou, mas NÃO HÁ CONFIRMAÇÃO em fonte independente: escreva "informado pelo órgão; sem confirmação
+  independente" e, em "Dados que faltam", peça a confirmação (ex.: "Confirmação da relação de contratos, que o órgão
+  enviou, em fonte oficial: Compras RJ, SIAFE-Rio"), nunca o dado como se ele não existisse.
+"Não localizado no dossiê" quer dizer que a pesquisa não achou fonte independente, não que o órgão omitiu.
 ## Custo de não decidir
 (1 parágrafo, a partir do baseline)
 ## Custo de decidir errado
@@ -2737,6 +2747,29 @@ class _passo:
         return False
 
 
+def conteudo_autodeclaracao(relatorio, completude, limite=60):
+    """O que o órgão enviou, para quem escreve o memorando não confundir "não informado" com "sem confirmação
+    independente": os títulos das seções do relatório e as linhas de tabela com contratos, obras e valores."""
+    if not (relatorio or "").strip():
+        return "CONTEÚDO DA AUTODECLARAÇÃO: o órgão não enviou relatório nem documentos."
+    titulos = [s["secao"] for s in ((completude or {}).get("secoes") or [])][:limite]
+    if not titulos:
+        titulos = [re.sub(r"[*\\]", "", m.group(1)).strip()[:90] for m in RE_TITULO.finditer(relatorio)][:limite]
+    arquivos = re.findall(r"^# ARQUIVO: (.+)$", relatorio, re.M)
+    linhas_tabela = [l for l in relatorio.splitlines() if l.lstrip().startswith("|") and not re.fullmatch(r"[|\s:-]+", l)]
+    contratos = sum(1 for l in linhas_tabela if re.search(r"contrat|obra|processo|sei|r\$|\d{1,3}(?:\.\d{3})+,\d{2}", l, re.I))
+    partes = ["CONTEÚDO DA AUTODECLARAÇÃO (o que o órgão enviou; serve só para saber o que foi informado, não é fato "
+              "confirmado):"]
+    if arquivos:
+        partes.append("Arquivos: " + "; ".join(arquivos[:20]))
+    if titulos:
+        partes.append("Seções: " + "; ".join(titulos))
+    if contratos:
+        partes.append(f"Tabelas: {contratos} linha(s) com contratos, obras, processos ou valores.")
+    partes.append(f"Tamanho: {len(relatorio):,} caracteres.".replace(",", "."))
+    return "\n".join(partes)
+
+
 def deliberar(insumos, dossie, relatorio, completude, cfg, progresso=None, anterior=None):
     """Confronto, debate (Fases 1 a 4), memorando (Fase 5), verificação e registro.
 
@@ -2828,6 +2861,7 @@ def deliberar(insumos, dossie, relatorio, completude, cfg, progresso=None, anter
         with _passo(progresso, f"{etapa_memo}: redigindo o memorando executivo e a matriz de risco..."):
             mensagens2 = [{"role": "system", "content": PROMPT_ETAPA_2},
                           {"role": "user", "content": cenario_completo
+                           + "\n\n" + conteudo_autodeclaracao(relatorio, completude)
                            + ("\n\n" + txt_confronto if txt_confronto else "")
                            + "\n\nTENSION MAP (Fase 4, já verificado):\n"
                            + json.dumps(tension_map, ensure_ascii=False, indent=2)}]
