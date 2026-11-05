@@ -404,7 +404,7 @@ def test_quadro_sobre_o_documento(funcoes):
     memo = funcoes.inserir_sobre_documento("# Memorando Executivo\n## Em síntese\n- x", quadro)
     linhas = memo.splitlines()
     assert linhas[0] == "# Memorando Executivo" and linhas[2] == "## Sobre este documento"
-    assert "4 papéis institucionais simulados" in memo and "não recomenda" in memo
+    assert "Apoio à decisão gerado com IA" in memo and "Não recomenda decisões" in memo and "média" in memo
     assert funcoes.inserir_sobre_documento("sem título", quadro).startswith("## Sobre este documento")
 
 
@@ -441,7 +441,7 @@ def test_conteudo_da_autodeclaracao_para_o_memorando(funcoes):
 
 
 def test_memorando_recebe_o_que_o_orgao_enviou(funcoes):
-    assert "DECLARADO x CONFIRMADO" in funcoes.PROMPT_ETAPA_2 and "Declarado x confirmado" in funcoes.METODOLOGIA
+    assert "Informado x confirmado" in funcoes.PROMPT_ETAPA_2 and "Declarado x confirmado" in funcoes.METODOLOGIA
 
 
 def test_resumo_de_100_paginas_entra_inteiro(funcoes):
@@ -453,3 +453,27 @@ def test_resumo_de_100_paginas_entra_inteiro(funcoes):
     assert not any("cortado" in a for a in avisos)
     grande, avisos = funcoes.limpar_relatorio(resumo * 2)
     assert len(grande) == funcoes.LIMITE_RELATORIO and any("passou do limite" in a for a in avisos)
+
+
+def test_anexo_do_debate_montado_por_codigo(funcoes):
+    tm = tension_map([trade_off("T1", "Licitações", estabilidade="2/2"), trade_off("T2", "Atas")])
+    tm["trade_offs"][0]["polo_a"]["defendido_por"] = ["p1"]
+    anexo = funcoes.anexo_debate(tm, "- [p1] Fazenda: equilíbrio fiscal\n- [p2] Prefeituras: obras")
+    assert anexo.startswith("## Anexo 1 – O debate em detalhe")
+    assert "### Licitações" in anexo and "Defendida por: Fazenda." in anexo
+    assert "Natureza do desacordo" in anexo and "apareceu em 2/2 rodadas" in anexo
+    assert "nível" in anexo and "Nível" not in anexo.split("Informação:")[0]
+
+
+def test_memorando_novo_sem_jargao_no_prompt_e_titulo_no_word(funcoes):
+    import io
+    import docx
+    p = funcoes.PROMPT_ETAPA_2
+    assert "ALTO GESTOR" in p and "## Decisões a tomar" in p and "NÃO use estes termos" in p
+    memo = ("# Carteira de obras da SECID depende de dados ainda não confirmados\n\n## O essencial\n- ponto\n\n"
+            "## Decisões a tomar\n### Prorrogar já?\n- **Opção 1 – Prorrogar:** x.\n\n## Anexo 1 – O debate em detalhe\ntexto")
+    doc = docx.Document(io.BytesIO(funcoes.gerar_docx(memo, {"orgao": "Equipe de Transição", "assunto": ""})))
+    textos = [par.text for par in doc.paragraphs]
+    assert "Carteira de obras da SECID depende de dados ainda não confirmados" in textos     # título vem do memorando
+    assert "O ESSENCIAL" in "\n".join(c.text for t in doc.tables for c in t._cells)          # quadro de destaque
+    assert any('w:br w:type="page"' in par._p.xml for par in doc.paragraphs)                 # anexo em página nova

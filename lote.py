@@ -427,9 +427,10 @@ def processar_orgao(app, drive, orgao, cfg, saida):
             resultado["confianca"], resultado["completude"], tm, resultado["neutralidade"],
             resultado["resumo_dossie"], resultado["confronto"])
         meta = {"orgao": cfg["orgao_emissor"], "unidade": cfg["unidade"], "para": cfg.get("para", ""),
-                "assunto": f"Mapa de tensões — {orgao['nome']}", "data": resultado["data"],
+                "assunto": "", "data": resultado["data"],
                 "rodape_extra": f"apoio de IA, processamento automático, reg. {resultado['registro_id']}"}
-        (pasta / "memorando.docx").write_bytes(app["gerar_docx"](memo + "\n\n" + verificacao, meta))
+        anexo = resultado.get("anexo_debate") or ""
+        (pasta / "memorando.docx").write_bytes(app["gerar_docx"](memo + "\n\n" + anexo + "\n\n" + verificacao, meta))
         (pasta / "memorando.md").write_text(memo, encoding="utf-8")
         (pasta / "tension_map.json").write_text(json.dumps(tm, ensure_ascii=False, indent=2), encoding="utf-8")
         (pasta / "registro.json").write_text(resultado["registro_json"], encoding="utf-8")
