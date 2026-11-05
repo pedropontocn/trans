@@ -157,7 +157,8 @@ O GitHub Actions roda os testes a cada push na `main` e a cada pull request (`.g
 | `orquestrador.py`, `validador.py`, `prompts.py` | Versão anterior, em linha de comando, com auditoria cruzada por modelos Gemini. Não é usada pelo `app.py`. |
 | `lote.py` | Processamento em lote a partir do Google Drive (usa as funções do `app.py`); o app usa a leitura do Drive dele. |
 | `.github/workflows/lote.yml` | Workflow manual que roda o `lote.py` em paralelo e entrega o zip criptografado. |
-| `requirements-lote.txt` | Dependências extras do lote (acesso ao Google Drive). |
+| `lote_api.py` | Modo econômico do lote: fila que envia as chamadas à Batch API da Anthropic. |
+| `requirements-lote.txt` | Dependências extras do lote (acesso ao Google Drive e à Batch API). |
 | `extraido/lacunas_oficio/` | Diagnóstico de lacunas e minuta de ofício, retirados do painel na versão 2.0. Ponto de partida da ferramenta própria de triagem; não é usado pelo `app.py`. |
 
 ## Drive no app
@@ -230,10 +231,21 @@ confiança e custo de cada órgão. Uma falha num órgão não para os outros.
 3. Ao final, baixe o artefato **resultados** e abra com a senha. O zip usa criptografia AES: no Windows, abra com o
    7-Zip ou o WinRAR (o Explorador de Arquivos não abre).
 
+**Modo econômico (Batch API).** Vem marcado por padrão no workflow. As chamadas aos modelos da Anthropic vão pela
+Message Batches API, que cobra **metade do preço** dos tokens (as buscas na web custam o mesmo). Em troca, cada resposta
+leva de minutos a, raramente, uma hora. Para compensar, todos os órgãos rodam ao mesmo tempo: cada chamada entra numa
+fila e, quando a fila para de receber pedidos por alguns segundos, ela segue como um lote só. Assim, cada etapa de todos
+os órgãos (pesquisa, insumos, rodadas, memorando) vai junta. A análise é a mesma do modo normal; muda só o caminho das
+chamadas. O código está em `lote_api.py`.
+- Deixe "Execuções em paralelo" em **1**: os órgãos já rodam juntos, e cada execução extra pesquisaria o Estado de novo.
+- A execução espera no máximo 320 minutos (o GitHub encerra o trabalho em 6 horas). O que não terminar nesse prazo sai
+  como erro no `resumo.csv`; o que terminou fica no zip.
+- Modelos Gemini, se escolhidos, continuam pela chamada normal.
+
 **Custo.** A camada do Estado (situação fiscal, dívida, previdência, calendário e cenário político) é igual para todos
 os órgãos: é pesquisada uma vez por execução e reaproveitada, e o resumo mostra esse custo à parte. Cada órgão pesquisa
 só a própria camada. O padrão do lote é Sonnet no debate e no memorando, com 2 rodadas: estimativa de US$ 0,40 a 0,70
-por órgão. Com Opus e 3 rodadas, a estimativa sobe para US$ 0,80 a 1,20. Com 4 partes em paralelo, cerca de 40 órgãos
+por órgão. Com Opus e 3 rodadas, a estimativa sobe para US$ 0,80 a 1,20. No modo econômico, a parte dos tokens cai pela metade. Com 4 partes em paralelo, cerca de 40 órgãos
 levam de 1h a 1h30. O custo real de cada órgão sai no `resumo.csv`.
 
 **Atenção: o repositório é público.** Logs e artefatos do GitHub Actions de um repositório público podem ser vistos
