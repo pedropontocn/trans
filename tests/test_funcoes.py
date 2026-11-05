@@ -537,3 +537,31 @@ def test_calendario_em_excel(funcoes):
     assert ws["A2"].value.date() == date(2026, 11, 11) and ws["D3"].value == "SECID"     # ordenado por data
     assert ws["M2"].hyperlink.target == "https://alerj.exemplo/emendas" and ws.auto_filter.ref
     assert ws["A3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Calendário", "Como ler", "Descartados"}
+
+
+def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
+    rel, _ = funcoes.limpar_relatorio(RELATORIO)
+    d = dossie_exemplo(funcoes)
+    assert d["itens"][[i["id"] for i in d["itens"]].index("O1")]["afirmacao"].startswith("A LOA 2026")
+    diag = funcoes.extrair_diagnostico("anthropic/claude-sonnet-5-5", d, rel, "Secretaria de Exemplo")
+    assert [s["titulo"] for s in diag["secoes"]] == ["Orçamento e execução"] and diag["descartados"] == 2
+    rotulos = [i["rotulo"] for i in diag["secoes"][0]["itens"]]
+    assert rotulos[1] == "informado pelo órgão" and rotulos[0].startswith(("confirmado", "fonte pública"))
+    op = funcoes.gerar_opcoes_organizacao("anthropic/claude-opus-5-5", d, rel, diag, "Secretaria de Exemplo")
+    assert [o["nome"] for o in op["opcoes"]][0] == "Manter a estrutura atual" and op["descartados"] == 1
+    assert "DIAGNÓSTICO CONFERIDO" in llm.mensagem_opcoes and "40 subsecretarias" not in llm.mensagem_opcoes
+    md = funcoes.markdown_diagnostico(diag, op, "Secretaria de Exemplo", "04/11/2026")
+    assert "## Parte 1 – Diagnóstico" in md and "### Opção 2 – Criar uma unidade" in md
+    assert "| Continuidade dos serviços | igual | pior |" in md and "Risco jurídico" not in md.split("Comparação")[1]
+    assert "### O que não se sabe" in md and "Nenhuma opção é recomendada" in md
+
+
+def test_diagnostico_em_word(funcoes, llm):
+    import io
+    import docx
+    rel, _ = funcoes.limpar_relatorio(RELATORIO)
+    d = dossie_exemplo(funcoes)
+    diag = funcoes.extrair_diagnostico("m", d, rel, "Secretaria de Exemplo")
+    dados = funcoes.diagnostico_docx(diag, {"opcoes": []}, "Secretaria de Exemplo", meta={"orgao": "Equipe"})
+    textos = [p.text for p in docx.Document(io.BytesIO(dados)).paragraphs]
+    assert "DIAGNÓSTICO DO ÓRGÃO" in textos and "Diagnóstico e opções de organização – Secretaria de Exemplo" in textos
