@@ -123,8 +123,29 @@ def e_copia_da_pasta(sub, mae):
     s_mae, n_sub, n_mae = sigla(mae), _norm(sub), _norm(mae)
     if s_mae and re.search(r"\b" + re.escape(s_mae.lower()) + r"\b", n_sub):
         return True
+    # sigla digitada com letras trocadas ("SETD" dentro de "... - SEDT")
+    if s_mae and len(n_sub) == len(s_mae) and sorted(n_sub) == sorted(s_mae.lower()):
+        return True
     base_mae = _norm(re.sub(r"\s*[-–]\s*[A-Z0-9]+\s*$", "", mae))
     return bool(n_sub) and (n_sub in n_mae or base_mae in n_sub)
+
+
+RE_ENTIDADE = re.compile(r"^(funda[cç][aã]o|instituto|companhia|cia\.?|departamento|junta|fundo|empresa|ag[eê]ncia|"
+                         r"autarquia|centro|superintend[eê]ncia|loteria|imprensa|universidade|fundacao|rio\s?prev|"
+                         r"secretaria|comiss[aã]o|conselho|procuradoria|defensoria|detran|ceperj|cedae|emop)", re.I)
+RE_PASTA_GENERICA = re.compile(r"anexo|resposta|of[ií]cio|documento|relat[oó]rio|planilha|arquivo|processo|\bsei\b|"
+                               r"outros|diversos|complement|pasta|dados|c[oó]pia|vers[aã]o|enviado|recebido", re.I)
+
+
+def parece_orgao(nome):
+    """Subpasta que tem cara de órgão (nome de entidade ou sigla). "Anexos" ou "Resposta ao Ofício 5" não têm:
+    são juntadas à pasta-mãe, em vez de virar um órgão vinculado."""
+    nome = nome.strip()
+    if RE_ENTIDADE.search(nome):
+        return True
+    if RE_PASTA_GENERICA.search(nome):
+        return False
+    return bool(sigla(nome))
 
 
 def planejar_orgaos(drive, pasta_raiz):
@@ -136,7 +157,7 @@ def planejar_orgaos(drive, pasta_raiz):
         for item in drive.listar(pasta["id"]):
             if item["mimeType"] != PASTA_MIME:
                 continue
-            if profundidade < 4 and e_copia_da_pasta(item["name"], nome_dono):
+            if profundidade < 4 and (e_copia_da_pasta(item["name"], nome_dono) or not parece_orgao(item["name"])):
                 pastas.append(item)
                 juntar(item, nome_dono, pastas, vinculadas, profundidade + 1)
             else:
