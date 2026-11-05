@@ -421,3 +421,12 @@ def test_dossie_com_estado_compartilhado(funcoes, llm):
     # o Estado não é conferido de novo nem cobrado de novo no dossiê do órgão
     assert llm.paginas_abertas.count("https://www.exemplo.rj.gov.br/loa-2027") == 1
     assert sum(u["buscas"] for u in d["uso"]) == 12
+
+
+def test_memorando_sem_orgao_nem_unidade_no_cabecalho(funcoes):
+    """Com os campos "Órgão" e "De (unidade)" vazios, o Word sai sem eles, sem erro."""
+    from conftest import MEMORANDO
+    import io
+    import docx
+    dados = funcoes.gerar_docx(MEMORANDO, {"orgao": "", "unidade": "", "para": "", "assunto": "Teste", "data": "5 de novembro de 2026"})
+    assert "MEMORANDO EXECUTIVO" in "\n".join(p.text for p in docx.Document(io.BytesIO(dados)).paragraphs)
