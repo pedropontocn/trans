@@ -8,3 +8,4 @@ jsonschema
 google-api-python-client
 google-auth
 anthropic
+openpyxl

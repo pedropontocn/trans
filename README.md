@@ -161,6 +161,18 @@ O GitHub Actions roda os testes a cada push na `main` e a cada pull request (`.g
 | `requirements-lote.txt` | Dependências extras do lote (acesso ao Google Drive e à Batch API). |
 | `extraido/lacunas_oficio/` | Diagnóstico de lacunas e minuta de ofício, retirados do painel na versão 2.0. Ponto de partida da ferramenta própria de triagem; não é usado pelo `app.py`. |
 
+## Produtos de cada análise
+
+| Produto | O que é | Como é feito |
+|---|---|---|
+| **Memorando executivo** (Word) | Para o gestor: decisões a tomar, dados a obter, prazos e riscos, em linguagem simples. Anexos com o debate em detalhe e a verificação | Modelo (corpo) e código (anexos) |
+| **Dossiê do órgão** (Word) | Fatos por tema, com fonte clicável e selo de conferência; comparação com o que o órgão informou; o que foi procurado sem fonte | Código, a partir do dossiê |
+| **Calendário de vencimentos críticos** (Excel) | Uma linha por evento com data (contratos, convênios, prazos legais, orçamento, controle), com criticidade, valor, decisão que a data cobra e o trecho de origem | Modelo extrai; o código confere se o trecho está no relatório ou no dossiê e se a data está no trecho. O que não confere vai para a aba "Descartados" |
+| **Mapa de tensões** (JSON) e **registro** (JSON) | Resultado estruturado do debate e trilha de auditoria | Modelo e código |
+
+Na análise de vários órgãos e no lote, cada órgão tem a sua pasta com esses arquivos, e a raiz traz o
+`calendario_consolidado.xlsx`, com as datas de todos os órgãos numa planilha só, ordenada por data.
+
 ## Vários órgãos de uma vez (relatórios resumidos)
 
 A documentação bruta de cada órgão é resumida fora deste app, num relatório menor em Word ou PDF. Com a pasta dos

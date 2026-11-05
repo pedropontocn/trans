@@ -131,7 +131,8 @@ def test_lote_completo_sem_parar(tmp_path, llm):
                              "--data-corte", "04/11/2026"], drive=DriveFalso(), app=app)
     assert [(x["sigla"], x["situacao"]) for x in linhas] == [("SEFAZ", "concluído"), ("RIOPREV", "concluído")]
     pasta = tmp_path / "sefaz"
-    for arquivo in ("memorando.docx", "memorando.md", "tension_map.json", "dossie.json", "dossie.docx", "registro.json", "arquivos_lidos.json"):
+    for arquivo in ("memorando.docx", "memorando.md", "tension_map.json", "dossie.json", "dossie.docx", "registro.json",
+                    "arquivos_lidos.json", "calendario.json"):
         assert (pasta / arquivo).exists(), arquivo
     registro = json.loads((pasta / "registro.json").read_text(encoding="utf-8"))
     assert registro["origem"] == "lote" and registro["dossie_revisado"] is False
@@ -234,3 +235,18 @@ def test_secao_9_nao_apaga_os_arquivos_seguintes(funcoes):
              "# ARQUIVO: base.xlsx\n\n|OBRA|\n|-|\n|Ponte|")
     limpo, avisos = funcoes.limpar_relatorio(texto)
     assert "Risco A" in limpo and "Fulano" not in limpo and "|Ponte|" in limpo and "# ARQUIVO: base.xlsx" in limpo
+
+
+def test_calendario_consolidado_de_todos_os_orgaos(tmp_path, llm):
+    from openpyxl import load_workbook
+    # o fake devolve a data do "Empenhado até 23/10/2026"; no lote, o texto lido do Drive é o do relatório de exemplo
+    import conftest
+    llm.texto_relatorio = conftest.RELATORIO
+    app = lote.carregar_app()
+    linhas = lote.principal(["--pasta", "raiz", "--orgaos", "SEFAZ,SETUR", "--rodadas", "1", "--saida", str(tmp_path),
+                             "--data-corte", "04/11/2026"], drive=DriveFalso(), app=app)
+    assert all(x["eventos_calendario"] == 1 for x in linhas)
+    assert (tmp_path / "sefaz" / "calendario.xlsx").exists()
+    ws = load_workbook(tmp_path / "calendario_consolidado.xlsx")["Calendário"]
+    assert {ws.cell(r, 4).value for r in range(2, ws.max_row + 1)} == {"Secretaria de Fazenda - SEFAZ",
+                                                                     "Secretaria de Turismo - SETUR"}

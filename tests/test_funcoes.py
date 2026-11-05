@@ -494,3 +494,46 @@ def test_dossie_em_word_com_links_e_selos(funcoes):
     assert "w:hyperlink" in xml                                         # fonte clicável
     assert any(p.text == "DOSSIÊ DO ÓRGÃO" for p in documento.paragraphs)
     assert documento.part.rels and any("http" in r.target_ref for r in documento.part.rels.values() if r.is_external)
+
+
+def test_calendario_so_com_datas_conferidas(funcoes, llm):
+    from datetime import date
+    rel, _ = funcoes.limpar_relatorio(RELATORIO)
+    cal = funcoes.extrair_calendario("anthropic/claude-sonnet-5-5", dossie_exemplo(funcoes), rel, "Secretaria de Exemplo",
+                                     "04/11/2026")
+    assert [(e["data"], e["origem"], e["criticidade"]) for e in cal["eventos"]] == [
+        (date(2026, 10, 23), "Informado pelo órgão", "Vencido")]
+    assert cal["eventos"][0]["valor"] == 398750000.0
+    motivos = {d["evento"]: d["motivo"] for d in cal["descartados"]}
+    assert motivos == {"Data trocada": "a data não está no trecho citado",
+                       "Trecho inventado": "trecho não encontrado no relatório"}
+
+
+def test_formas_de_data_e_valores(funcoes):
+    from datetime import date
+    assert funcoes._ler_data("31/12/2026") == (date(2026, 12, 31), False)
+    assert funcoes._ler_data("03/2027") == (date(2027, 3, 1), True)
+    assert funcoes._ler_data("31/02/2026") is None
+    assert funcoes._norm("31 de dezembro de 2026") in funcoes._formas_da_data(date(2026, 12, 31), False)
+    assert funcoes._valor_em_reais("R$ 998,1 mi") == 998100000.0 and funcoes._valor_em_reais("R$ 1,2 bi") == 1.2e9
+    assert funcoes.criticidade(10).startswith("Crítico") and funcoes.criticidade(60).startswith("Atenção")
+
+
+def test_calendario_em_excel(funcoes):
+    import io
+    from datetime import date
+    from openpyxl import load_workbook
+    eventos = [{"data": date(2027, 3, 1), "so_mes": True, "dias": 117, "criticidade": "Acompanhar", "orgao": "SECID",
+                "tipo": "Contrato", "evento": "Fim da locação de máquinas", "objeto": "Contrato 12/2025", "valor": 5e6,
+                "valor_texto": "R$ 5 mi", "consequencia": "Fica sem máquinas", "decisao": "Prorrogar ou não",
+                "origem": "Informado pelo órgão", "fonte": "relatório do órgão", "trecho": "vence em 03/2027"},
+               {"data": date(2026, 11, 11), "so_mes": False, "dias": 6, "criticidade": "Crítico (até 30 dias)",
+                "orgao": "Estado", "tipo": "Prazo legal", "evento": "Fim das emendas", "objeto": "LOA 2027", "valor": None,
+                "valor_texto": "", "consequencia": "", "decisao": "", "origem": "Fonte pública (dossiê)",
+                "fonte": "https://alerj.exemplo/emendas", "trecho": "até 11/11/2026"}]
+    wb = load_workbook(io.BytesIO(funcoes.calendario_xlsx(eventos, [{"orgao": "SECID", "data": "x", "evento": "y",
+                                                                     "motivo": "z"}])))
+    ws = wb["Calendário"]
+    assert ws["A2"].value.date() == date(2026, 11, 11) and ws["D3"].value == "SECID"     # ordenado por data
+    assert ws["M2"].hyperlink.target == "https://alerj.exemplo/emendas" and ws.auto_filter.ref
+    assert ws["A3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Calendário", "Como ler", "Descartados"}

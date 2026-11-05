@@ -159,6 +159,16 @@ class LLMFalso:
         self.continuacao_sem_json = False            # a continuação também para sem o JSON
         self.dossie_arquivo = None                   # bytes de um dossiê .json para o upload opcional
         self.sem_relatorio = False
+        self.calendario = {"eventos": [
+            {"data": "23/10/2026", "tipo": "orcamento", "evento": "Corte do empenho informado", "objeto": "LOA 2026",
+             "valor": "R$ 398.750.000,00", "consequencia": "", "decisao": "Conferir o empenhado",
+             "origem": "relatorio", "item": "", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+            {"data": "31/12/2026", "tipo": "contrato", "evento": "Data trocada", "objeto": "x", "valor": "",
+             "consequencia": "", "decisao": "", "origem": "relatorio", "item": "",
+             "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+            {"data": "15/12/2026", "tipo": "contrato", "evento": "Trecho inventado", "objeto": "Contrato 99/2026",
+             "valor": "R$ 5 mi", "consequencia": "", "decisao": "", "origem": "relatorio", "item": "",
+             "trecho": "o contrato 99/2026 vence em 15/12/2026"}]}
         self.confronto = {"divergencias": [
             {"item": "O4", "situacao": "nao_mencionado", "o_orgao_declara": "", "trecho_relatorio": "",
              "as_fontes_mostram": "O TCE-RJ apontou atraso na prestação de contas de convênios."},
@@ -226,9 +236,12 @@ class LLMFalso:
             if self.resposta_insumos_texto is not None or nome is None:
                 return self._resp(self.resposta_insumos_texto or json.dumps(self.insumos))
             return self._resp(nome=nome, args=self.insumos, motivo="tool_calls")
-        if "Você confronta o que um órgão declarou" in sistema:
+        if "Você confronta o que um órgão declarou" in contexto:
             self.mensagem_confronto = ultimo
             return self._resp(json.dumps(self.confronto))
+        if "Você monta o calendário de vencimentos críticos" in contexto:
+            self.mensagem_calendario = ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.calendario) + "[FIM DO JSON]")
         if "Você participa de uma deliberação multiagente" in contexto:
             mais_curta = ultimo.startswith("Sua resposta passou do limite")
             if mais_curta:                      # o pedido de resposta mais curta vem depois da conversa original
