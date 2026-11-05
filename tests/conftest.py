@@ -45,6 +45,12 @@ ITENS_ESTADO = [
      "confianca": "media"},
 ]
 ITENS_ORGAO = [
+    {"bloco": "orcamento_execucao", "afirmacao": "A LOA 2026 da Secretaria é de R$ 412.000.000,00.", "fonte": "LOA 2026",
+     "data_fonte": "2026", "url": "https://transparencia.exemplo.gov.br/loa-sex",
+     "trecho": "LOA 2026 da Secretaria de Exemplo: R$ 412.000.000,00", "tipo_fonte": "documento_oficial", "confianca": "alta"},
+    {"bloco": "pessoal", "afirmacao": "A Secretaria tem 1.200 servidores efetivos.", "fonte": "Portal da Transparência",
+     "data_fonte": "2026", "url": "https://transparencia.exemplo.gov.br/licitacoes",
+     "trecho": "A Secretaria tem 1.200 servidores efetivos", "tipo_fonte": "dado_oficial", "confianca": "media"},
     {"bloco": "contratos_convenios", "afirmacao": TRECHO_LICITACOES + ".", "fonte": "Painel de compras",
      "data_fonte": "10/2026", "url": "https://transparencia.exemplo.gov.br/licitacoes", "trecho": TRECHO_LICITACOES,
      "tipo_fonte": "dado_oficial", "confianca": "alta"},
@@ -52,23 +58,20 @@ ITENS_ORGAO = [
      "fonte": "TCE-RJ, decisão 123", "data_fonte": "09/2026", "url": "https://tce.exemplo.gov.br/decisao-123",
      "trecho": "O Tribunal apontou atraso na prestação de contas de convênios da Secretaria de Exemplo",
      "tipo_fonte": "decisao_controle_judicial", "confianca": "alta"},
-    {"bloco": "orcamento_execucao", "afirmacao": "A LOA 2026 da Secretaria é de R$ 412.000.000,00.", "fonte": "LOA 2026",
-     "data_fonte": "2026", "url": "https://transparencia.exemplo.gov.br/loa-sex",
-     "trecho": "LOA 2026 da Secretaria de Exemplo: R$ 412.000.000,00", "tipo_fonte": "documento_oficial", "confianca": "alta"},
-    {"bloco": "pessoal", "afirmacao": "A Secretaria tem 1.200 servidores efetivos.", "fonte": "Portal da Transparência",
-     "data_fonte": "2026", "url": "https://transparencia.exemplo.gov.br/licitacoes",
-     "trecho": "A Secretaria tem 1.200 servidores efetivos", "tipo_fonte": "dado_oficial", "confianca": "media"},
     {"bloco": "riscos_continuidade", "afirmacao": "O contrato de manutenção do sistema de folha vence em janeiro.",
      "fonte": "Diário Oficial", "data_fonte": "08/2026", "url": "https://pagina-que-nao-abre.exemplo/do",
      "trecho": "contrato de manutenção do sistema de folha", "tipo_fonte": "documento_oficial", "confianca": "media"},
     {"bloco": "inventado", "afirmacao": "Item sem link.", "fonte": "?", "url": "", "trecho": "", "tipo_fonte": "estudo"},
 ]
+GRUPOS = [["situacao_fiscal", "regime_divida", "previdencia"], ["calendario_legal", "cenario_politico", "compromissos_governo"],
+          ["mandato_estrutura", "orcamento_execucao", "pessoal"], ["contratos_convenios", "entregas_indicadores"],
+          ["controle_judicializacao", "riscos_continuidade"]]
 NAO_ENCONTRADO = {"estado": [{"bloco": "previdencia", "procurado": "Aporte do Tesouro ao RioPrevidência em 2026"}],
                   "orgao": [{"bloco": "pessoal", "procurado": "Número de terceirizados nos contratos de custeio"}]}
 
 # Fontes citadas nos Tension Maps dos testes: item do dossiê que existe, trecho inventado e sem fonte
-FONTE_OK = {"tipo": "dossie", "referencia": "O1", "trecho": TRECHO_LICITACOES}
-FONTE_FALSA = {"tipo": "dossie", "referencia": "O1",
+FONTE_OK = {"tipo": "dossie", "referencia": "O3", "trecho": TRECHO_LICITACOES}
+FONTE_FALSA = {"tipo": "dossie", "referencia": "O3",
                "trecho": "a Secretaria tem R$ 500 milhões livres em caixa para 2027"}
 FONTE_AUTO = {"tipo": "autodeclaracao", "referencia": "3.2",
               "trecho": "Cinco obras estão com execução suspensa aguardando decisão da Casa Civil"}
@@ -151,16 +154,19 @@ class LLMFalso:
         self.resposta_insumos_texto = None           # se definido, os insumos vêm em texto, sem ferramenta
         self.paginas = dict(PAGINAS)                 # o que a "web" devolve quando o código abre um link
         self.falhar_pesquisa = False
+        self.grupos_sem_json = set()                 # primeiro bloco dos grupos cuja resposta para sem o JSON
+        self.grupos_com_erro = set()                 # primeiro bloco dos grupos cuja chamada dá erro
+        self.continuacao_sem_json = False            # a continuação também para sem o JSON
         self.dossie_arquivo = None                   # bytes de um dossiê .json para o upload opcional
         self.sem_relatorio = False
         self.confronto = {"divergencias": [
-            {"item": "O2", "situacao": "nao_mencionado", "o_orgao_declara": "", "trecho_relatorio": "",
+            {"item": "O4", "situacao": "nao_mencionado", "o_orgao_declara": "", "trecho_relatorio": "",
              "as_fontes_mostram": "O TCE-RJ apontou atraso na prestação de contas de convênios."},
-            {"item": "O1", "situacao": "contradiz", "o_orgao_declara": "o motivo não foi informado",
+            {"item": "O3", "situacao": "contradiz", "o_orgao_declara": "o motivo não foi informado",
              "trecho_relatorio": "O motivo do adiamento não foi informado", "as_fontes_mostram": "x"},
             {"item": "O99", "situacao": "contradiz", "trecho_relatorio": "x", "as_fontes_mostram": "item que não existe"},
-            {"item": "O3", "situacao": "contradiz", "trecho_relatorio": "a Secretaria não tem orçamento", "as_fontes_mostram": "y"},
-            {"item": "O1", "situacao": "nao_mencionado", "trecho_relatorio": "", "as_fontes_mostram": "LOA mencionada"}]}
+            {"item": "O1", "situacao": "contradiz", "trecho_relatorio": "a Secretaria não tem orçamento", "as_fontes_mostram": "y"},
+            {"item": "O3", "situacao": "nao_mencionado", "trecho_relatorio": "", "as_fontes_mostram": "licitações mencionadas"}]}
         self.rodadas = [tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])]
         self.consolidacao = None
         self.memorando = MEMORANDO
@@ -200,13 +206,21 @@ class LLMFalso:
         if nome and self.recusar_ferramentas:
             raise self.recusar_ferramentas
 
-        if "Monte a camada" in ultimo:
-            if self.falhar_pesquisa:
+        if "Monte a camada" in texto(messages[0]["content"]):
+            pedido = texto(messages[0]["content"])
+            grupo = re.findall(r"^- ([a-z_]+): ", pedido, re.M)
+            if self.falhar_pesquisa or grupo[0] in self.grupos_com_erro:
                 raise RuntimeError("busca indisponível")
-            camada = "estado" if 'camada\n"Estado"' in ultimo else "orgao"
-            dados = {"itens": ITENS_ESTADO if camada == "estado" else ITENS_ORGAO, "nao_encontrado": NAO_ENCONTRADO[camada]}
-            return self._resp("Pesquisei. [INÍCIO DO JSON]" + json.dumps(dados) + "[FIM DO JSON]", entrada=30000,
-                              saida=3000, buscas=4)
+            continuacao = ultimo.startswith("Você parou antes")
+            if grupo[0] in self.grupos_sem_json and (not continuacao or self.continuacao_sem_json):
+                return self._resp("Fiz as buscas e encontrei documentos relevantes.", buscas=5)   # turno pausado
+            camada = "estado" if 'camada\n"Estado"' in pedido else "orgao"
+            todos = ITENS_ESTADO if camada == "estado" else ITENS_ORGAO
+            conhecidos = {b for g in GRUPOS for b in g}
+            itens = [i for i in todos if i["bloco"] in grupo or (i["bloco"] not in conhecidos and grupo[0] == "mandato_estrutura")]
+            nao = [n for n in NAO_ENCONTRADO[camada] if n["bloco"] in grupo]
+            return self._resp("Pesquisei. [INÍCIO DO JSON]" + json.dumps({"itens": itens, "nao_encontrado": nao})
+                              + "[FIM DO JSON]", entrada=30000, saida=3000, buscas=0 if continuacao else 4)
         if "Você prepara os insumos" in sistema:
             self.mensagem_insumos = ultimo
             if self.resposta_insumos_texto is not None or nome is None:

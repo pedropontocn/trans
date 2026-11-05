@@ -276,8 +276,8 @@ def test_nivel_maximo_por_tipo_de_fonte(funcoes):
 def test_links_conferidos_por_codigo(funcoes, llm):
     d = dossie_exemplo(funcoes)
     chec = {i["id"]: i["checagem"] for i in d["itens"]}
-    assert chec["O1"] == "conferido"                       # o script da página é ignorado e o trecho é achado
-    assert chec["O4"] == "trecho_nao_encontrado"           # a página abre, mas não tem o trecho
+    assert chec["O3"] == "conferido"                       # o script da página é ignorado e o trecho é achado
+    assert chec["O2"] == "trecho_nao_encontrado"           # a página abre, mas não tem o trecho
     assert chec["O5"] == "inacessivel"
     assert chec["O6"] == "sem_trecho"
     # cada página é aberta uma vez só, mesmo citada por dois itens
@@ -333,16 +333,52 @@ def test_dossie_pronto_e_lido_e_reconferido(funcoes):
         funcoes.ler_dossie_arquivo(b'{"itens": [{"bloco": "x"}]}')
 
 
-def test_pesquisa_usa_busca_na_web_e_monta_o_dossie(funcoes, llm):
+def test_pesquisa_usa_busca_na_web_em_grupos(funcoes, llm):
     d = funcoes.montar_dossie("anthropic/claude-sonnet-5-5", "Secretaria de Exemplo", "04/11/2026", "licitações")
     pesquisas = [c for c in llm.chamadas if "Monte a camada" in str(c["mensagens"])]
-    assert len(pesquisas) == 2 and all(c["kw"]["web_search_options"] == {"search_context_size": "high"} for c in pesquisas)
-    assert any("Foco indicado pela equipe" in str(c["mensagens"]) for c in pesquisas)
-    assert [i["id"] for i in d["itens"]][:4] == ["E1", "E2", "E3", "O1"]
-    assert sum(u["buscas"] for u in d["uso"]) == 8
+    assert len(pesquisas) == 5 and all(c["kw"]["web_search_options"] == {"search_context_size": "medium"} for c in pesquisas)
+    assert all("Foco indicado pela equipe" in str(c["mensagens"]) for c in pesquisas)
+    assert sorted(i["id"] for i in d["itens"]) == ["E1", "E2", "E3", "O1", "O2", "O3", "O4", "O5", "O6"]
+    assert sum(u["buscas"] for u in d["uso"]) == 20
+    assert all(not x["erro"] and not x["continuacao"] for x in d["diagnostico"])
+    assert len(d["nao_encontrado"]) == 2
     # mesma pesquisa de novo: reaproveitada, sem nova busca
     de_novo = funcoes.montar_dossie("anthropic/claude-sonnet-5-5", "Secretaria de Exemplo", "04/11/2026", "licitações")
-    assert de_novo["reaproveitado"] and len([c for c in llm.chamadas if "Monte a camada" in str(c["mensagens"])]) == 2
+    assert de_novo["reaproveitado"] and len([c for c in llm.chamadas if "Monte a camada" in str(c["mensagens"])]) == 5
+
+
+def test_resposta_sem_json_pede_que_o_modelo_termine(funcoes, llm):
+    llm.grupos_sem_json = {"situacao_fiscal", "contratos_convenios"}
+    d = funcoes.montar_dossie("anthropic/claude-sonnet-5-5", "Secretaria de Exemplo", "04/11/2026")
+    assert len(d["itens"]) == 9                                   # a continuação recuperou os itens
+    continuacoes = [c for c in llm.chamadas if str(c["mensagens"][-1]["content"]).startswith("Você parou antes")]
+    assert len(continuacoes) == 2
+    assert continuacoes[0]["mensagens"][1] == {"role": "assistant", "content": "Fiz as buscas e encontrei documentos relevantes."}
+    assert sum(x["continuacao"] for x in d["diagnostico"]) == 2 and not any(x["erro"] for x in d["diagnostico"])
+
+
+def test_erro_em_parte_da_pesquisa_nao_derruba_o_resto(funcoes, llm):
+    llm.grupos_com_erro = {"situacao_fiscal"}
+    d = funcoes.montar_dossie("anthropic/claude-sonnet-5-5", "Secretaria de Exemplo", "04/11/2026")
+    assert len(d["itens"]) == 8
+    erro = next(x for x in d["diagnostico"] if x["erro"])
+    assert erro["blocos"][0] == "situacao_fiscal" and "RuntimeError: busca indisponível" in erro["erro"]
+
+
+def test_pesquisa_toda_com_erro_mostra_o_motivo(funcoes, llm):
+    import pytest
+    llm.falhar_pesquisa = True
+    with pytest.raises(RuntimeError, match="todas as buscas falharam: RuntimeError: busca indisponível"):
+        funcoes.montar_dossie("gemini/gemini-3.8-flash", "Secretaria de Exemplo", "04/11/2026")
+
+
+def test_pesquisa_sem_json_nenhum_devolve_dossie_vazio_com_diagnostico(funcoes, llm):
+    from conftest import GRUPOS
+    llm.grupos_sem_json = {g[0] for g in GRUPOS}
+    llm.continuacao_sem_json = True
+    d = funcoes.montar_dossie("anthropic/claude-sonnet-5-5", "Secretaria de Exemplo", "04/11/2026")
+    assert d["itens"] == [] and all(x["erro"] == funcoes.SEM_JSON for x in d["diagnostico"])
+    assert all("Fiz as buscas" in x["resposta"] and x["continuacao"] for x in d["diagnostico"])
 
 
 def test_insumos_saem_do_dossie_e_sem_baseline(funcoes, llm):
@@ -356,7 +392,7 @@ def test_insumos_saem_do_dossie_e_sem_baseline(funcoes, llm):
 def test_confronto_descarta_o_que_nao_confere(funcoes, llm):
     texto_rel, _ = funcoes.limpar_relatorio(RELATORIO)
     c = funcoes.confrontar("anthropic/claude-sonnet-5-5", dossie_exemplo(funcoes), texto_rel)
-    assert [(d["item"], d["situacao"]) for d in c["divergencias"]] == [("O2", "nao_mencionado"), ("O1", "contradiz")]
+    assert [(d["item"], d["situacao"]) for d in c["divergencias"]] == [("O4", "nao_mencionado"), ("O3", "contradiz")]
     assert c["descartadas"] == 3      # item inexistente, trecho que não está no relatório e item que o relatório menciona
     assert "<relatorio>" in llm.mensagem_confronto and "<dossie>" in llm.mensagem_confronto
     assert "sem atribuir intenção" in funcoes.texto_confronto(c)
