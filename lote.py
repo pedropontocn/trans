@@ -21,9 +21,11 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import unicodedata
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
@@ -373,7 +375,7 @@ def gravar_resumo(saida, linhas, custo_estado=0.0):
 
 # --- PRINCIPAL -----------------------------------------------------------------------
 
-def principal(argv=None, drive=None, app=None):
+def principal(argv=None, drive=None, app=None, cliente_batch=None):
     p = argparse.ArgumentParser(description="Mapa de tensões em lote a partir das pastas do Google Drive.")
     p.add_argument("--pasta", required=True, help="ID da pasta DOCUMENTOS RECEBIDOS no Drive")
     p.add_argument("--orgaos", default="", help="só estes órgãos: siglas ou partes do nome, separadas por vírgula")
@@ -390,6 +392,11 @@ def principal(argv=None, drive=None, app=None):
     p.add_argument("--orgao-emissor", default="Equipe de Transição de Governo")
     p.add_argument("--unidade", default="Equipe de Transição")
     p.add_argument("--para", default="")
+    p.add_argument("--economico", action="store_true",
+                   help="manda as chamadas da Anthropic pela Message Batches API: metade do preço, respostas mais lentas")
+    p.add_argument("--prazo-minutos", type=float, default=320,
+                   help="no modo econômico, quanto esperar no total; o que não terminar sai como erro")
+    p.add_argument("--paralelos", type=int, default=40, help="no modo econômico, órgãos processados ao mesmo tempo")
     a = p.parse_args(argv)
 
     if drive is None:
@@ -420,6 +427,17 @@ def principal(argv=None, drive=None, app=None):
         return linhas
 
     app = app or carregar_app()
+    fila = None
+    if a.economico:
+        # Todos os órgãos rodam em paralelo; cada chamada à Anthropic entra numa fila que vai à Batch API em lotes.
+        import lote_api
+        fila = lote_api.FilaBatch(cliente=cliente_batch, prazo=time.time() + a.prazo_minutos * 60, log=log,
+                                  **({"quieto": 0.2, "intervalo": 0.2} if cliente_batch is not None else {}))
+        app["completion"] = fila.completion(app["completion"])
+        app["st"] = lote_api.StPorFio(app["st"])
+        app["RODADAS_JUNTAS"] = True
+        log(f"Modo econômico: chamadas da Anthropic pela Batch API (metade do preço), até {a.paralelos} órgãos ao "
+            f"mesmo tempo, prazo de {a.prazo_minutos:.0f} min.")
     cfg = {"modelo_pesquisa": a.modelo_pesquisa, "modelo_auxiliar": a.modelo_auxiliar, "modelo": a.modelo,
            "n_rodadas": a.rodadas, "parar_cedo": a.rodadas >= 3, "modo_independente": False,
            "data_corte": a.data_corte, "foco": a.foco, "orgao_emissor": a.orgao_emissor, "unidade": a.unidade,
@@ -443,13 +461,36 @@ def principal(argv=None, drive=None, app=None):
             log(f"  a pesquisa do Estado falhou ({type(e).__name__}: {e}); cada órgão vai pesquisar a sua")
             cfg["estado"] = None
     linhas = []
-    for k, o in enumerate(orgaos, 1):
-        log(f"[{k}/{len(orgaos)}] {o['nome']}" + (f" (vinculado a {o['vinculada_a']})" if o["vinculada_a"] else ""))
+    if fila is None:
+        for k, o in enumerate(orgaos, 1):
+            log(f"[{k}/{len(orgaos)}] {o['nome']}" + (f" (vinculado a {o['vinculada_a']})" if o["vinculada_a"] else ""))
+            linha = processar_orgao(app, drive, o, cfg, saida)
+            linhas.append(linha)
+            log(f"  → {linha['situacao']}" + (f": {linha['observacao']}" if linha["observacao"] else "")
+                + f" ({linha['minutos']} min, US$ {linha['custo_usd']:.2f})")
+            gravar_resumo(saida, linhas, custo_estado)   # grava a cada órgão: se a execução cair, o que já foi feito fica
+        return linhas
+
+    # modo econômico: os órgãos em paralelo; o resumo é regravado a cada órgão concluído, na ordem original
+    prontas, trava = {}, threading.Lock()
+
+    def um(k, o):
+        log(f"[{k}/{len(orgaos)}] {o['nome']}: começando")
         linha = processar_orgao(app, drive, o, cfg, saida)
-        linhas.append(linha)
-        log(f"  → {linha['situacao']}" + (f": {linha['observacao']}" if linha["observacao"] else "")
+        with trava:
+            prontas[k] = linha
+            gravar_resumo(saida, [prontas[i] for i in sorted(prontas)], custo_estado)
+        log(f"[{k}/{len(orgaos)}] {o['nome']} → {linha['situacao']}"
+            + (f": {linha['observacao']}" if linha["observacao"] else "")
             + f" ({linha['minutos']} min, US$ {linha['custo_usd']:.2f})")
-        gravar_resumo(saida, linhas, custo_estado)   # grava a cada órgão: se a execução cair, o que já foi feito fica
+        return linha
+
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, min(a.paralelos, len(orgaos) or 1))) as ex:
+            linhas = list(ex.map(lambda par: um(*par), enumerate(orgaos, 1)))
+    finally:
+        fila.encerrar()
+    log(f"Modo econômico: {fila.enviados} lote(s) enviados à Batch API.")
     return linhas
 
 

@@ -52,7 +52,7 @@ LIMITE_CARACTERES = 150_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas", "sem_voz"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "2.2"
+APP_VERSAO = "2.3"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -60,6 +60,10 @@ PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).reso
 PRECOS = {"opus-5-5": (4, 20, 0.05), "sonnet-5-5": (2, 10, 0.05), "haiku-5-5": (0.10, 0.50, 0.10), "sonnet-4-5": (3, 15, 0.10)}
 ESCRITA_CACHE = 1.25
 ESCRITA_CACHE_1H = 2.0
+DESCONTO_LOTE_API = 0.5
+# Com True (modo econômico do lote), as rodadas iniciais do debate vão juntas: na Batch API cada pedido em sequência
+# custa uma ida e volta na fila, e a economia de cache da 1ª rodada sozinha não compensa a espera.
+RODADAS_JUNTAS = False
 # Busca na web da Anthropic: US$ 10 por mil buscas, além dos tokens. A do Gemini tem preço próprio (não cadastrado).
 PRECO_BUSCA_ANTHROPIC = 0.01
 MIN_ITENS_DOSSIE = 5
@@ -543,7 +547,8 @@ def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa="", uso_
         buscas = servidor.get("web_search_requests")
     registro = {"etapa": etapa, "modelo": modelo, "entrada": normal + leitura + escrita, "entrada_sem_cache": normal,
                 "cache_leitura": leitura, "cache_escrita": escrita, "cache_escrita_1h": escrita_1h,
-                "saida": int(getattr(uso, "completion_tokens", 0) or 0), "buscas": int(buscas or 0)}
+                "saida": int(getattr(uso, "completion_tokens", 0) or 0), "buscas": int(buscas or 0),
+                "lote_api": bool(getattr(resp, "desconto_lote", False))}
     (uso_lista if uso_lista is not None else st.session_state.setdefault("uso_rodada", [])).append(registro)
     escolha = resp.choices[0]
     msg = escolha.message
@@ -1449,9 +1454,11 @@ def custo_estimado(uso):
         preco_in, preco_out, mult_leitura = PRECOS[chave]
         sem_cache = u.get("entrada_sem_cache", u["entrada"])
         escrita_1h = u.get("cache_escrita_1h", 0)
-        total += (sem_cache * preco_in + (u.get("cache_escrita", 0) - escrita_1h) * preco_in * ESCRITA_CACHE
+        tokens = (sem_cache * preco_in + (u.get("cache_escrita", 0) - escrita_1h) * preco_in * ESCRITA_CACHE
                   + escrita_1h * preco_in * ESCRITA_CACHE_1H
                   + u.get("cache_leitura", 0) * preco_in * mult_leitura + u["saida"] * preco_out) / 1e6
+        # Message Batches API (modo econômico do lote): metade do preço dos tokens; as buscas custam o mesmo
+        total += tokens * (DESCONTO_LOTE_API if u.get("lote_api") else 1)
         total += u.get("buscas", 0) * PRECO_BUSCA_ANTHROPIC
     return total, desconhecido
 
@@ -1752,11 +1759,16 @@ def rodar_rodadas(modelo, mensagens, n, modelo_checagem=None):
         return args or extrair_json(texto), texto, motivo
 
     usos = [[] for _ in range(n + 1)]          # o último guarda a checagem de concordância
-    resultados = [uma(1, usos[0])]
-    proxima = 2
-    if n >= 3 and modelo_checagem:
-        resultados.append(uma(2, usos[1]))
-        proxima = 3
+    checar = n >= 3 and bool(modelo_checagem)
+    if RODADAS_JUNTAS:
+        juntas = 2 if checar else n
+        resultados = _em_paralelo([lambda i=i: uma(i, usos[i - 1]) for i in range(1, juntas + 1)])
+    else:
+        resultados = [uma(1, usos[0])]
+        if checar:
+            resultados.append(uma(2, usos[1]))
+    proxima = len(resultados) + 1
+    if checar:
         tm1, tm2 = resultados[0][0], resultados[1][0]
         if _tm_valido(tm1) and _tm_valido(tm2):
             try:

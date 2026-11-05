@@ -22,11 +22,15 @@ on:
         description: "Só estes órgãos: siglas ou partes do nome, separadas por vírgula (vazio = todos)"
         required: false
         default: ""
+      economico:
+        description: "Modo econômico: Batch API da Anthropic, metade do preço, respostas mais lentas (até ~5h no total)"
+        type: boolean
+        default: true
       partes:
-        description: "Execuções em paralelo"
+        description: "Execuções em paralelo (no modo econômico, deixe 1: os órgãos já rodam juntos)"
         type: choice
         options: ["1", "2", "3", "4", "6"]
-        default: "4"
+        default: "1"
       rodadas:
         description: "Rodadas independentes do debate"
         type: choice
@@ -87,6 +91,7 @@ jobs:
       DATA_CORTE: ${{ inputs.data_corte }}
       FOCO: ${{ inputs.foco }}
       APENAS_LISTAR: ${{ inputs.apenas_listar }}
+      ECONOMICO: ${{ inputs.economico }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -113,6 +118,7 @@ jobs:
                 --saida resultados)
           [ -n "$DATA_CORTE" ] && args+=(--data-corte "$DATA_CORTE")
           [ "$APENAS_LISTAR" = "true" ] && args+=(--apenas-listar)
+          [ "$ECONOMICO" = "true" ] && args+=(--economico --prazo-minutos 320)
           python lote.py "${args[@]}"
       - name: Criptografar resultados
         if: always()
