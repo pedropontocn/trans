@@ -18,6 +18,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 import unicodedata
 import zipfile
 from datetime import date, datetime
@@ -501,6 +502,27 @@ def extrair_json(texto):
     return None
 
 
+ESPERAS_NOVA_TENTATIVA = (10, 30, 60)
+
+
+def _transitorio(e):
+    """Erros que passam sozinhos: limite de uso por minuto (429) e API sobrecarregada (529)."""
+    texto = f"{type(e).__name__} {e}".lower()
+    return any(t in texto for t in ("ratelimit", "rate limit", "rate_limit", "429", "overloaded", "529"))
+
+
+def _com_novas_tentativas(chamada):
+    """Repete a chamada depois de uma espera quando o erro é passageiro (limite por minuto ou sobrecarga)."""
+    for espera in ESPERAS_NOVA_TENTATIVA:
+        try:
+            return chamada()
+        except Exception as e:
+            if not _transitorio(e):
+                raise
+            time.sleep(espera)
+    return chamada()
+
+
 def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa="", uso_lista=None, busca_web=False):
     """Chama o modelo e devolve (texto, argumentos da ferramenta ou None, motivo de parada).
     Com busca_web, liga a busca na web do provedor (Anthropic ou Gemini) pelo parâmetro padrão do LiteLLM; o valor
@@ -518,7 +540,7 @@ def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa="", uso_
         ferramentas = conjunto if _prefixo_comum(mensagens) and ferramenta in conjunto else [ferramenta]
         extras = {**extras, "tools": ferramentas, "tool_choice": "auto"}
     try:
-        resp = completion(model=modelo, messages=mensagens, max_tokens=max_tokens, **extras)
+        resp = _com_novas_tentativas(lambda: completion(model=modelo, messages=mensagens, max_tokens=max_tokens, **extras))
     except Exception as e:
         # Sem o pacote "mcp", ou com um modelo que não aceita ferramentas, repete a chamada sem ferramenta;
         # os prompts já pedem o JSON em texto nesse caso.
@@ -2205,10 +2227,14 @@ def debate_independente(modelo_personas, modelo_sintese, avaliador, personas, ce
         try:
             msgs = mensagens_com_cache(modelo_personas, PROMPT_PERSONAS, material,
                                        f"{contexto}\n\nVOCÊ É: {_persona_txt(persona)}\n\n{instrucao}", ttl="5m")
-            texto, _, _ = chamar_modelo(modelo_personas, msgs, 2500, etapa=f"{etapa} · {persona['id']}", uso_lista=uso)
-            return extrair_json(texto), uso
+            texto, _, motivo = chamar_modelo(modelo_personas, msgs, 4000, etapa=f"{etapa} · {persona['id']}", uso_lista=uso)
+            obj = extrair_json(texto)
+            if not isinstance(obj, dict):
+                return {"erro": "a resposta foi cortada pelo limite de tokens" if motivo == "length"
+                        else "a resposta não trouxe o JSON pedido"}, uso
+            return obj, uso
         except Exception as e:
-            return {"erro": str(e)}, uso
+            return {"erro": f"{type(e).__name__}: {e}"[:400]}, uso
 
     def coletar(resultados):
         saida = []
@@ -2229,7 +2255,10 @@ def debate_independente(modelo_personas, modelo_sintese, avaliador, personas, ce
         if not (prop and prop.get("plano")):
             problemas.append(f"a persona {p['id']} não respondeu na Fase 1 e ficou fora do debate")
     if len(ativos) < 3:
-        raise RuntimeError("menos de 3 personas responderam na Fase 1; o debate não tem diversidade suficiente")
+        motivos = sorted({(prop or {}).get("erro") or "resposta vazia" for p, prop in zip(personas, propostas)
+                          if not (prop and prop.get("plano") and not prop.get("erro"))})
+        raise RuntimeError(f"só {len(ativos)} de {len(personas)} personas responderam na Fase 1 (são precisas 3). "
+                           "Motivo: " + " | ".join(motivos))
     ids_ativos = [p["id"] for p, _ in ativos]
 
     # Fase 2: crítica cruzada

@@ -511,3 +511,36 @@ def test_varios_orgaos_em_segundo_plano(app, llm):
     assert not at.exception, at.exception
     assert any("Análise concluída" in s.value and "2 de 2" in s.value for s in at.success)
     assert any("Baixar os resultados" in b.label for b in at.get("download_button"))
+
+
+def test_debate_sem_personas_suficientes_mostra_o_motivo(app, llm, monkeypatch):
+    class ErroDeAutenticacao(Exception):
+        pass
+
+    original = llm.__class__.__call__
+
+    def chamada(self, model, messages, max_tokens, **kw):
+        if "Você participa de uma deliberação multiagente" in str(messages[1:2]):
+            raise ErroDeAutenticacao("invalid x-api-key")
+        return original(self, model, messages, max_tokens, **kw)
+
+    monkeypatch.setattr(llm.__class__, "__call__", chamada)
+    at = _modo_independente(_preparar(app.run()))
+    next(b for b in at.button if "deliber" in b.label.lower()).click().run()
+    erros = " ".join(e.value for e in at.error)
+    assert "0 de 4 personas responderam" in erros and "ErroDeAutenticacao: invalid x-api-key" in erros
+
+
+def test_limite_por_minuto_tenta_de_novo(funcoes, monkeypatch):
+    monkeypatch.setattr(funcoes.time, "sleep", lambda s: None) if hasattr(funcoes, "time") else None
+    tentativas = []
+
+    def chamada():
+        tentativas.append(1)
+        if len(tentativas) < 3:
+            raise RuntimeError("litellm.RateLimitError: AnthropicException - 429 rate_limit_error")
+        return "ok"
+
+    assert funcoes._com_novas_tentativas(chamada) == "ok" and len(tentativas) == 3
+    with __import__("pytest").raises(ValueError):
+        funcoes._com_novas_tentativas(lambda: (_ for _ in ()).throw(ValueError("invalid x-api-key")))
