@@ -3292,6 +3292,9 @@ with st.sidebar:
             st.session_state["arquivo_nome"] = arquivo.name
             st.session_state["fonte_relatorio"] = "upload"
             st.session_state.pop("manifesto_drive", None)
+            if not st.session_state["orgao_analisado"].strip():      # o nome do órgão sai do nome do arquivo
+                st.session_state["orgao_analisado_sugerido"] = nome_do_orgao_pelo_arquivo(arquivo.name)
+                st.rerun()
         if len(arquivos) > 1:
             st.caption("ℹ️ Com vários arquivos soltos, só o primeiro é lido. Para enviar vários, envie a pasta em .zip.")
     status = st.session_state.get("status_relatorio")

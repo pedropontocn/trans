@@ -31,6 +31,7 @@ def test_relatorio_nao_preenche_os_campos(app, llm):
     assert any("autodeclaração" in m.value for m in at.caption)
     assert any("não preenche os campos" in m.value for m in at.success)
     assert not llm.chamadas                                   # ler o relatório não chama o modelo
+    assert at.session_state["orgao_analisado"] == "exemplo"   # o nome sai do arquivo (sem "relatório")
 
 
 def test_pesquisa_monta_o_dossie_e_confere_os_links(app, llm):
