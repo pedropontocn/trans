@@ -442,3 +442,14 @@ def test_conteudo_da_autodeclaracao_para_o_memorando(funcoes):
 
 def test_memorando_recebe_o_que_o_orgao_enviou(funcoes):
     assert "DECLARADO x CONFIRMADO" in funcoes.PROMPT_ETAPA_2 and "Declarado x confirmado" in funcoes.METODOLOGIA
+
+
+def test_resumo_de_100_paginas_entra_inteiro(funcoes):
+    """Um resumo de ~100 páginas (300 mil caracteres) entra inteiro; só o que passa de 400 mil é cortado, com aviso."""
+    pagina = "## Contratos\n" + ("Contrato 012/2025, obra da Ponte do Rio, valor de R$ 1.000.000,00. " * 40) + "\n"
+    resumo = pagina * 100 + "## Última seção\nRelação final de contratos."
+    texto, avisos = funcoes.limpar_relatorio(resumo)
+    assert len(resumo) > 250_000 and "Relação final de contratos." in texto
+    assert not any("cortado" in a for a in avisos)
+    grande, avisos = funcoes.limpar_relatorio(resumo * 2)
+    assert len(grande) == funcoes.LIMITE_RELATORIO and any("passou do limite" in a for a in avisos)
