@@ -52,7 +52,7 @@ LIMITE_CARACTERES = 150_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas", "sem_voz"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "2.3"
+APP_VERSAO = "2.4"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -462,7 +462,8 @@ def limpar_relatorio(texto):
     # Quadros "Como preencher"
     texto = re.sub(r"\**Como preencher:?\**.*?(?:\n\s*\n|$)", "", texto, flags=re.S | re.I)
     # Seção 9 (pontos focais: nomes e contatos de servidores)
-    texto, n9 = re.subn(r"#+\s*\**9\.\s*PONTOS FOCAIS.*", "", texto, flags=re.S | re.I)
+    # (só até o próximo arquivo, quando vários documentos do órgão vêm juntos)
+    texto, n9 = re.subn(r"#+\s*\**9\.\s*PONTOS FOCAIS.*?(?=^# ARQUIVO: |\Z)", "", texto, flags=re.S | re.I | re.M)
     if n9:
         avisos.append("A seção 9 (pontos focais, com nomes e e-mails) não foi enviada ao modelo.")
     # E-mails que sobrarem em outras seções
@@ -3161,13 +3162,15 @@ with st.sidebar:
     if manifesto and st.session_state.get("fonte_relatorio") in ("drive", "zip"):
         with st.expander(f"Arquivos lidos ({len(manifesto['lidos'])}) e pulados ({len(manifesto['pulados'])})"):
             for rotulo_m, chave_m, campo_m in [("Lidos", "lidos", None), ("Pulados", "pulados", "motivo"),
-                                               ("Com erro", "erros", "erro"), ("Cortados", "cortados", None)]:
+                                               ("Com erro", "erros", "erro"), ("Cortados", "cortados", None),
+                                               ("Trechos repetidos de outro arquivo, retirados", "repetidos", None)]:
                 if manifesto.get(chave_m):
                     st.markdown(f"**{rotulo_m}**")
                     for m in manifesto[chave_m]:
                         st.caption(f"- {m['arquivo']}" + (f" — {m[campo_m]}" if campo_m else "")
                                    + (f" (usados {m['usados']:,} de {m['caracteres']:,} caracteres)".replace(",", ".")
-                                      if chave_m == "cortados" else ""))
+                                      if chave_m == "cortados" else "")
+                                   + (f" ({m['caracteres']:,} caracteres)".replace(",", ".") if chave_m == "repetidos" else ""))
     if st.session_state.get("texto_relatorio"):
         with st.expander("Ver texto do relatório"):
             st.caption("Confira se as tabelas vieram com os valores nas colunas certas.")
