@@ -203,3 +203,34 @@ def test_pastas_reais_do_drive():
     assert not junta("TURISRIO", "Secretaria de Turismo - SETUR")
     assert not junta("DETRAN", "Secretaria da Casa Civil - SECC")
     assert not junta("Instituto Vital Brasil - IVB", "Secretaria de Estado de Saúde - SES")
+
+
+def test_planilha_compactada_sem_perder_valores():
+    md = ("## Obras\n| OBRA | Unnamed: 1 | VALOR | STATUS |\n|---|---|---|---|\n"
+          "| Ponte do Rio   | nan | 1.000,00 | Paralisada |\n| nan | nan | nan | nan |\n| Escola | NaN | 2.500,00 | NaN |\n\nTexto  com   espaços")
+    c = lote.compactar_tabelas(md)
+    assert c == ("## Obras\n|OBRA|VALOR|STATUS|\n|-|-|-|\n|Ponte do Rio|1.000,00|Paralisada|\n|Escola|2.500,00||\n\n"
+                 "Texto com espaços")
+
+
+def test_trecho_repetido_entre_arquivos_entra_uma_vez():
+    comum = "Este parágrafo longo aparece no relatório e também no anexo, palavra por palavra, sem nenhuma mudança."
+    manifesto = {}
+    saida = lote.remover_repetidos([("relatorio.docx", f"Início.\n\n{comum}"), ("anexo.docx", f"{comum}\n\nSó do anexo.")],
+                                   manifesto)
+    assert saida[1] == ("anexo.docx", "Só do anexo.") and comum in saida[0][1]
+    assert manifesto["repetidos"] == [{"arquivo": "anexo.docx", "caracteres": len(comum)}]
+
+
+def test_limite_dividido_sem_desperdicio():
+    assert lote.dividir_limite([5000, 3000], 150000) == [5000, 3000]                 # tudo cabe
+    assert lote.dividir_limite([20000, 129330, 341439], 150000) == [20000, 65000, 65000]   # a sobra vai aos maiores
+    assert lote.dividir_limite([111361, 129330, 341439], 150000) == [75000, 37500, 37500]  # relatório com peso 2
+    assert sum(lote.dividir_limite([90000, 90000, 90000], 150000)) <= 150000
+
+
+def test_secao_9_nao_apaga_os_arquivos_seguintes(funcoes):
+    texto = ("# ARQUIVO: relatorio.docx\n\n## 8. RISCOS\nRisco A\n\n## 9. PONTOS FOCAIS\nFulano, fulano@rj.gov.br\n\n"
+             "# ARQUIVO: base.xlsx\n\n|OBRA|\n|-|\n|Ponte|")
+    limpo, avisos = funcoes.limpar_relatorio(texto)
+    assert "Risco A" in limpo and "Fulano" not in limpo and "|Ponte|" in limpo and "# ARQUIVO: base.xlsx" in limpo
