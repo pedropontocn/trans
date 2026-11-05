@@ -93,7 +93,7 @@ def test_deliberacao_com_uma_rodada(app, llm):
     # o dossiê e a autodeclaração vão juntos para o debate, em cache de 1 hora, antes das instruções da etapa
     chamada = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
     partes = chamada["mensagens"][1]["content"]
-    assert partes[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert partes[0]["cache_control"] == {"type": "ephemeral"}
     assert partes[0]["text"].startswith("<dossie>") and "<relatorio>\nAUTODECLARAÇÃO DO ÓRGÃO" in partes[0]["text"]
     assert "<instrucoes>" in partes[1]["text"] and partes[1]["cache_control"] == {"type": "ephemeral"}
     assert "QUALIDADE DO RELATÓRIO" in partes[2]["text"] and "DIVERGÊNCIAS ENTRE A AUTODECLARAÇÃO" in partes[2]["text"]
@@ -457,3 +457,22 @@ def test_zip_sem_pasta_no_primeiro_nivel(funcoes, llm):
     assert [o["nome"] for o in orgaos] == ["SETUR"]           # o nome do arquivo vira a pasta principal
     nomes = {i["name"] for i in pacote.listar(orgaos[0]["pastas"][0]["id"])}
     assert nomes == {"relatorio.pdf", "anexos", "solto.docx"}
+
+
+def test_segundo_orgao_reaproveita_a_pesquisa_do_estado(app, llm):
+    at = app.run()
+    at.text_input(key="orgao_analisado").input("Secretaria de Exemplo").run()
+    _botao(at, "Pesquisar e montar o dossiê")
+    buscas = lambda: [c for c in llm.chamadas if c["kw"].get("web_search_options")]
+    assert len(buscas()) == 5                                  # 2 grupos do Estado + 3 do órgão
+    primeiro = at.session_state["dossie"]
+    assert not primeiro["estado_reaproveitado"]
+    assert any(i["camada"] == "estado" for i in primeiro["itens"])
+    at.text_input(key="orgao_analisado").input("Outra Secretaria").run()
+    _botao(at, "Pesquisar e montar o dossiê")
+    segundo = at.session_state["dossie"]
+    assert len(buscas()) == 8                                  # só os 3 grupos do órgão
+    assert segundo["estado_reaproveitado"] and segundo["orgao"] == "Outra Secretaria"
+    assert any(i["camada"] == "estado" for i in segundo["itens"])
+    assert len(segundo["uso"]) < len(primeiro["uso"])          # o custo do Estado não é cobrado de novo
+    assert any("contexto do Estado veio de uma pesquisa anterior" in c.value for c in at.caption)

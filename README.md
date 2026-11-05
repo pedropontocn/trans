@@ -126,8 +126,11 @@ do órgão nas duas análises, as seções do relatório e os valores em R$ que 
   chamada aparece em "Diagnóstico da pesquisa", no painel do dossiê. Com o Sonnet 5.5, a Anthropic cobra US$ 10 por mil
   buscas além dos tokens; o painel soma as buscas no custo. Uma pesquisa repetida com os mesmos insumos é
   reaproveitada sem nova busca enquanto o app não reinicia ("Pesquisar de novo do zero" força uma nova).
-- **Debate e memorando:** com o Opus 5.5 no debate e 3 rodadas, cerca de US$ 0,50 a 0,60. O dossiê fica em cache por
-  1 hora e as rodadas o leem por 5% do preço.
+- **Contexto do Estado pesquisado uma vez.** Situação fiscal, dívida, previdência, calendário e cenário político são
+  iguais para todos os órgãos. No app, a primeira análise do dia pesquisa o Estado; as seguintes, com o mesmo modelo,
+  data de corte e foco, reaproveitam essa parte e pesquisam só o órgão (3 das 5 pesquisas). O lote já fazia assim.
+- **Debate e memorando:** com o Opus 5.5 no debate e 3 rodadas, cerca de US$ 0,50 a 0,60. O material fica em cache
+  por 5 minutos, o bastante para as rodadas de uma deliberação, e as rodadas o leem por 5% do preço.
 
 O valor real de cada análise aparece no painel e no registro.
 
