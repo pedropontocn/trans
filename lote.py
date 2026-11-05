@@ -387,7 +387,10 @@ def processar_orgao(app, drive, orgao, cfg, saida):
             texto, manifesto = ler_documentos(drive, orgao, app["converter_arquivo"], app["LIMITE_CARACTERES"])
         (pasta / "arquivos_lidos.json").write_text(json.dumps(manifesto, ensure_ascii=False, indent=2), encoding="utf-8")
         linha["arquivos_lidos"], linha["arquivos_pulados"] = len(manifesto["lidos"]), len(manifesto["pulados"])
-        relatorio, _ = app["limpar_relatorio"](texto) if texto else ("", [])
+        relatorio, avisos_rel = app["limpar_relatorio"](texto) if texto else ("", [])
+        corte = next((a for a in avisos_rel if "foi cortado" in a), "")
+        if corte:
+            log(f"  {corte}")
         log(f"  documentos: {len(manifesto['lidos'])} lidos, {len(manifesto['pulados'])} pulados, "
             f"{len(manifesto['erros'])} com erro, {len(manifesto['cortados'])} cortados")
 
@@ -433,7 +436,8 @@ def processar_orgao(app, drive, orgao, cfg, saida):
         linha.update(situacao="concluído", trade_offs=len(tm.get("trade_offs") or []),
                      confianca=resultado["confianca"]["nivel"],
                      custo_usd=round(resultado["custo"] + resultado["custo_extracao"], 3),
-                     observacao="; ".join(resultado.get("problemas_formato") or [])[:300])
+                     observacao="; ".join(([corte.replace("⚠️ ", "")] if corte else [])
+                                          + (resultado.get("problemas_formato") or []))[:300])
         return linha
     except Exception as e:
         linha["observacao"] = f"{type(e).__name__}: {e}"[:300]

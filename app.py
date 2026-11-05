@@ -50,11 +50,14 @@ MODELOS = [
     "anthropic/claude-haiku-5-5",
     "anthropic/claude-sonnet-4-5-20250929",
 ]
-LIMITE_CARACTERES = 150_000
+LIMITE_CARACTERES = 150_000      # documentos brutos de uma pasta (Drive ou .zip), somados
+# Relatório ou resumo do órgão: é o material já preparado e precisa ser lido inteiro. 400 mil caracteres são cerca de
+# 130 páginas e 110 mil tokens, o que cabe com folga no contexto dos modelos junto com o dossiê.
+LIMITE_RELATORIO = 400_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas", "sem_voz"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "2.6"
+APP_VERSAO = "2.7"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -465,10 +468,13 @@ def converter_arquivo(nome, conteudo):
         os.remove(caminho)
 
 
-def limpar_relatorio(texto):
-    """Tira do relatório o que não serve à deliberação: instruções do modelo e dados pessoais."""
+def limpar_relatorio(texto, limite=None):
+    """Tira do relatório o que não serve à deliberação: instruções do modelo, dados pessoais e o espaço vazio das
+    tabelas. Corta no final o que passar do limite (LIMITE_RELATORIO), avisando."""
+    limite = limite or LIMITE_RELATORIO
     avisos = []
     tamanho_original = len(texto)
+    texto = _modulo_lote().compactar_tabelas(texto)        # células vazias e alinhamento: nenhum valor se perde
     # Páginas de orientação do modelo de relatório (antes da seção 1)
     texto = re.sub(r"#+\s*\**ORIENTAÇÕES DE PREENCHIMENTO.*?(?=#+\s*\**1\.\s*APRESENTA)", "", texto, flags=re.S | re.I)
     # Quadros "Como preencher"
@@ -484,10 +490,13 @@ def limpar_relatorio(texto):
         avisos.append(f"{n_email} endereço(s) de e-mail foram omitidos.")
     reduzido = tamanho_original - len(texto)
     if reduzido > 0:
-        avisos.append(f"{reduzido:,} caracteres de instruções e dados pessoais foram removidos.".replace(",", "."))
-    if len(texto) > LIMITE_CARACTERES:
-        avisos.append(f"O relatório passou de {LIMITE_CARACTERES:,} caracteres e foi cortado no final.".replace(",", "."))
-        texto = texto[:LIMITE_CARACTERES]
+        avisos.append(f"{reduzido:,} caracteres de instruções, dados pessoais e espaço vazio de tabelas foram "
+                      "removidos.".replace(",", "."))
+    if len(texto) > limite:
+        avisos.append(f"⚠️ O relatório tem {len(texto):,} caracteres e passou do limite de {limite:,}: o final "
+                      f"(cerca de {(len(texto) - limite) * 100 // len(texto)}%) foi cortado e não entra na análise."
+                      .replace(",", "."))
+        texto = texto[:limite]
     return texto, avisos
 
 
