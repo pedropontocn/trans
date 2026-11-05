@@ -506,9 +506,10 @@ ESPERAS_NOVA_TENTATIVA = (10, 30, 60)
 
 
 def _transitorio(e):
-    """Erros que passam sozinhos: limite de uso por minuto (429) e API sobrecarregada (529)."""
+    """Erros que passam sozinhos: limite de uso por minuto (429), serviço indisponível (503) e sobrecarga (529)."""
     texto = f"{type(e).__name__} {e}".lower()
-    return any(t in texto for t in ("ratelimit", "rate limit", "rate_limit", "429", "overloaded", "529"))
+    return any(t in texto for t in ("ratelimit", "rate limit", "rate_limit", "429", "overloaded", "529", "503",
+                                    "serviceunavailable", "service unavailable", "high demand"))
 
 
 def _com_novas_tentativas(chamada):
@@ -2342,26 +2343,34 @@ def debate_independente(modelo_personas, modelo_sintese, avaliador, personas, ce
                                       "premissas": [anonimizar(str(x)) for x in
                                                     next(prop for q, prop in ativos if q["id"] == pid).get("premissas", [])]}
                        for pid in ordem}
-    avaliacao, erro_avaliacao = {}, None
-    try:
-        uso = []
-        texto, _, _ = chamar_modelo(avaliador, [{"role": "system", "content": PROMPT_AVALIACAO},
-                                                {"role": "user", "content": (cenario_avaliador or cenario) + "\n\nPLANOS:\n"
-                                                 + json.dumps(planos_anonimos, ensure_ascii=False, indent=2)}],
-                                    3000, etapa="fase 3 · avaliação cega", uso_lista=uso)
-        usos.extend(uso)
-        por_rotulo = {str(a.get("plano", "")).strip().upper(): a for a in ((extrair_json(texto) or {}).get("avaliacoes") or [])
-                      if isinstance(a, dict)}
-        avaliacao = {pid: por_rotulo[r] for pid, r in rotulos.items() if r in por_rotulo}
-        if not avaliacao:
-            erro_avaliacao = "o avaliador não devolveu notas legíveis"
-    except Exception as e:
-        erro_avaliacao = str(e)
-    if erro_avaliacao:
+    avaliacao, erro_avaliacao, avaliador_usado, falhas = {}, None, avaliador, []
+    # Se o avaliador escolhido falhar (fora do ar, sem cota), tenta os outros: primeiro os de outra família.
+    reservas = sorted([a for a in AVALIADORES if a != avaliador], key=lambda a: mesma_familia(a, modelo_personas))
+    for candidato in [avaliador] + reservas:
+        try:
+            uso = []
+            texto, _, _ = chamar_modelo(candidato, [{"role": "system", "content": PROMPT_AVALIACAO},
+                                                    {"role": "user", "content": (cenario_avaliador or cenario) + "\n\nPLANOS:\n"
+                                                     + json.dumps(planos_anonimos, ensure_ascii=False, indent=2)}],
+                                        3000, etapa=f"fase 3 · avaliação cega ({candidato.split('/')[-1]})", uso_lista=uso)
+            usos.extend(uso)
+            por_rotulo = {str(a.get("plano", "")).strip().upper(): a
+                          for a in ((extrair_json(texto) or {}).get("avaliacoes") or []) if isinstance(a, dict)}
+            avaliacao = {pid: por_rotulo[r] for pid, r in rotulos.items() if r in por_rotulo}
+            if avaliacao:
+                avaliador_usado = candidato
+                break
+            falhas.append(f"{candidato}: não devolveu notas legíveis")
+        except Exception as e:
+            falhas.append(f"{candidato}: {type(e).__name__}: {str(e)[:200]}")
+    if not avaliacao:
+        erro_avaliacao = " | ".join(falhas) or "sem avaliador disponível"
         problemas.append(f"avaliação cega indisponível ({erro_avaliacao})")
+    elif avaliador_usado != avaliador:
+        problemas.append(f"a avaliação cega foi feita por {avaliador_usado}, porque {avaliador} falhou")
 
     debate = {
-        "modelo_personas": modelo_personas, "avaliador": avaliador,
+        "modelo_personas": modelo_personas, "avaliador": avaliador_usado, "avaliador_escolhido": avaliador,
         "personas": [{"id": p["id"], "nome": p["nome"], "criterio": p["criterio"],
                       "plano_inicial": prop["plano"], "premissas": prop.get("premissas", []),
                       "argumentos": prop.get("argumentos", []),
@@ -3637,8 +3646,8 @@ else:
     if hashlib.md5(montar_cenario(com_dossie=True).encode()).hexdigest() != resultado.get("assinatura_insumos"):
         st.warning("O dossiê ou os campos da barra lateral mudaram depois desta deliberação. Rode de novo para atualizar.")
     if resultado.get("problemas_formato"):
-        st.warning("O Tension Map veio incompleto mesmo após uma nova tentativa: "
-                   + "; ".join(resultado["problemas_formato"][:3]) + ". Veja a aba Verificação.")
+        st.warning("Pontos de atenção nesta análise: " + "; ".join(resultado["problemas_formato"][:3])
+                   + ". Veja a aba Verificação.")
 
     ev = resultado.get("evidencias") or {"conferidas": [], "calculos": [], "rebaixadas": [], "normas": []}
     numeros = resultado.get("numeros") or []
