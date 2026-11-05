@@ -152,10 +152,31 @@ O GitHub Actions roda os testes a cada push na `main` e a cada pull request (`.g
 | `requirements.txt` | Dependências para rodar o painel |
 | `requirements-dev.txt` | Dependências para rodar os testes |
 | `orquestrador.py`, `validador.py`, `prompts.py` | Versão anterior, em linha de comando, com auditoria cruzada por modelos Gemini. Não é usada pelo `app.py`. |
-| `lote.py` | Processamento em lote a partir do Google Drive (usa as funções do `app.py`). |
+| `lote.py` | Processamento em lote a partir do Google Drive (usa as funções do `app.py`); o app usa a leitura do Drive dele. |
 | `.github/workflows/lote.yml` | Workflow manual que roda o `lote.py` em paralelo e entrega o zip criptografado. |
 | `requirements-lote.txt` | Dependências extras do lote (acesso ao Google Drive). |
 | `extraido/lacunas_oficio/` | Diagnóstico de lacunas e minuta de ofício, retirados do painel na versão 2.0. Ponto de partida da ferramenta própria de triagem; não é usado pelo `app.py`. |
+
+## Drive no app
+
+Com a conta de serviço configurada, a seção **1. Órgão e pesquisa** mostra a lista **Órgão (pastas do Drive)**, com as
+secretarias e, marcados com ↳, os órgãos vinculados. A lista sai da pasta DOCUMENTOS RECEBIDOS, com as mesmas regras do
+lote. Escolher um órgão preenche o nome usado na pesquisa. Na seção **2**, o botão **Ler os documentos de ... no Drive**
+baixa e lê os arquivos da pasta do órgão. Eles entram no debate como a versão do órgão, igual a um relatório enviado à
+mão. A lista dos arquivos lidos, pulados e cortados aparece logo abaixo. O envio manual de arquivo continua funcionando.
+
+Para ligar, use a mesma conta de serviço do lote (passos 1 a 3 da configuração abaixo). No Streamlit Cloud, em
+**Manage app > ⋮ > Settings > Secrets**, acrescente:
+
+```toml
+DRIVE_PASTA_ID = "o ID da pasta DOCUMENTOS RECEBIDOS (o trecho do link depois de /folders/)"
+GOOGLE_SERVICE_ACCOUNT_JSON = '''
+{ cole aqui o conteúdo inteiro do arquivo JSON da conta de serviço }
+'''
+```
+
+Use três aspas **simples**: assim o `\n` da chave privada continua como está. Sem esses dois segredos, o app funciona
+como antes, sem a lista do Drive.
 
 ## Processamento em lote a partir do Drive
 

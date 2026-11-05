@@ -356,3 +356,43 @@ def test_dossie_vazio_mostra_o_diagnostico(app, llm):
     assert "5 de 5 buscas com problema" in diag.label
     assert any("a resposta não trouxe o JSON do dossiê" in m.value for m in at.markdown)
     assert any("Fiz as buscas" in c.value for c in at.code)
+
+
+def test_orgao_e_documentos_lidos_do_drive(app, llm, monkeypatch):
+    import lote
+    from test_lote import DriveFalso
+    drive = DriveFalso()
+    monkeypatch.setattr(lote, "Drive", lambda credenciais: drive)
+    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", '{"client_email": "conta@projeto.iam.gserviceaccount.com"}')
+    monkeypatch.setenv("DRIVE_PASTA_ID", "raiz")
+    llm.sem_relatorio = True
+    at = app.run()
+    assert not at.exception, at.exception
+    seletor = at.selectbox(key="orgao_drive")
+    # secretarias e vinculadas, na ordem do lote; a pasta que repete o nome não vira órgão
+    assert seletor.options == ["—", "Secretaria de Fazenda - SEFAZ",
+                               "↳ Fundo Único de Previdência Social do Estado - RIOPREV", "Secretaria de Turismo - SETUR"]
+    seletor.set_value("Secretaria de Fazenda - SEFAZ").run()
+    assert at.session_state["orgao_analisado"] == "Secretaria de Fazenda - SEFAZ"
+    next(b for b in at.button if "Ler os documentos de SEFAZ" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["fonte_relatorio"] == "drive" and at.session_state["texto_relatorio"]
+    m = at.session_state["manifesto_drive"]
+    lidos = {x["arquivo"] for x in m["lidos"]}
+    assert "Relatorio_de_Transicao_SEFAZ.docx" in lidos and "SEFAZ/anexo.docx" in lidos
+    assert "Planilha_dos_Cargos_e_Telefones.xlsx" not in drive.baixados          # dados pessoais: nem baixa
+    assert not any("rioprev" in x for x in lidos)                               # vinculada tem análise própria
+    at.run()                                                                    # nova execução: o texto do Drive fica
+    assert at.session_state["texto_relatorio"]
+    # trocar de órgão apaga os documentos do anterior e põe o vínculo no nome da pesquisa
+    at.selectbox(key="orgao_drive").set_value("↳ Fundo Único de Previdência Social do Estado - RIOPREV").run()
+    assert at.session_state["orgao_analisado"] == ("Fundo Único de Previdência Social do Estado - RIOPREV "
+                                                   "(vinculado à Secretaria de Fazenda - SEFAZ)")
+    assert "texto_relatorio" not in at.session_state
+
+
+def test_sem_drive_configurado_o_app_segue(app, llm):
+    at = app.run()
+    assert not at.exception, at.exception
+    assert not [s for s in at.selectbox if s.key == "orgao_drive"]
+    assert any("conta de serviço nos Secrets" in c.value for c in at.caption)
