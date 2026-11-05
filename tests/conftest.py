@@ -230,10 +230,16 @@ class LLMFalso:
             self.mensagem_confronto = ultimo
             return self._resp(json.dumps(self.confronto))
         if "Você participa de uma deliberação multiagente" in contexto:
+            mais_curta = ultimo.startswith("Sua resposta passou do limite")
+            if mais_curta:                      # o pedido de resposta mais curta vem depois da conversa original
+                ultimo = texto(messages[1]["content"])
             pid = re.search(r"VOCÊ É: \[([^\]]+)\]", ultimo).group(1)
             if "FASE 1 — PROPOSIÇÃO" in ultimo:
                 if pid in self.personas_mudas:
                     return self._resp("não sei responder")
+                if pid in getattr(self, "personas_prolixas", set()) and not mais_curta:
+                    return self._resp('[INÍCIO DO JSON]{"plano": "um plano enorme que não acaba', motivo="length",
+                                      saida=6000)
                 obj = {"plano": f"Plano de {pid}", "premissas": [f"premissa de {pid}"],
                        "argumentos": [{"afirmacao": "a", "evidencia": 1, "fonte": FONTE_OK}]}
             elif "FASE 2 — CRÍTICA" in ultimo:
