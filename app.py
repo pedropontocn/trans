@@ -52,7 +52,7 @@ LIMITE_CARACTERES = 150_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas", "sem_voz"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "2.1"
+APP_VERSAO = "2.2"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -1040,6 +1040,19 @@ def pesquisar_estado(modelo, data_corte, foco=""):
                                                                    datetime.now().isoformat(timespec="seconds"))}
 
 
+def camada_estado(modelo, data_corte, foco="", reaproveitar=True):
+    """A camada do Estado para o app: pesquisada na primeira análise e reaproveitada nas seguintes com o mesmo modelo,
+    data de corte e foco, como no lote. Devolve (estado, pesquisada_agora)."""
+    chave = chave_guardada("camada do Estado", modelo, PROMPT_PESQUISA, data_corte, foco)
+    guardada = resposta_guardada(chave) if reaproveitar else None
+    if guardada:
+        return deepcopy(guardada), False
+    estado = pesquisar_estado(modelo, data_corte, foco)
+    if estado["itens"]:
+        guardar_resposta(chave, deepcopy(estado))
+    return estado, True
+
+
 def ler_dossie_arquivo(conteudo):
     """Lê um dossiê pronto (.json no formato que o app baixa). Os links são conferidos de novo por código."""
     dados = json.loads(conteudo.decode("utf-8"))
@@ -1616,15 +1629,15 @@ def _pede_cache_1h(mensagens):
                for m in mensagens if isinstance(m.get("content"), list) for p in m["content"])
 
 
-def mensagens_com_cache(modelo, instrucoes, material, texto_usuario, ttl="1h", dados_extra=""):
+def mensagens_com_cache(modelo, instrucoes, material, texto_usuario, ttl="5m", dados_extra=""):
     """Monta as mensagens com o material de referência em cache (só em modelos da Anthropic).
 
     material: o texto já marcado de material_referencia() (dossiê e, se houver, a autodeclaração do órgão).
     O cache vale para o começo da mensagem que se repete igual. Por isso a ordem é: um prompt de sistema comum a todas
     as etapas, o material e só depois as instruções da etapa. Assim as rodadas do debate e a síntese gravam o material
-    uma vez e as demais chamadas o leem por uma fração do preço. Com ttl="1h" o material fica em cache por uma hora
-    (gravar custa 2x em vez de 1,25x): compensa quando se delibera de novo com ajustes. As instruções da etapa ficam em
-    cache por 5 minutos, para as rodadas e a correção."""
+    uma vez e as demais chamadas o leem por uma fração do preço. O padrão é o cache de 5 minutos (gravar custa 1,25x):
+    as rodadas de uma deliberação acontecem dentro desse prazo, e cada leitura renova o prazo. O de 1 hora (ttl="1h",
+    gravar custa 2x) só compensa quando se delibera de novo o mesmo material dentro da hora."""
     bloco_relatorio = material or ""
     if not _usa_cache(modelo):
         return [{"role": "system", "content": instrucoes},
@@ -3027,15 +3040,23 @@ with st.sidebar:
     if botao_pesquisa or refazer_pesquisa:
         with st.spinner("Pesquisando o Estado e o órgão na web e conferindo os links. Leva alguns minutos..."):
             try:
-                st.session_state["dossie"] = montar_dossie(
-                    modelo_pesquisa, st.session_state["orgao_analisado"].strip(), data_corte.strftime("%d/%m/%Y"),
-                    st.session_state["foco"].strip(), reaproveitar=not refazer_pesquisa)
+                corte_txt, foco_txt = data_corte.strftime("%d/%m/%Y"), st.session_state["foco"].strip()
+                # o Estado é igual para todos os órgãos: pesquisado uma vez e reaproveitado nos seguintes
+                estado, estado_novo = camada_estado(modelo_pesquisa, corte_txt, foco_txt, reaproveitar=not refazer_pesquisa)
+                dossie_novo = montar_dossie(modelo_pesquisa, st.session_state["orgao_analisado"].strip(), corte_txt,
+                                            foco_txt, reaproveitar=not refazer_pesquisa, estado=estado)
+                if estado_novo and not dossie_novo.get("reaproveitado"):
+                    dossie_novo["uso"] = list(estado.get("uso") or []) + list(dossie_novo.get("uso") or [])
+                dossie_novo["estado_reaproveitado"] = not estado_novo
+                st.session_state["dossie"] = dossie_novo
                 reiniciar_tabela_dossie()
                 if not st.session_state["dossie"]["itens"]:
                     st.warning("A pesquisa não trouxe nenhum item com fonte. O motivo de cada busca está em "
                                "\"Diagnóstico da pesquisa\", no painel do dossiê.")
             except Exception as e:
                 st.error(f"Não foi possível pesquisar: {e}. Você pode carregar um dossiê pronto logo abaixo.")
+    if (st.session_state.get("dossie") or {}).get("estado_reaproveitado") and not st.session_state["dossie"].get("reaproveitado"):
+        st.caption("♻️ O contexto do Estado veio de uma pesquisa anterior do mesmo dia; só o órgão foi pesquisado agora.")
     if (st.session_state.get("dossie") or {}).get("reaproveitado"):
         st.caption("♻️ Dossiê reaproveitado de uma pesquisa anterior com os mesmos insumos, sem nova busca.")
         st.button("Pesquisar de novo do zero", width="stretch",
