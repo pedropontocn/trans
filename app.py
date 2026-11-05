@@ -825,17 +825,21 @@ def pesquisar_grupo(modelo, camada, blocos, orgao, data_corte, foco=""):
         return [], [], uso, diag
 
 
-def montar_dossie(modelo, orgao, data_corte, foco="", reaproveitar=True):
+def montar_dossie(modelo, orgao, data_corte, foco="", reaproveitar=True, estado=None):
     """Pesquisa os grupos em paralelo, numera os itens e confere os links por código.
-    Se todos os grupos falharem com erro, levanta RuntimeError com as mensagens, para a tela mostrar o motivo."""
-    chave = chave_guardada("dossiê", modelo, PROMPT_PESQUISA, GRUPOS_PESQUISA, orgao, data_corte, foco)
+
+    estado: a camada do Estado já pesquisada (o que pesquisar_estado devolve). Ela é igual para todos os órgãos; com
+    ela, só a camada do órgão é pesquisada, e os itens do Estado entram como estão, sem nova busca nem nova conferência.
+    Se todos os grupos pesquisados falharem com erro, levanta RuntimeError com as mensagens."""
+    grupos = [g for g in GRUPOS_PESQUISA if estado is None or g[0] == "orgao"]
+    chave = chave_guardada("dossiê", modelo, PROMPT_PESQUISA, grupos, orgao, data_corte, foco,
+                           (estado or {}).get("assinatura"))
     guardada = resposta_guardada(chave) if reaproveitar else None
     if guardada:
         dossie = deepcopy(guardada)
         dossie["reaproveitado"] = True
         return dossie
-    resultados = _em_paralelo([lambda c=c, b=b: pesquisar_grupo(modelo, c, b, orgao, data_corte, foco)
-                               for c, b in GRUPOS_PESQUISA])
+    resultados = _em_paralelo([lambda c=c, b=b: pesquisar_grupo(modelo, c, b, orgao, data_corte, foco) for c, b in grupos])
     itens, nao, uso, diagnostico = [], [], [], []
     for it, n, u, d in resultados:
         itens += it
@@ -845,22 +849,53 @@ def montar_dossie(modelo, orgao, data_corte, foco="", reaproveitar=True):
     # todos os grupos deram erro na chamada (chave, modelo, parâmetro): não há dossiê a montar
     if not itens and all(d["erro"] and d["erro"] != SEM_JSON for d in diagnostico):
         raise RuntimeError("todas as buscas falharam: " + " | ".join(sorted({d["erro"] for d in diagnostico})))
+    novos = conferir_itens(_unicos_ordenados(itens))
+    if estado is not None:
+        # itens do Estado já conferidos; perdem o id para a numeração ficar contínua neste dossiê
+        itens = [dict(i, id="") for i in deepcopy(estado["itens"])] + [dict(i, id="") for i in novos]
+        nao = deepcopy(estado["nao_encontrado"]) + nao
+        diagnostico = [dict(d, compartilhado=True) for d in deepcopy(estado["diagnostico"])] + diagnostico
+    else:
+        itens = novos
+    dossie = {"orgao": orgao, "data_corte": data_corte, "foco": foco, "modelo": modelo, "origem": "pesquisa",
+              "gerado_em": datetime.now().isoformat(timespec="seconds"),
+              "itens": numerar_itens(_unicos_ordenados(itens)), "nao_encontrado": nao, "uso": uso,
+              "diagnostico": diagnostico, "reaproveitado": False, "estado_compartilhado": estado is not None}
+    if dossie["itens"]:
+        guardar_resposta(chave, deepcopy(dossie))
+    return dossie
+
+
+def _unicos_ordenados(itens):
+    """Tira repetidos (mesmo link e mesma afirmação) e ordena: Estado antes do órgão e, dentro de cada camada, a ordem
+    fixa dos blocos, para os ids não dependerem da ordem em que as respostas chegam."""
     vistos, unicos = set(), []
     for i in itens:
         chave_item = (i["url"], _comparavel(i["afirmacao"])[:120])
         if chave_item not in vistos:
             vistos.add(chave_item)
             unicos.append(i)
-    # ids estáveis: Estado antes do órgão e, dentro de cada camada, a ordem fixa dos blocos (não a ordem de chegada)
     ordem = {b: k for k, b in enumerate(OPCOES_BLOCO)}
     unicos.sort(key=lambda i: (i["camada"] != "estado", ordem.get(i["bloco"], len(ordem))))
-    dossie = {"orgao": orgao, "data_corte": data_corte, "foco": foco, "modelo": modelo, "origem": "pesquisa",
-              "gerado_em": datetime.now().isoformat(timespec="seconds"),
-              "itens": conferir_itens(numerar_itens(unicos)), "nao_encontrado": nao, "uso": uso,
-              "diagnostico": diagnostico, "reaproveitado": False}
-    if dossie["itens"]:
-        guardar_resposta(chave, deepcopy(dossie))
-    return dossie
+    return unicos
+
+
+def pesquisar_estado(modelo, data_corte, foco=""):
+    """A camada do Estado, pesquisada uma vez para ser usada em vários órgãos (processamento em lote)."""
+    grupos = [g for g in GRUPOS_PESQUISA if g[0] == "estado"]
+    resultados = _em_paralelo([lambda b=b: pesquisar_grupo(modelo, "estado", b, "", data_corte, foco) for _, b in grupos])
+    itens, nao, uso, diagnostico = [], [], [], []
+    for it, n, u, d in resultados:
+        itens += it
+        nao += n
+        uso += u
+        diagnostico.append(d)
+    if not itens and all(d["erro"] and d["erro"] != SEM_JSON for d in diagnostico):
+        raise RuntimeError("todas as buscas falharam: " + " | ".join(sorted({d["erro"] for d in diagnostico})))
+    itens = conferir_itens(numerar_itens(_unicos_ordenados(itens)))
+    return {"itens": itens, "nao_encontrado": nao, "uso": uso, "diagnostico": diagnostico, "modelo": modelo,
+            "data_corte": data_corte, "assinatura": chave_guardada("estado", modelo, data_corte, foco,
+                                                                   datetime.now().isoformat(timespec="seconds"))}
 
 
 def ler_dossie_arquivo(conteudo):

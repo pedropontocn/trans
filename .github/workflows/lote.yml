@@ -31,10 +31,10 @@ on:
         description: "Rodadas independentes do debate"
         type: choice
         options: ["1", "2", "3"]
-        default: "3"
+        default: "2"
       modelo:
-        description: "Modelo do debate e do memorando"
-        default: "anthropic/claude-opus-5-5"
+        description: "Modelo do debate e do memorando (Opus: mais profundo, cerca do dobro do custo)"
+        default: "anthropic/claude-sonnet-5-5"
       modelo_pesquisa:
         description: "Modelo da pesquisa do dossiê"
         default: "anthropic/claude-sonnet-5-5"

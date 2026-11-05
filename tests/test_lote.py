@@ -140,10 +140,19 @@ def test_lote_completo_sem_parar(tmp_path, llm):
     # o órgão vinculado é pesquisado com o nome da secretaria-mãe
     pesquisas = [str(c["mensagens"]) for c in llm.chamadas if "Monte a camada" in str(c["mensagens"])]
     assert any("RIOPREV (vinculado à Secretaria de Fazenda - SEFAZ)" in p for p in pesquisas)
+    # a camada do Estado é pesquisada uma vez só (2 grupos) e entra no dossiê dos dois órgãos
+    assert sum('camada\\n"Estado"' in p for p in pesquisas) == 2 and len(pesquisas) == 2 + 2 * 3
+    dossie = json.loads((pasta / "dossie.json").read_text(encoding="utf-8"))
+    assert [i["id"] for i in dossie["itens"]][:3] == ["E1", "E2", "E3"]
+    assert (tmp_path / "dossie_estado.json").exists()
+    # padrão do lote: Sonnet no debate
+    assert registro["modelo_debate"].endswith("sonnet-5-5")
     with open(tmp_path / "resumo.csv", encoding="utf-8-sig") as f:
         resumo = list(csv.DictReader(f, delimiter=";"))
     assert [r["sigla"] for r in resumo] == ["SEFAZ", "RIOPREV"] and all(float(r["custo_usd"]) > 0 for r in resumo)
-    assert "2 de 2 órgãos concluídos" in (tmp_path / "resumo.md").read_text(encoding="utf-8")
+    resumo_md = (tmp_path / "resumo.md").read_text(encoding="utf-8")
+    assert "2 de 2 órgãos concluídos" in resumo_md and "da pesquisa do Estado, feita uma vez" in resumo_md
+    assert "usada em todos os órgãos." in resumo_md
 
 
 def test_falha_num_orgao_nao_para_o_lote(tmp_path, llm):

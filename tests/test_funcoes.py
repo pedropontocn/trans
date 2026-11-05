@@ -406,3 +406,18 @@ def test_quadro_sobre_o_documento(funcoes):
     assert linhas[0] == "# Memorando Executivo" and linhas[2] == "## Sobre este documento"
     assert "4 papéis institucionais simulados" in memo and "não recomenda" in memo
     assert funcoes.inserir_sobre_documento("sem título", quadro).startswith("## Sobre este documento")
+
+
+def test_dossie_com_estado_compartilhado(funcoes, llm):
+    estado = funcoes.pesquisar_estado("anthropic/claude-sonnet-5-5", "04/11/2026")
+    assert [i["id"] for i in estado["itens"]] == ["E1", "E2", "E3"]
+    antes = len([c for c in llm.chamadas if "Monte a camada" in str(c["mensagens"])])
+    assert antes == 2
+    d = funcoes.montar_dossie("anthropic/claude-sonnet-5-5", "Secretaria de Exemplo", "04/11/2026", estado=estado)
+    pesquisas = [str(c["mensagens"]) for c in llm.chamadas if "Monte a camada" in str(c["mensagens"])][antes:]
+    assert len(pesquisas) == 3 and not any('camada\\n"Estado"' in p for p in pesquisas)   # só o órgão
+    assert sorted(i["id"] for i in d["itens"]) == ["E1", "E2", "E3", "O1", "O2", "O3", "O4", "O5", "O6"]
+    assert d["estado_compartilhado"] and sum(x.get("compartilhado", False) for x in d["diagnostico"]) == 2
+    # o Estado não é conferido de novo nem cobrado de novo no dossiê do órgão
+    assert llm.paginas_abertas.count("https://www.exemplo.rj.gov.br/loa-2027") == 1
+    assert sum(u["buscas"] for u in d["uso"]) == 12

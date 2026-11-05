@@ -275,7 +275,8 @@ def processar_orgao(app, drive, orgao, cfg, saida):
             f"{len(manifesto['erros'])} com erro, {len(manifesto['cortados'])} cortados")
 
         nome_pesquisa = orgao["nome"] + (f" (vinculado à {orgao['vinculada_a']})" if orgao["vinculada_a"] else "")
-        dossie = app["montar_dossie"](cfg["modelo_pesquisa"], nome_pesquisa, cfg["data_corte"], cfg.get("foco", ""))
+        dossie = app["montar_dossie"](cfg["modelo_pesquisa"], nome_pesquisa, cfg["data_corte"], cfg.get("foco", ""),
+                                      estado=cfg.get("estado"))
         (pasta / "dossie.json").write_text(app["dossie_para_json"](dossie), encoding="utf-8")
         resumo = app["resumo_dossie"](dossie)
         linha["itens_dossie"], linha["conferidos"] = resumo["itens"], resumo["conferidos"]
@@ -324,7 +325,11 @@ def processar_orgao(app, drive, orgao, cfg, saida):
         linha["minutos"] = round((time.time() - inicio) / 60, 1)
 
 
-def gravar_resumo(saida, linhas):
+def _reais(valor):
+    return f"{valor:.2f}".replace(".", ",")
+
+
+def gravar_resumo(saida, linhas, custo_estado=0.0):
     campos = list(linhas[0]) if linhas else ["orgao"]
     with open(saida / "resumo.csv", "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=campos, delimiter=";")
@@ -333,7 +338,8 @@ def gravar_resumo(saida, linhas):
     concluidos = [x for x in linhas if x["situacao"] == "concluído"]
     texto = [f"# Processamento em lote — {datetime.now():%d/%m/%Y %H:%M}", "",
              f"{len(concluidos)} de {len(linhas)} órgãos concluídos. Custo estimado: US$ "
-             f"{sum(x['custo_usd'] for x in linhas):.2f}.".replace(".", ",", 1), "",
+             f"{_reais(sum(x['custo_usd'] for x in linhas) + custo_estado)}, dos quais US$ {_reais(custo_estado)} da "
+             "pesquisa do Estado, feita uma vez e usada em todos os órgãos.", "",
              "Os memorandos foram gerados sem revisão humana do dossiê e dos insumos e dizem isso no quadro "
              "\"Sobre este documento\". Revise antes de circular.", "",
              "| Órgão | Situação | Arquivos lidos | Itens do dossiê (conferidos) | Trade-offs | Confiança | Observação |",
@@ -356,8 +362,8 @@ def principal(argv=None, drive=None, app=None):
     p.add_argument("--apenas-listar", action="store_true", help="lista os órgãos e arquivos, sem chamar modelos")
     p.add_argument("--modelo-pesquisa", default="anthropic/claude-sonnet-5-5")
     p.add_argument("--modelo-auxiliar", default="anthropic/claude-sonnet-5-5")
-    p.add_argument("--modelo", default="anthropic/claude-opus-5-5", help="modelo do debate e do memorando")
-    p.add_argument("--rodadas", type=int, default=3)
+    p.add_argument("--modelo", default="anthropic/claude-sonnet-5-5", help="modelo do debate e do memorando")
+    p.add_argument("--rodadas", type=int, default=2)
     p.add_argument("--data-corte", default=date.today().strftime("%d/%m/%Y"))
     p.add_argument("--foco", default="")
     p.add_argument("--orgao-emissor", default="Equipe de Transição de Governo")
@@ -397,6 +403,24 @@ def principal(argv=None, drive=None, app=None):
            "n_rodadas": a.rodadas, "parar_cedo": a.rodadas >= 3, "modo_independente": False,
            "data_corte": a.data_corte, "foco": a.foco, "orgao_emissor": a.orgao_emissor, "unidade": a.unidade,
            "para": a.para}
+    # A camada do Estado (situação fiscal, dívida, previdência, calendário, cenário político) é a mesma para todos os
+    # órgãos: é pesquisada uma vez e reaproveitada. Se falhar, cada órgão pesquisa a sua.
+    custo_estado = 0.0
+    if orgaos:
+        log("Pesquisando a camada do Estado (uma vez para todos os órgãos)...")
+        try:
+            estado = app["pesquisar_estado"](cfg["modelo_pesquisa"], cfg["data_corte"], cfg["foco"])
+            custo_estado = round(app["custo_estimado"](estado["uso"])[0], 3)
+            (saida / "dossie_estado.json").write_text(json.dumps(
+                {k: estado[k] for k in ("itens", "nao_encontrado", "diagnostico", "modelo", "data_corte")},
+                ensure_ascii=False, indent=2), encoding="utf-8")
+            log(f"  Estado: {len(estado['itens'])} itens (US$ {custo_estado:.2f})")
+            cfg["estado"] = estado if estado["itens"] else None
+            if not estado["itens"]:
+                log("  a camada do Estado veio vazia; cada órgão vai pesquisar a sua")
+        except Exception as e:
+            log(f"  a pesquisa do Estado falhou ({type(e).__name__}: {e}); cada órgão vai pesquisar a sua")
+            cfg["estado"] = None
     linhas = []
     for k, o in enumerate(orgaos, 1):
         log(f"[{k}/{len(orgaos)}] {o['nome']}" + (f" (vinculado a {o['vinculada_a']})" if o["vinculada_a"] else ""))
@@ -404,7 +428,7 @@ def principal(argv=None, drive=None, app=None):
         linhas.append(linha)
         log(f"  → {linha['situacao']}" + (f": {linha['observacao']}" if linha["observacao"] else "")
             + f" ({linha['minutos']} min, US$ {linha['custo_usd']:.2f})")
-        gravar_resumo(saida, linhas)          # grava a cada órgão: se a execução cair, o que já foi feito fica
+        gravar_resumo(saida, linhas, custo_estado)   # grava a cada órgão: se a execução cair, o que já foi feito fica
     return linhas
 
 

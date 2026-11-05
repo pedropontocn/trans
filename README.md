@@ -197,8 +197,11 @@ confiança e custo de cada órgão. Uma falha num órgão não para os outros.
 3. Ao final, baixe o artefato **resultados** e abra com a senha. O zip usa criptografia AES: no Windows, abra com o
    7-Zip ou o WinRAR (o Explorador de Arquivos não abre).
 
-Com 4 partes em paralelo, cerca de 40 órgãos levam de 1h30 a 2h. Custo estimado: US$ 1 a 1,50 por órgão (pesquisa,
-debate em 3 rodadas com Opus e memorando).
+**Custo.** A camada do Estado (situação fiscal, dívida, previdência, calendário e cenário político) é igual para todos
+os órgãos: é pesquisada uma vez por execução e reaproveitada, e o resumo mostra esse custo à parte. Cada órgão pesquisa
+só a própria camada. O padrão do lote é Sonnet no debate e no memorando, com 2 rodadas: estimativa de US$ 0,40 a 0,70
+por órgão. Com Opus e 3 rodadas, a estimativa sobe para US$ 0,80 a 1,20. Com 4 partes em paralelo, cerca de 40 órgãos
+levam de 1h a 1h30. O custo real de cada órgão sai no `resumo.csv`.
 
 **Atenção: o repositório é público.** Logs e artefatos do GitHub Actions de um repositório público podem ser vistos
 por qualquer pessoa com conta no GitHub. Por isso o zip sai criptografado e os logs mostram só nomes de órgãos,
