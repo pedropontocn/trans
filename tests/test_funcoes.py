@@ -430,3 +430,15 @@ def test_memorando_sem_orgao_nem_unidade_no_cabecalho(funcoes):
     import docx
     dados = funcoes.gerar_docx(MEMORANDO, {"orgao": "", "unidade": "", "para": "", "assunto": "Teste", "data": "5 de novembro de 2026"})
     assert "MEMORANDO EXECUTIVO" in "\n".join(p.text for p in docx.Document(io.BytesIO(dados)).paragraphs)
+
+
+def test_conteudo_da_autodeclaracao_para_o_memorando(funcoes):
+    rel = ("# ARQUIVO: relatorio.docx\n\n## 3. Contratos vigentes\n|Contrato|Obra|Valor|\n|-|-|-|\n"
+           "|012/2025|Ponte do Rio|R$ 1.000.000,00|\n|013/2025|Escola|R$ 2.500.000,00|\n\n## 4. Pessoal\nTexto.")
+    texto = funcoes.conteudo_autodeclaracao(rel, funcoes.indice_completude(rel))
+    assert "relatorio.docx" in texto and "3. Contratos vigentes" in texto and "3 linha(s) com contratos" in texto
+    assert "não enviou" in funcoes.conteudo_autodeclaracao("", None)
+
+
+def test_memorando_recebe_o_que_o_orgao_enviou(funcoes):
+    assert "DECLARADO x CONFIRMADO" in funcoes.PROMPT_ETAPA_2 and "Declarado x confirmado" in funcoes.METODOLOGIA
