@@ -252,8 +252,10 @@ class LLMFalso:
                        "premissas_abandonadas": [], "justificativa": "j"}
             return self._resp("[INÍCIO DO JSON]" + json.dumps(obj) + "[FIM DO JSON]", entrada=15000, saida=600)
         if "avaliador independente de políticas públicas" in sistema:
-            if self.falhar_avaliador:
-                raise RuntimeError("GEMINI_API_KEY inválida")
+            # True: todo avaliador falha; "gemini": só os Gemini falham (fora do ar), e o Claude serve de reserva
+            if self.falhar_avaliador is True or (self.falhar_avaliador == "gemini" and model.startswith("gemini/")):
+                raise RuntimeError("GEMINI_API_KEY inválida" if self.falhar_avaliador is True else
+                                   'litellm.ServiceUnavailableError: GeminiException - {"code": 503, "status": "UNAVAILABLE"}')
             planos = json.loads(ultimo.split("PLANOS:\n")[1])
             self.planos_vistos_pelo_avaliador = ultimo
             return self._resp(json.dumps({"avaliacoes": [{"plano": r, "notas": {"viabilidade_juridica": 3, "viabilidade_fiscal": 2,

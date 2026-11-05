@@ -554,3 +554,21 @@ def test_limite_por_minuto_tenta_de_novo(funcoes, monkeypatch):
     assert funcoes._com_novas_tentativas(chamada) == "ok" and len(tentativas) == 3
     with __import__("pytest").raises(ValueError):
         funcoes._com_novas_tentativas(lambda: (_ for _ in ()).throw(ValueError("invalid x-api-key")))
+
+
+def test_gemini_fora_do_ar_usa_o_avaliador_reserva(app, llm, monkeypatch):
+    import time as _time
+    monkeypatch.setattr(_time, "sleep", lambda s: None)          # as novas tentativas no 503 não esperam no teste
+    llm.falhar_avaliador = "gemini"
+    at = _modo_independente(_preparar(app.run()))
+    r = _deliberar(at)
+    d = r["debate"]
+    assert d["erro_avaliacao"] is None and d["avaliador"] == "anthropic/claude-sonnet-5-5"
+    assert d["avaliador_escolhido"] == "gemini/gemini-3.8-flash"
+    assert all(x["avaliacao_cega"] for x in d["personas"])
+    # tentou de novo o Gemini antes de trocar (503 é passageiro) e tentou o outro Gemini antes do Claude
+    gemini = [c["modelo"] for c in llm.chamadas if c["modelo"].startswith("gemini/")]
+    assert gemini.count("gemini/gemini-3.8-flash") == 4 and "gemini/gemini-3.1-pro-preview" in gemini
+    assert any("feita por anthropic/claude-sonnet-5-5" in p for p in r["problemas_formato"])
+    assert any("mesma família" in m for m in r["confianca"]["motivos"])
+    assert any("Pontos de atenção" in w.value for w in at.warning)
