@@ -442,6 +442,10 @@ def processar_orgao(app, drive, orgao, cfg, saida):
             (pasta / "calendario.xlsx").write_bytes(app["calendario_xlsx"](
                 eventos, descartados, f"Calendário de vencimentos críticos – {orgao['nome']}", cfg["data_corte"]))
         linha["eventos_calendario"] = len(eventos)
+        if (resultado.get("diagnostico") or {}).get("secoes"):
+            (pasta / "diagnostico.docx").write_bytes(app["diagnostico_docx"](
+                resultado["diagnostico"], resultado.get("opcoes_organizacao"), orgao["nome"], cfg["data_corte"],
+                {"orgao": cfg["orgao_emissor"], "unidade": cfg["unidade"], "data": resultado["data"]}))
         (pasta / "dossie.docx").write_bytes(app["dossie_docx"](
             dossie, resultado.get("confronto"), {"orgao": cfg["orgao_emissor"], "unidade": cfg["unidade"],
                                                  "data": resultado["data"]}))

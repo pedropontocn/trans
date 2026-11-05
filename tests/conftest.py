@@ -159,6 +159,27 @@ class LLMFalso:
         self.continuacao_sem_json = False            # a continuação também para sem o JSON
         self.dossie_arquivo = None                   # bytes de um dossiê .json para o upload opcional
         self.sem_relatorio = False
+        self.diagnostico_orgao = {"secoes": [
+            {"titulo": "Orçamento e execução", "itens": [
+                {"texto": "A LOA 2026 da Secretaria é de R$ 412 milhões.", "origem": "dossie", "item": "O1", "trecho": ""},
+                {"texto": "O órgão informa R$ 398,75 milhões empenhados até 23/10/2026.", "origem": "relatorio",
+                 "item": "", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+                {"texto": "A Secretaria tem 40 subsecretarias.", "origem": "relatorio", "item": "",
+                 "trecho": "a Secretaria tem 40 subsecretarias"}]},
+            {"titulo": "Missão e competências", "itens": [
+                {"texto": "Item que não existe.", "origem": "dossie", "item": "O999", "trecho": ""}]}],
+            "lacunas": ["Organograma atualizado e quadro de cargos"]}
+        self.opcoes_org = {"opcoes": [
+            {"nome": "Manter a estrutura atual", "o_que_muda": "Nada muda.", "ganhos": ["continuidade"],
+             "perdas_e_custos": ["riscos seguem"], "riscos_juridicos": "Nenhum ato novo.", "impacto_nas_pessoas": "Nenhum.",
+             "pre_requisitos": [], "fundamentos": [{"texto": "LOA de R$ 412 mi.", "origem": "dossie", "item": "O1"}]},
+            {"nome": "Criar uma unidade de gestão de contratos", "o_que_muda": "Concentra a fiscalização.",
+             "ganhos": ["controle"], "perdas_e_custos": ["custo de transição"],
+             "riscos_juridicos": "Exige decreto de estrutura; a confirmar com a PGE.", "impacto_nas_pessoas": "Remanejamento.",
+             "pre_requisitos": ["lista de contratos conferida"],
+             "fundamentos": [{"texto": "inventado", "origem": "relatorio", "trecho": "frase que não está no relatório"}]}],
+            "comparacao": [{"criterio": "Continuidade dos serviços", "avaliacoes": ["igual", "pior"]},
+                           {"criterio": "Risco jurídico", "avaliacoes": ["igual", "pior", "melhor"]}]}
         self.calendario = {"eventos": [
             {"data": "23/10/2026", "tipo": "orcamento", "evento": "Corte do empenho informado", "objeto": "LOA 2026",
              "valor": "R$ 398.750.000,00", "consequencia": "", "decisao": "Conferir o empenhado",
@@ -239,6 +260,12 @@ class LLMFalso:
         if "Você confronta o que um órgão declarou" in contexto:
             self.mensagem_confronto = ultimo
             return self._resp(json.dumps(self.confronto))
+        if "Você escreve o DIAGNÓSTICO de um órgão" in contexto:
+            self.mensagem_diagnostico_orgao = ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.diagnostico_orgao) + "[FIM DO JSON]")
+        if "Você prepara OPÇÕES DE ORGANIZAÇÃO" in contexto:
+            self.mensagem_opcoes = ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.opcoes_org) + "[FIM DO JSON]")
         if "Você monta o calendário de vencimentos críticos" in contexto:
             self.mensagem_calendario = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.calendario) + "[FIM DO JSON]")
