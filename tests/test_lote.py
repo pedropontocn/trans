@@ -179,3 +179,27 @@ def test_sem_credenciais_explica_o_que_falta(monkeypatch):
     monkeypatch.delenv("GOOGLE_SERVICE_ACCOUNT_JSON", raising=False)
     with pytest.raises(SystemExit, match="GOOGLE_SERVICE_ACCOUNT_JSON"):
         lote.principal(["--pasta", "raiz"])
+
+
+def test_subpasta_generica_nao_vira_orgao():
+    assert lote.parece_orgao("Junta Comercial do Estado do Rio de Janeiro - JUCERJA")
+    assert lote.parece_orgao("FUNDAÇÃO SAÚDE ") and lote.parece_orgao("DETRAN")
+    for nome in ("Anexos", "ANEXOS", "Resposta Ofício 7", "Planilhas", "2026"):
+        assert not lote.parece_orgao(nome)
+    drive = DriveFalso()
+    drive.arvore["setur"].append({"id": "anexos_setur", "name": "Anexos", "mimeType": PASTA})
+    drive.arvore["anexos_setur"] = [{"id": "f11", "name": "anexo_setur.pdf", "mimeType": "application/pdf"}]
+    setur = next(o for o in lote.planejar_orgaos(drive, "raiz") if o["sigla"] == "SETUR")
+    assert "Anexos" in [p["name"] for p in setur["pastas"]]
+
+
+def test_pastas_reais_do_drive():
+    """Subpastas reais da pasta DOCUMENTOS RECEBIDOS (nov/2026)."""
+    junta = lambda sub, mae: lote.e_copia_da_pasta(sub, mae) or not lote.parece_orgao(sub)
+    sedec = "Secretaria de Estado de Defesa Civil - SEDEC"
+    assert junta("SETD", "Secretaria de Estado de Transformação Digital - SEDT")          # sigla com letras trocadas
+    assert junta("OFÍCIO PADRÃO 03", sedec) and junta("OFÍCIO 9 - EL NIÑO", sedec)
+    assert junta("SEDEC - OFÍCIOS 02/06/07/08/09", sedec)
+    assert not junta("TURISRIO", "Secretaria de Turismo - SETUR")
+    assert not junta("DETRAN", "Secretaria da Casa Civil - SECC")
+    assert not junta("Instituto Vital Brasil - IVB", "Secretaria de Estado de Saúde - SES")

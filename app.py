@@ -18,6 +18,7 @@ import os
 import re
 import tempfile
 import unicodedata
+import zipfile
 from datetime import date, datetime
 from bisect import bisect_left
 from pathlib import Path
@@ -665,14 +666,81 @@ def rotulo_orgao_drive(orgao):
 
 
 def ler_relatorio_drive(credenciais, orgao):
-    """Baixa e lê os documentos da pasta do órgão no Drive, como o lote faz. Entra como autodeclaração, igual ao
-    relatório enviado à mão. Arquivos com dados pessoais no nome não são baixados; CPFs e telefones são apagados."""
+    """Baixa e lê os documentos da pasta do órgão no Drive, como o lote faz."""
+    lote = _modulo_lote()
+    try:
+        drive = lote.Drive(credenciais)
+    except Exception as e:
+        return {"tipo": "erro", "mensagem": f"Não foi possível acessar o Drive: {e}", "avisos": []}
+    return ler_documentos_orgao(drive, orgao, "da pasta no Drive")
+
+
+RE_SUFIXO_ZIP_DRIVE = re.compile(r"-\d{8}T\d{6}Z(?:-\d+)?-\d{3}$")
+
+
+class ZipComoDrive:
+    """Faz um ou mais .zip (a pasta baixada do Drive) se comportarem como a pasta no Drive, para usar as mesmas regras
+    do lote: subpasta que repete o nome da secretaria é juntada a ela; as demais são órgãos vinculados."""
+    RAIZ = "__raiz__"
+
+    def __init__(self, arquivos):
+        """arquivos: lista de (nome, bytes). Os .zip são abertos; os demais entram na pasta principal."""
+        self.pasta_mime = _modulo_lote().PASTA_MIME
+        self.filhos = {self.RAIZ: {}}
+        self.origem = {}                              # id do arquivo -> (bytes do zip ou do arquivo, nome interno)
+        soltos, topo_padrao = [], None
+        for nome, conteudo in arquivos:
+            if not nome.lower().endswith(".zip"):
+                soltos.append((nome, conteudo))
+                continue
+            topo = RE_SUFIXO_ZIP_DRIVE.sub("", Path(nome).stem).strip() or "Pasta enviada"
+            with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
+                infos = [i for i in z.infolist() if not i.is_dir()]
+            caminhos = [[p for p in i.filename.replace("\\", "/").split("/") if p] for i in infos]
+            # o zip do Drive costuma trazer a pasta como primeiro nível; se não trouxer, usa o nome do arquivo
+            tem_topo = bool(caminhos) and all(len(c) > 1 for c in caminhos) and len({c[0] for c in caminhos}) == 1
+            for info, partes in zip(infos, caminhos):
+                partes = partes if tem_topo else [topo] + partes
+                topo_padrao = topo_padrao or partes[0]
+                self._incluir(partes, info.file_size, (conteudo, info.filename))
+        for nome, conteudo in soltos:
+            self._incluir([topo_padrao or "Arquivos enviados", nome], len(conteudo), (conteudo, None))
+
+    def _incluir(self, partes, tamanho, origem):
+        pai = self.RAIZ
+        for pasta in partes[:-1]:
+            pid = pai + "/" + pasta
+            self.filhos[pai].setdefault(pasta, {"id": pid, "name": pasta, "mimeType": self.pasta_mime})
+            self.filhos.setdefault(pid, {})
+            pai = pid
+        fid = pai + "/" + partes[-1]
+        self.filhos[pai][partes[-1]] = {"id": fid, "name": partes[-1], "mimeType": "application/octet-stream",
+                                        "size": str(tamanho)}
+        self.origem[fid] = origem
+
+    def listar(self, pasta_id):
+        return list(self.filhos.get(pasta_id, {}).values())
+
+    def baixar(self, arquivo):
+        conteudo, interno = self.origem[arquivo["id"]]
+        if interno is None:
+            return conteudo
+        with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
+            return z.read(interno)
+
+    def orgaos(self):
+        return _modulo_lote().planejar_orgaos(self, self.RAIZ)
+
+
+def ler_documentos_orgao(drive, orgao, de_onde):
+    """Lê os documentos do órgão (no Drive ou num .zip) com as regras do lote. Entram como autodeclaração, igual ao
+    relatório enviado à mão. Arquivos com dados pessoais no nome não são lidos; CPFs e telefones são apagados."""
     status = {"tipo": "erro", "mensagem": "", "avisos": []}
     lote = _modulo_lote()
     try:
-        texto, manifesto = lote.ler_documentos(lote.Drive(credenciais), orgao, converter_arquivo, LIMITE_CARACTERES)
+        texto, manifesto = lote.ler_documentos(drive, orgao, converter_arquivo, LIMITE_CARACTERES)
     except Exception as e:
-        status["mensagem"] = f"Não foi possível ler a pasta no Drive: {e}"
+        status["mensagem"] = f"Não foi possível ler os documentos: {e}"
         return status
     st.session_state["manifesto_drive"] = manifesto
     if not texto or len(texto.strip()) < 200:
@@ -684,7 +752,7 @@ def ler_relatorio_drive(credenciais, orgao):
     st.session_state["completude"] = indice_completude(texto)
     n_lidos, n_pulados, n_erros = len(manifesto["lidos"]), len(manifesto["pulados"]), len(manifesto["erros"])
     status["tipo"] = "aviso" if n_erros or manifesto["cortados"] else "ok"
-    status["mensagem"] = (f"{n_lidos} arquivo(s) lido(s) da pasta no Drive"
+    status["mensagem"] = (f"{n_lidos} arquivo(s) lido(s) {de_onde}"
                           + (f", {n_pulados} pulado(s)" if n_pulados else "")
                           + (f", {n_erros} com erro" if n_erros else "")
                           + (f"; {len(manifesto['cortados'])} cortado(s) para caber no limite" if manifesto["cortados"] else "")
@@ -2946,6 +3014,9 @@ with st.sidebar:
     else:
         st.caption("Para escolher o órgão direto das pastas do Drive, configure a conta de serviço nos Secrets "
                    "(veja \"Drive no app\" no README).")
+    sugerido = st.session_state.pop("orgao_analisado_sugerido", None)        # vem do .zip enviado na seção 2
+    if sugerido and not st.session_state.get("orgao_analisado", "").strip():
+        st.session_state["orgao_analisado"] = sugerido
     st.text_input("Órgão analisado", key="orgao_analisado", placeholder="ex.: Secretaria de Estado das Cidades")
     st.text_area("Foco da análise (opcional)", key="foco", height=80,
                  help="O que a equipe quer entender. Orienta a pesquisa e os insumos; não é tratado como fato.")
@@ -2993,13 +3064,52 @@ with st.sidebar:
             st.session_state["fonte_relatorio"] = "drive"
             st.session_state["arquivo_nome"] = f"Drive: {orgao_drive['nome']}"
             st.session_state.pop("arquivo_lido", None)
-    arquivo = st.file_uploader("Relatório (PDF, DOCX ou XLSX)" + (", em vez do Drive" if orgao_drive else ""),
-                               type=["pdf", "docx", "xlsx"])
-    if arquivo is None:
+    arquivos = st.file_uploader(
+        "Relatório ou pasta baixada do Drive (PDF, DOCX, XLSX ou .zip)", type=["pdf", "docx", "xlsx", "zip"],
+        accept_multiple_files=True,
+        help="Para enviar a pasta inteira: no Drive, clique com o botão direito na pasta da secretaria > Fazer download, "
+             "e envie o .zip. Pastas grandes vêm em mais de um .zip: envie todos juntos.")
+    if arquivos and not isinstance(arquivos, list):
+        arquivos = [arquivos]
+    if not arquivos:
         if st.session_state.get("fonte_relatorio") != "drive":
-            for chave in ("texto_relatorio", "completude", "arquivo_lido", "arquivo_nome", "status_relatorio"):
+            for chave in ("texto_relatorio", "completude", "arquivo_lido", "arquivo_nome", "status_relatorio",
+                          "manifesto_drive", "fonte_relatorio", "orgaos_zip"):
                 st.session_state.pop(chave, None)
+    elif any(a.name.lower().endswith(".zip") for a in arquivos):
+        conteudos = [(a.name, a.getvalue()) for a in arquivos]
+        assinatura_zip = hashlib.md5(b"".join(n.encode() + c for n, c in conteudos)).hexdigest()
+        if st.session_state.get("zip_lido") != assinatura_zip:
+            try:
+                pacote = ZipComoDrive(conteudos)
+                st.session_state["orgaos_zip"] = (pacote, pacote.orgaos())
+            except (zipfile.BadZipFile, OSError) as e:
+                st.session_state["orgaos_zip"] = None
+                st.session_state["status_relatorio"] = {"tipo": "erro", "mensagem": f"Não foi possível abrir o .zip: {e}",
+                                                        "avisos": []}
+            st.session_state["zip_lido"] = assinatura_zip
+            st.session_state.pop("zip_orgao_lido", None)
+        pacote, orgaos_zip = st.session_state.get("orgaos_zip") or (None, [])
+        if orgaos_zip:
+            rotulos_zip = [rotulo_orgao_drive(o) for o in orgaos_zip]
+            escolha_zip = st.selectbox("Órgão do .zip", rotulos_zip, key="orgao_zip",
+                                       help="Órgãos vinculados que vieram dentro da pasta (↳) são analisados à parte.") \
+                if len(orgaos_zip) > 1 else rotulos_zip[0]
+            orgao_zip = orgaos_zip[rotulos_zip.index(escolha_zip)] if escolha_zip in rotulos_zip else orgaos_zip[0]
+            chave_lida = assinatura_zip + "|" + escolha_zip
+            if st.session_state.get("zip_orgao_lido") != chave_lida:
+                with st.spinner("Lendo os arquivos do .zip..."):
+                    st.session_state["status_relatorio"] = ler_documentos_orgao(pacote, orgao_zip, "do .zip")
+                st.session_state["zip_orgao_lido"] = chave_lida
+                st.session_state["fonte_relatorio"] = "zip"
+                st.session_state["arquivo_nome"] = f"Pasta enviada em .zip: {orgao_zip['nome']}"
+                if not st.session_state["orgao_analisado"].strip():
+                    st.session_state["orgao_analisado_sugerido"] = nome_para_pesquisa(orgao_zip)
+                    st.rerun()
+        elif pacote is not None:
+            st.session_state["status_relatorio"] = {"tipo": "erro", "mensagem": "O .zip não tem arquivos.", "avisos": []}
     else:
+        arquivo = arquivos[0]
         assinatura_rel = hashlib.md5(arquivo.getvalue()).hexdigest()
         if st.session_state.get("arquivo_lido") != assinatura_rel:
             st.session_state["status_relatorio"] = ler_relatorio(arquivo)
@@ -3007,14 +3117,16 @@ with st.sidebar:
             st.session_state["arquivo_nome"] = arquivo.name
             st.session_state["fonte_relatorio"] = "upload"
             st.session_state.pop("manifesto_drive", None)
+        if len(arquivos) > 1:
+            st.caption("ℹ️ Com vários arquivos soltos, só o primeiro é lido. Para enviar vários, envie a pasta em .zip.")
     status = st.session_state.get("status_relatorio")
     if status:
         {"ok": st.success, "aviso": st.warning, "erro": st.error}[status["tipo"]](status["mensagem"])
         for aviso in status["avisos"]:
             st.caption(f"ℹ️ {aviso}")
     manifesto = st.session_state.get("manifesto_drive")
-    if manifesto and st.session_state.get("fonte_relatorio") == "drive":
-        with st.expander(f"Arquivos do Drive ({len(manifesto['lidos'])} lidos)"):
+    if manifesto and st.session_state.get("fonte_relatorio") in ("drive", "zip"):
+        with st.expander(f"Arquivos lidos ({len(manifesto['lidos'])}) e pulados ({len(manifesto['pulados'])})"):
             for rotulo_m, chave_m, campo_m in [("Lidos", "lidos", None), ("Pulados", "pulados", "motivo"),
                                                ("Com erro", "erros", "erro"), ("Cortados", "cortados", None)]:
                 if manifesto.get(chave_m):

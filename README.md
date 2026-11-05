@@ -159,6 +159,14 @@ O GitHub Actions roda os testes a cada push na `main` e a cada pull request (`.g
 
 ## Drive no app
 
+**Sem configurar nada: envie a pasta em .zip.** No Drive, clique com o botão direito na pasta da secretaria e escolha
+**Fazer download**. Envie o .zip na seção **2** (pastas grandes vêm em mais de um .zip: envie todos juntos). O app
+aplica as mesmas regras do Drive e do lote: subpastas que repetem o nome da secretaria ou que são genéricas
+("Anexos", "Resposta ao Ofício 5") entram junto; subpastas de órgãos vinculados podem ser escolhidas à parte; arquivos
+com dados pessoais no nome não são lidos. Limite do Streamlit: 200 MB por arquivo.
+
+**Com a conta de serviço: lista direto do Drive.**
+
 Com a conta de serviço configurada, a seção **1. Órgão e pesquisa** mostra a lista **Órgão (pastas do Drive)**, com as
 secretarias e, marcados com ↳, os órgãos vinculados. A lista sai da pasta DOCUMENTOS RECEBIDOS, com as mesmas regras do
 lote. Escolher um órgão preenche o nome usado na pesquisa. Na seção **2**, o botão **Ler os documentos de ... no Drive**
@@ -186,7 +194,8 @@ funções do painel. Roda no GitHub Actions, disparado à mão, e entrega um zip
 
 **Como as pastas são lidas**
 - Cada pasta da raiz é uma secretaria. Subpasta que repete o nome ou a sigla da secretaria (ex.: "SEFAZ" dentro de
-  "Secretaria de Fazenda - SEFAZ") é juntada a ela. As demais subpastas são órgãos vinculados, com análise própria.
+  "Secretaria de Fazenda - SEFAZ") ou que é genérica ("Anexos", "Resposta ao Ofício 5") é juntada a ela. Subpastas
+  com nome de entidade ou sigla ("Junta Comercial ... - JUCERJA") são órgãos vinculados, com análise própria.
 - Lê PDF, Word, Excel, PowerPoint, CSV, texto, arquivos do Google Docs/Planilhas/Apresentações e o que estiver dentro
   de zips (como os exportados do SEI). Pula outros formatos e arquivos acima de 30 MB.
 - **Dados pessoais:** arquivos cujo nome indica contatos, telefones, CPF ou pontos focais não são baixados. Nos demais,

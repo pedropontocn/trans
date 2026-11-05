@@ -396,3 +396,64 @@ def test_sem_drive_configurado_o_app_segue(app, llm):
     assert not at.exception, at.exception
     assert not [s for s in at.selectbox if s.key == "orgao_drive"]
     assert any("conta de serviço nos Secrets" in c.value for c in at.caption)
+
+
+def _zip_bytes(arquivos):
+    import io
+    import zipfile
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as z:
+        for nome, texto in arquivos.items():
+            z.writestr(nome, texto)
+    return buffer.getvalue()
+
+
+class _Enviado:
+    def __init__(self, nome, dados):
+        self.name, self.dados = nome, dados
+
+    def getvalue(self):
+        return self.dados
+
+
+def test_pasta_do_drive_enviada_em_zip(app, llm, monkeypatch):
+    import streamlit
+    # como o Drive entrega "Fazer download" da pasta: o primeiro nível é a própria pasta
+    pacote = _zip_bytes({
+        "Secretaria de Fazenda - SEFAZ/Relatorio_de_Transicao.docx": "relatório",
+        "Secretaria de Fazenda - SEFAZ/Contatos_e_telefones.xlsx": "telefones",
+        "Secretaria de Fazenda - SEFAZ/SEFAZ/anexo.pdf": "anexo",
+        "Secretaria de Fazenda - SEFAZ/Junta Comercial do Estado do Rio de Janeiro - JUCERJA/jucerja.pdf": "jucerja",
+        "Secretaria de Fazenda - SEFAZ/video.mp4": "x"})
+    original = streamlit.file_uploader
+
+    def uploader(rotulo, *a, **k):
+        if "pasta baixada" in rotulo:
+            return [_Enviado("Secretaria de Fazenda - SEFAZ-20261105T131500Z-001.zip", pacote)]
+        return original(rotulo, *a, **k)
+
+    monkeypatch.setattr(streamlit, "file_uploader", uploader)
+    at = app.run()
+    assert not at.exception, at.exception
+    assert at.session_state["fonte_relatorio"] == "zip" and at.session_state["texto_relatorio"]
+    assert at.session_state["orgao_analisado"] == "Secretaria de Fazenda - SEFAZ"
+    m = at.session_state["manifesto_drive"]
+    lidos = {x["arquivo"] for x in m["lidos"]}
+    assert lidos == {"Relatorio_de_Transicao.docx", "SEFAZ/anexo.pdf"}
+    motivos = {x["arquivo"]: x["motivo"] for x in m["pulados"]}
+    assert "dados pessoais" in motivos["Contatos_e_telefones.xlsx"] and "formato" in motivos["video.mp4"]
+    # a vinculada que veio dentro do zip pode ser escolhida à parte
+    seletor = at.selectbox(key="orgao_zip")
+    assert seletor.options == ["Secretaria de Fazenda - SEFAZ", "↳ Junta Comercial do Estado do Rio de Janeiro - JUCERJA"]
+    seletor.set_value("↳ Junta Comercial do Estado do Rio de Janeiro - JUCERJA").run()
+    assert not at.exception, at.exception
+    assert {x["arquivo"] for x in at.session_state["manifesto_drive"]["lidos"]} == {"jucerja.pdf"}
+
+
+def test_zip_sem_pasta_no_primeiro_nivel(funcoes, llm):
+    pacote = funcoes.ZipComoDrive([("SETUR.zip", _zip_bytes({"relatorio.pdf": "a", "anexos/b.docx": "b"})),
+                                      ("solto.docx", b"c")])
+    orgaos = pacote.orgaos()
+    assert [o["nome"] for o in orgaos] == ["SETUR"]           # o nome do arquivo vira a pasta principal
+    nomes = {i["name"] for i in pacote.listar(orgaos[0]["pastas"][0]["id"])}
+    assert nomes == {"relatorio.pdf", "anexos", "solto.docx"}
