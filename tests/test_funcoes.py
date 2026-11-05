@@ -477,3 +477,20 @@ def test_memorando_novo_sem_jargao_no_prompt_e_titulo_no_word(funcoes):
     assert "Carteira de obras da SECID depende de dados ainda não confirmados" in textos     # título vem do memorando
     assert "O ESSENCIAL" in "\n".join(c.text for t in doc.tables for c in t._cells)          # quadro de destaque
     assert any('w:br w:type="page"' in par._p.xml for par in doc.paragraphs)                 # anexo em página nova
+
+
+def test_dossie_em_word_com_links_e_selos(funcoes):
+    import io
+    import docx
+    d = dossie_exemplo(funcoes)
+    md = funcoes.markdown_dossie(d)
+    assert md.startswith("# Dossiê – ") and "## Visão geral" in md and "## O órgão" in md
+    assert "✔ conferido na fonte" in md and "⚠" in md
+    confronto = {"divergencias": [{"item": d["itens"][-1]["id"], "situacao": "contradiz", "o_orgao_declara": "100 obras",
+                                   "trecho_relatorio": "100 obras", "as_fontes_mostram": "80 obras"}]}
+    assert "**As fontes mostram:** 80 obras" in funcoes.markdown_dossie(d, confronto)
+    documento = docx.Document(io.BytesIO(funcoes.dossie_docx(d, confronto, {"orgao": "Equipe de Transição"})))
+    xml = documento.element.xml
+    assert "w:hyperlink" in xml                                         # fonte clicável
+    assert any(p.text == "DOSSIÊ DO ÓRGÃO" for p in documento.paragraphs)
+    assert documento.part.rels and any("http" in r.target_ref for r in documento.part.rels.values() if r.is_external)

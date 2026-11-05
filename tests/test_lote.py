@@ -131,7 +131,7 @@ def test_lote_completo_sem_parar(tmp_path, llm):
                              "--data-corte", "04/11/2026"], drive=DriveFalso(), app=app)
     assert [(x["sigla"], x["situacao"]) for x in linhas] == [("SEFAZ", "concluído"), ("RIOPREV", "concluído")]
     pasta = tmp_path / "sefaz"
-    for arquivo in ("memorando.docx", "memorando.md", "tension_map.json", "dossie.json", "registro.json", "arquivos_lidos.json"):
+    for arquivo in ("memorando.docx", "memorando.md", "tension_map.json", "dossie.json", "dossie.docx", "registro.json", "arquivos_lidos.json"):
         assert (pasta / arquivo).exists(), arquivo
     registro = json.loads((pasta / "registro.json").read_text(encoding="utf-8"))
     assert registro["origem"] == "lote" and registro["dossie_revisado"] is False
