@@ -134,6 +134,10 @@ def test_tres_rodadas_com_estabilidade(app, llm):
     assert [f["id"] for f in tm["sinais_fracos"]] == ["C3"]
     assert [c["ferramenta"] for c in llm.chamadas].count("registrar_tension_map") == 3
     assert [c["ferramenta"] for c in llm.chamadas].count("registrar_consolidacao") == 1
+    # a consolidação é mecânica: vai com o modelo auxiliar (Sonnet), não com o do debate (Opus)
+    consolidacao = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_consolidacao")
+    debate = next(c for c in llm.chamadas if c["ferramenta"] == "registrar_tension_map")
+    assert consolidacao["modelo"].endswith("sonnet-5-5") and debate["modelo"].endswith("opus-5-5")
     assert r["n_rodadas"] == 3 and "previstas" not in tm["estabilidade"]
 
 
