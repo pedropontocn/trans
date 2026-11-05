@@ -2624,7 +2624,8 @@ def gerar_docx(memorando_md, meta):
     normal.font.name, normal.font.size = "Arial", Pt(10.5)
     normal.element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
 
-    # Cabeçalho institucional
+    # Cabeçalho institucional (órgão e unidade são opcionais; a linha azul sai mesmo sem eles)
+    p = None
     if meta.get("orgao"):
         p = doc.add_paragraph()
         p.paragraph_format.space_after = Pt(0)
@@ -2632,6 +2633,9 @@ def gerar_docx(memorando_md, meta):
     if meta.get("unidade"):
         p = doc.add_paragraph()
         _texto_inline(p, meta["unidade"], Pt(9.5), CINZA)
+    if p is None:
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(0)
     _linha_inferior(p, "3E6A9E", 12)
     p = doc.add_paragraph()
     p.paragraph_format.space_before = Pt(10)
