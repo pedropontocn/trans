@@ -152,7 +152,58 @@ O GitHub Actions roda os testes a cada push na `main` e a cada pull request (`.g
 | `requirements.txt` | Dependências para rodar o painel |
 | `requirements-dev.txt` | Dependências para rodar os testes |
 | `orquestrador.py`, `validador.py`, `prompts.py` | Versão anterior, em linha de comando, com auditoria cruzada por modelos Gemini. Não é usada pelo `app.py`. |
+| `lote.py` | Processamento em lote a partir do Google Drive (usa as funções do `app.py`). |
+| `.github/workflows/lote.yml` | Workflow manual que roda o `lote.py` em paralelo e entrega o zip criptografado. |
+| `requirements-lote.txt` | Dependências extras do lote (acesso ao Google Drive). |
 | `extraido/lacunas_oficio/` | Diagnóstico de lacunas e minuta de ofício, retirados do painel na versão 2.0. Ponto de partida da ferramenta própria de triagem; não é usado pelo `app.py`. |
+
+## Processamento em lote a partir do Drive
+
+O `lote.py` lê a pasta DOCUMENTOS RECEBIDOS no Google Drive e roda, sem parar, a análise de cada secretaria e de cada
+órgão vinculado: baixa os documentos, monta o dossiê, prepara os insumos, delibera e gera o memorando. Usa as mesmas
+funções do painel. Roda no GitHub Actions, disparado à mão, e entrega um zip criptografado.
+
+**Como as pastas são lidas**
+- Cada pasta da raiz é uma secretaria. Subpasta que repete o nome ou a sigla da secretaria (ex.: "SEFAZ" dentro de
+  "Secretaria de Fazenda - SEFAZ") é juntada a ela. As demais subpastas são órgãos vinculados, com análise própria.
+- Lê PDF, Word, Excel, PowerPoint, CSV, texto, arquivos do Google Docs/Planilhas/Apresentações e o que estiver dentro
+  de zips (como os exportados do SEI). Pula outros formatos e arquivos acima de 30 MB.
+- **Dados pessoais:** arquivos cujo nome indica contatos, telefones, CPF ou pontos focais não são baixados. Nos demais,
+  CPFs e telefones são apagados do texto antes de ir para a API. E-mails são apagados como no painel.
+- Os textos são juntados num limite de 150 mil caracteres por órgão, com relatórios e resumos primeiro. O que for
+  cortado fica registrado em `arquivos_lidos.json`.
+- **Sem revisão humana:** o dossiê e os insumos não passam pela equipe antes do debate. O quadro "Sobre este
+  documento" diz isso em cada memorando. Revise antes de circular.
+
+**O que sai, por órgão:** `memorando.docx`, `memorando.md`, `tension_map.json`, `dossie.json` (com o diagnóstico da
+pesquisa), `registro.json` e `arquivos_lidos.json`. Na raiz, `resumo.md` e `resumo.csv` com situação, itens do dossiê,
+confiança e custo de cada órgão. Uma falha num órgão não para os outros.
+
+**Configuração (uma vez)**
+1. No [Google Cloud Console](https://console.cloud.google.com/), crie um projeto (ou use um existente) e ative a
+   **Google Drive API**.
+2. Em **IAM e administrador > Contas de serviço**, crie uma conta de serviço (não precisa de papel). Em **Chaves >
+   Adicionar chave > JSON**, baixe o arquivo. Guarde-o com cuidado: ele dá acesso ao que for compartilhado com a conta.
+3. O dono da pasta DOCUMENTOS RECEBIDOS compartilha a pasta com o e-mail da conta de serviço
+   (`...@...iam.gserviceaccount.com`) como **Leitor**. As subpastas herdam o acesso.
+4. No GitHub, em **Settings > Secrets and variables > Actions**, crie os segredos:
+   `GOOGLE_SERVICE_ACCOUNT_JSON` (o conteúdo do arquivo JSON), `DRIVE_PASTA_ID` (o ID da pasta, o trecho do link depois
+   de `/folders/`), `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` (se usar Gemini) e `RESULTADOS_SENHA` (a senha do zip).
+
+**Como rodar**
+1. Em **Actions > Processamento em lote (Drive) > Run workflow**, rode primeiro com "Só listar" marcado. O zip traz
+   `orgaos.json` com os órgãos e o número de arquivos de cada um, sem gastar nada com modelos.
+2. Rode de novo com "Só listar" desmarcado. Para testar, preencha "Só estes órgãos" com uma ou duas siglas.
+3. Ao final, baixe o artefato **resultados** e abra com a senha. O zip usa criptografia AES: no Windows, abra com o
+   7-Zip ou o WinRAR (o Explorador de Arquivos não abre).
+
+Com 4 partes em paralelo, cerca de 40 órgãos levam de 1h30 a 2h. Custo estimado: US$ 1 a 1,50 por órgão (pesquisa,
+debate em 3 rodadas com Opus e memorando).
+
+**Atenção: o repositório é público.** Logs e artefatos do GitHub Actions de um repositório público podem ser vistos
+por qualquer pessoa com conta no GitHub. Por isso o zip sai criptografado e os logs mostram só nomes de órgãos,
+contagens e erros. O mais seguro é tornar o repositório privado (o Streamlit Community Cloud funciona com repositórios
+privados).
 
 ## Código retirado
 

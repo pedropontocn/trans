@@ -991,15 +991,17 @@ def texto_confronto(confronto):
             "sem atribuir intenção):\n" + "\n".join(linhas))
 
 
-def montar_cenario(com_dossie=False):
+def montar_cenario(com_dossie=False, insumos=None, dossie=None):
     """O cenário do debate. Nas chamadas com material de referência, o dossiê já vem no começo da mensagem (em
-    cache), então aqui vai só a indicação; com_dossie=True inclui o dossiê inteiro (avaliador cego e memorando)."""
-    s = st.session_state
-    resumo = resumo_dossie(s.get("dossie"))
-    fatos = (texto_dossie(s.get("dossie")) or "(sem dossiê)") if com_dossie else (
+    cache), então aqui vai só a indicação; com_dossie=True inclui o dossiê inteiro (avaliador cego e memorando).
+    Sem insumos e dossiê explícitos, usa os da tela."""
+    s = insumos if insumos is not None else st.session_state
+    dossie = dossie if dossie is not None else st.session_state.get("dossie")
+    resumo = resumo_dossie(dossie)
+    fatos = (texto_dossie(dossie) or "(sem dossiê)") if com_dossie else (
         f"Os {resumo['itens']} itens do dossiê (ids E1, E2... para o Estado e O1, O2... para o órgão) estão no "
         "material de referência, entre <dossie> e </dossie>. Use os ids como fonte.")
-    sem_voz = s.get("sem_voz", "").strip()
+    sem_voz = (s.get("sem_voz") or "").strip()
     return (f"CENÁRIO / PROBLEMA CENTRAL:\n{s['problema']}\n\nFATOS:\n{fatos}\n\n"
             f"PERSONAS:\n{s['personas']}\n\n"
             + (f"GRUPOS AFETADOS SEM VOZ NO DEBATE (não simule a posição deles; registre a ausência):\n{sem_voz}\n\n" if sem_voz else "")
@@ -2449,6 +2451,214 @@ def _data_extenso(d):
     return f"{d.day} de {meses[d.month - 1]} de {d.year}"
 
 
+# --- DELIBERAÇÃO (núcleo usado pela tela e pelo processamento em lote) -----------------
+
+class ErroDeliberacao(Exception):
+    def __init__(self, mensagem, texto_bruto=""):
+        super().__init__(mensagem)
+        self.texto_bruto = texto_bruto
+
+
+class _passo:
+    """Avisa o andamento (na tela, um aviso; no lote, uma linha de log) no começo de cada etapa."""
+
+    def __init__(self, progresso, texto):
+        progresso(texto)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def deliberar(insumos, dossie, relatorio, completude, cfg, progresso=None, anterior=None):
+    """Confronto, debate (Fases 1 a 4), memorando (Fase 5), verificação e registro.
+
+    insumos: problema, personas, lacunas e sem_voz (texto). cfg: modelo, modelo_auxiliar, modo_independente,
+    modelo_personas, avaliador, n_rodadas, parar_cedo e, opcionais, uso_preparo, arquivo_nome, origem e
+    dossie_revisado. Devolve o resultado (com o registro); em falha, levanta ErroDeliberacao."""
+    modelo, modelo_extracao = cfg["modelo"], cfg["modelo_auxiliar"]
+    modo_independente, n_rodadas = cfg.get("modo_independente", False), cfg.get("n_rodadas", 3)
+    modelo_personas, avaliador = cfg.get("modelo_personas"), cfg.get("avaliador")
+    parar_cedo = cfg.get("parar_cedo", False)
+    progresso = progresso or (lambda _texto: None)
+    insumos = {**insumos, "fatos": texto_dossie(dossie)}
+    cenario = montar_cenario(insumos=insumos, dossie=dossie)
+    cenario_completo = montar_cenario(com_dossie=True, insumos=insumos, dossie=dossie)
+    material = material_referencia(dossie, relatorio)
+    completude = completude if relatorio else None
+    st.session_state["uso_rodada"] = []
+    confronto = {"divergencias": [], "descartadas": 0, "uso": []}
+    if relatorio:
+        with _passo(progresso, "Confrontando o relatório do órgão com o dossiê..."):
+            try:
+                confronto = confrontar(modelo_extracao, dossie, relatorio)
+            except Exception as e:
+                confronto["erro"] = str(e)
+        st.session_state["uso_rodada"].extend(confronto.get("uso") or [])
+    txt_confronto = texto_confronto(confronto)
+    qualidade = "\n\n".join(x for x in [resumo_completude(completude) if completude else "", txt_confronto] if x)
+    texto_usuario = cenario + ("\n\n" + qualidade if qualidade else "") + "\n\nExecute o protocolo e registre o Tension Map."
+    mensagens1 = mensagens_com_cache(modelo, PROMPT_ETAPA_1, material, texto_usuario)
+    tension_map, erro, texto1, problemas, rodadas_validas, debate = None, None, "", [], [], None
+    rodadas_feitas = n_rodadas
+    try:
+        if modo_independente:
+            personas_lista = ler_personas(insumos["personas"])
+            if len(personas_lista) < 3:
+                raise ErroDeliberacao("o modo independente precisa de pelo menos 3 personas, uma por linha")
+            progresso(f"Debate com {len(personas_lista)} personas independentes ({modelo_personas})...")
+            tension_map, debate, problemas = debate_independente(
+                modelo_personas, modelo, avaliador, personas_lista, cenario, material, qualidade,
+                progresso=progresso, cenario_avaliador=cenario_completo)
+        elif n_rodadas == 1:
+            with _passo(progresso, f"Etapa 1/2: o conselho de agentes ({modelo}) está debatendo..."):
+                tension_map, texto1, motivo1, problemas = chamar_com_validacao(
+                    modelo, mensagens1, FERRAMENTA_TENSION_MAP, SCHEMA_TENSION_MAP, "tension map")
+            if tension_map is None:
+                erro = ("O modelo não devolveu um Tension Map válido."
+                        + (" A resposta foi cortada pelo limite de tokens; reduza o dossiê ou as personas." if motivo1 == "length" else ""))
+        else:
+            with _passo(progresso, f"Etapa 1/3: {'até ' if parar_cedo else ''}{n_rodadas} rodadas independentes do "
+                                   f"conselho de agentes ({modelo})..."):
+                resultados, _ = rodar_rodadas(modelo, mensagens1, n_rodadas,
+                                              modelo_checagem=modelo_extracao if parar_cedo else None)
+            rodadas_feitas = len(resultados)
+            rodadas_validas = [(i, tm) for i, (tm, _, _) in enumerate(resultados, 1)
+                               if isinstance(tm, dict) and isinstance(tm.get("trade_offs"), list) and tm["trade_offs"]]
+            texto1 = "\n\n".join(f"--- rodada {i} ---\n{t}" for i, (_, t, _) in enumerate(resultados, 1))
+            if len(rodadas_validas) < 2:
+                if rodadas_validas:
+                    tension_map = rodadas_validas[0][1]
+                    problemas = validar(tension_map, SCHEMA_TENSION_MAP) + ["só uma rodada válida: estabilidade não medida"]
+                else:
+                    erro = "Nenhuma rodada devolveu um Tension Map válido."
+            else:
+                with _passo(progresso, "Etapa 2/3: consolidando as rodadas e medindo a estabilidade..."):
+                    rodadas_json = json.dumps({f"R{i}": tm for i, tm in rodadas_validas}, ensure_ascii=False)
+                    consolidado, texto_c, motivo_c, problemas = chamar_com_validacao(
+                        modelo, [{"role": "system", "content": PROMPT_CONSOLIDACAO},
+                                 {"role": "user", "content": "RODADAS:\n" + rodadas_json}],
+                        FERRAMENTA_CONSOLIDACAO, SCHEMA_CONSOLIDACAO, "consolidação", max_tokens=16000)
+                if consolidado is None:
+                    tension_map = rodadas_validas[0][1]
+                    problemas = ["a consolidação falhou; usando a rodada 1 sem medir estabilidade"]
+                else:
+                    tension_map = aplicar_estabilidade(consolidado, rodadas_validas, len(resultados), previstas=n_rodadas)
+                    problemas = validar(tension_map, SCHEMA_TENSION_MAP)
+                    if tension_map.get("estabilidade") is None:
+                        problemas.append("a consolidação não indicou de quais rodadas veio cada trade-off; estabilidade não medida")
+    except ErroDeliberacao:
+        raise
+    except Exception as e:
+        erro = f"❌ Erro na API: {e}"
+
+    if erro:
+        raise ErroDeliberacao(erro, texto1)
+    try:
+        base_verificacao = "\n".join([texto_dossie(dossie), relatorio, insumos["problema"], insumos["lacunas"]])
+        tension_map, evidencias = verificar_evidencias(tension_map, base_verificacao, dossie, relatorio)
+        etapa_memo = "Fase 5" if debate else ("Etapa 2/2" if n_rodadas == 1 else "Etapa 3/3")
+        with _passo(progresso, f"{etapa_memo}: redigindo o memorando executivo e a matriz de risco..."):
+            mensagens2 = [{"role": "system", "content": PROMPT_ETAPA_2},
+                          {"role": "user", "content": cenario_completo
+                           + ("\n\n" + txt_confronto if txt_confronto else "")
+                           + "\n\nTENSION MAP (Fase 4, já verificado):\n"
+                           + json.dumps(tension_map, ensure_ascii=False, indent=2)}]
+            memorando, _, motivo2 = chamar_modelo(modelo, mensagens2, 16000, etapa="memorando")
+            # Se ainda for cortado, pede para continuar de onde parou (até 2 vezes)
+            for _ in range(2):
+                if motivo2 != "length":
+                    break
+                continuacao, _, motivo2 = chamar_modelo(
+                    modelo,
+                    mensagens2 + [{"role": "assistant", "content": memorando},
+                                  {"role": "user", "content": "Continue o memorando exatamente de onde parou, "
+                                   "sem repetir nada do que já escreveu e sem comentários."}],
+                    8000, etapa="memorando (continuação)")
+                memorando = memorando.rstrip() + ("\n" if continuacao.lstrip().startswith(("|", "#", "-")) else " ") + continuacao.lstrip()
+        memorando = memorando.strip()
+        numeros = verificar_numeros(memorando, base_verificacao)
+        # Revisão de neutralidade com o modelo auxiliar: mais barato e diferente do que escreveu o memorando
+        with _passo(progresso, "Revisando a neutralidade do memorando..."):
+            try:
+                neutralidade = revisar_neutralidade(modelo_extracao, memorando, tension_map)
+            except Exception as e:
+                neutralidade = {"erro": str(e), "modelo": modelo_extracao}
+        resumo_dos = resumo_dossie(dossie)
+        confianca = confianca_calculada(resumo_dos, tension_map.get("estabilidade"), evidencias, debate, completude)
+        memorando = inserir_sobre_documento(memorando, sobre_o_documento(
+            resumo_dos, dossie.get("data_corte"), confianca, len(ler_personas(insumos["personas"])),
+            revisado=cfg.get("dossie_revisado", True)))
+        uso = list(st.session_state.get("uso_rodada", []))
+        uso_preparo = list(dossie.get("uso") or []) + list(cfg.get("uso_preparo") or [])
+        custo, custo_parcial = custo_estimado(uso)
+        custo_extracao, parcial_preparo = custo_estimado(uso_preparo)
+        versao_prompt = hashlib.md5((PROMPT_PESQUISA + PROMPT_INSUMOS + PROMPT_CONFRONTO + PROMPT_ETAPA_1
+                                     + PROMPT_CONSOLIDACAO + PROMPT_ETAPA_2 + PROMPT_NEUTRALIDADE).encode()).hexdigest()[:8]
+        assinatura = hashlib.md5((cenario_completo + relatorio).encode()).hexdigest()
+        registro_id = f"{versao_prompt}-{assinatura[:8]}"
+        resultado = {
+            "tension_map": tension_map,
+            "memorando": memorando,
+            "memorando_cortado": motivo2 == "length",
+            "problemas_formato": problemas,
+            "evidencias": evidencias,
+            "numeros": numeros,
+            "completude": completude,
+            "confianca": confianca,
+            "resumo_dossie": resumo_dos,
+            "confronto": confronto,
+            "n_rodadas": rodadas_feitas,
+            "n_rodadas_previstas": n_rodadas,
+            "uso": uso,
+            "custo": custo,
+            "custo_extracao": custo_extracao,
+            "custo_parcial": custo_parcial or parcial_preparo,
+            "modelo": modelo,
+            "modelo_extracao": modelo_extracao,
+            "data": _data_extenso(date.today()),
+            "assinatura_insumos": hashlib.md5(cenario_completo.encode()).hexdigest(),
+            "registro_id": registro_id,
+            "neutralidade": neutralidade,
+            "debate": debate,
+        }
+        registro = {
+            "id": registro_id, "gerado_em": datetime.now().isoformat(timespec="seconds"),
+            "versao_app": APP_VERSAO, "versao_prompt": versao_prompt,
+            "modelo_debate": modelo, "modelo_auxiliar": modelo_extracao, "modelo_pesquisa": dossie.get("modelo"),
+            "rodadas": rodadas_feitas, "rodadas_previstas": n_rodadas,
+            "arquivo": cfg.get("arquivo_nome", "") if relatorio else "",
+            "assinatura_relatorio": hashlib.md5(relatorio.encode()).hexdigest() if relatorio else "",
+            "insumos": {c: insumos.get(c, "") for c in CAMPOS},
+            "origem": cfg.get("origem", "painel"), "dossie_revisado": cfg.get("dossie_revisado", True),
+            "dossie": json.loads(dossie_para_json(dossie)), "resumo_dossie": resumo_dos,
+            "confronto": {k: v for k, v in confronto.items() if k != "uso"},
+            "completude": completude, "confianca_calculada": confianca,
+            "retrato_relatorio": retrato_relatorio(relatorio),
+            "tension_maps_por_rodada": {f"R{i}": tm for i, tm in rodadas_validas},
+            "modo_debate": "personas independentes" if debate else "rápido",
+            "debate_independente": debate,
+            "tension_map": tension_map, "memorando": memorando,
+            "verificacao": {"evidencias": evidencias, "numeros": numeros, "problemas_formato": problemas,
+                            "neutralidade": neutralidade},
+            "uso_tokens": uso_preparo + uso, "custo_estimado_usd": round(custo + custo_extracao, 4),
+        }
+        resultado["registro_caminho"] = salvar_registro(registro)
+        resultado["retrato_relatorio"] = registro["retrato_relatorio"]
+        if anterior:
+            with _passo(progresso, "Comparando com a análise anterior..."):
+                resultado["comparacao"] = comparar_analises(modelo_extracao, anterior, resultado)
+            registro["comparacao_com"] = {"id": resultado["comparacao"]["anterior_id"],
+                                          "resumo": markdown_comparacao(resultado["comparacao"])}
+        resultado["registro_json"] = json.dumps(registro, ensure_ascii=False, indent=2)
+        resultado["registro"] = registro
+        return resultado
+    except Exception as e:
+        raise ErroDeliberacao(f"❌ Erro na API: {e}") from e
+
+
 # --- DOSSIÊ NA TELA E NO MEMORANDO -------------------------------------------------
 
 ROTULO_CAMADA = {"estado": "Estado", "orgao": "Órgão"}
@@ -2508,7 +2718,7 @@ def dossie_para_json(dossie):
     return json.dumps({k: dossie.get(k) for k in campos}, ensure_ascii=False, indent=2)
 
 
-def sobre_o_documento(resumo, data_corte, confianca, n_personas=None):
+def sobre_o_documento(resumo, data_corte, confianca, n_personas=None, revisado=True):
     """Quadro de proveniência que abre o memorando. Escrito por código, para não depender do modelo."""
     personas = f"{n_personas} papéis institucionais simulados" if n_personas else "papéis institucionais simulados"
     return ("## Sobre este documento\n"
@@ -2516,7 +2726,9 @@ def sobre_o_documento(resumo, data_corte, confianca, n_personas=None):
             "de pessoas ou órgãos. A base factual é um dossiê de fontes independentes com "
             f"{resumo['itens']} itens, {resumo['conferidos']} deles conferidos na fonte, com data de corte em "
             f"{data_corte or 'data não informada'}. O relatório do órgão, quando houver, foi tratado como "
-            f"autodeclaração. Confiança calculada: {confianca['nivel']}. O documento não recomenda decisões.")
+            f"autodeclaração. Confiança calculada: {confianca['nivel']}. O documento não recomenda decisões."
+            + ("" if revisado else " Gerado em processamento automático: o dossiê e os insumos não passaram por revisão "
+               "da equipe antes do debate."))
 
 
 def inserir_sobre_documento(memorando, quadro):
@@ -2736,183 +2948,24 @@ if botao_gerar:
         st.warning(f"Preencha antes de iniciar: {', '.join(faltando)}. O botão \"Preparar insumos\" faz isso a partir do dossiê.")
     else:
         st.session_state["fatos"] = texto_dossie(dossie)
-        cenario = montar_cenario()
-        cenario_completo = montar_cenario(com_dossie=True)
-        relatorio = st.session_state.get("texto_relatorio", "")
-        material = material_referencia(dossie, relatorio)
-        completude = st.session_state.get("completude") if relatorio else None
-        st.session_state["uso_rodada"] = []
-        confronto = {"divergencias": [], "descartadas": 0, "uso": []}
-        if relatorio:
-            with st.spinner("Confrontando o relatório do órgão com o dossiê..."):
-                try:
-                    confronto = confrontar(modelo_extracao, dossie, relatorio)
-                except Exception as e:
-                    confronto["erro"] = str(e)
-            st.session_state["uso_rodada"].extend(confronto.get("uso") or [])
-        txt_confronto = texto_confronto(confronto)
-        qualidade = "\n\n".join(x for x in [resumo_completude(completude) if completude else "", txt_confronto] if x)
-        texto_usuario = cenario + ("\n\n" + qualidade if qualidade else "") + "\n\nExecute o protocolo e registre o Tension Map."
-        mensagens1 = mensagens_com_cache(modelo, PROMPT_ETAPA_1, material, texto_usuario)
-        tension_map, erro, texto1, problemas, rodadas_validas, debate = None, None, "", [], [], None
-        rodadas_feitas = n_rodadas
+        configuracao = {"modelo": modelo, "modelo_auxiliar": modelo_extracao, "modo_independente": modo_independente,
+                        "modelo_personas": modelo_personas, "avaliador": avaliador, "n_rodadas": n_rodadas,
+                        "parar_cedo": parar_cedo, "uso_preparo": st.session_state.get("uso_insumos", []),
+                        "arquivo_nome": st.session_state.get("arquivo_nome", ""), "origem": "painel",
+                        "dossie_revisado": True}
+        aviso = st.empty()
         try:
-            if modo_independente:
-                personas_lista = ler_personas(st.session_state["personas"])
-                if len(personas_lista) < 3:
-                    raise RuntimeError("o modo independente precisa de pelo menos 3 personas, uma por linha")
-                aviso = st.empty()
-                with st.spinner(f"Debate com {len(personas_lista)} personas independentes ({modelo_personas})..."):
-                    tension_map, debate, problemas = debate_independente(
-                        modelo_personas, modelo, avaliador, personas_lista, cenario, material, qualidade,
-                        progresso=aviso.info, cenario_avaliador=cenario_completo)
-                aviso.empty()
-            elif n_rodadas == 1:
-                with st.spinner(f"Etapa 1/2: o conselho de agentes ({modelo}) está debatendo..."):
-                    tension_map, texto1, motivo1, problemas = chamar_com_validacao(
-                        modelo, mensagens1, FERRAMENTA_TENSION_MAP, SCHEMA_TENSION_MAP, "tension map")
-                if tension_map is None:
-                    erro = ("O modelo não devolveu um Tension Map válido."
-                            + (" A resposta foi cortada pelo limite de tokens; reduza o dossiê ou as personas." if motivo1 == "length" else ""))
-            else:
-                with st.spinner(f"Etapa 1/3: {'até ' if parar_cedo else ''}{n_rodadas} rodadas independentes do "
-                                f"conselho de agentes ({modelo})..."):
-                    resultados, _ = rodar_rodadas(modelo, mensagens1, n_rodadas,
-                                                  modelo_checagem=modelo_extracao if parar_cedo else None)
-                rodadas_feitas = len(resultados)
-                rodadas_validas = [(i, tm) for i, (tm, _, _) in enumerate(resultados, 1)
-                                   if isinstance(tm, dict) and isinstance(tm.get("trade_offs"), list) and tm["trade_offs"]]
-                texto1 = "\n\n".join(f"--- rodada {i} ---\n{t}" for i, (_, t, _) in enumerate(resultados, 1))
-                if len(rodadas_validas) < 2:
-                    if rodadas_validas:
-                        tension_map = rodadas_validas[0][1]
-                        problemas = validar(tension_map, SCHEMA_TENSION_MAP) + ["só uma rodada válida: estabilidade não medida"]
-                    else:
-                        erro = "Nenhuma rodada devolveu um Tension Map válido."
-                else:
-                    with st.spinner("Etapa 2/3: consolidando as rodadas e medindo a estabilidade..."):
-                        rodadas_json = json.dumps({f"R{i}": tm for i, tm in rodadas_validas}, ensure_ascii=False)
-                        consolidado, texto_c, motivo_c, problemas = chamar_com_validacao(
-                            modelo, [{"role": "system", "content": PROMPT_CONSOLIDACAO},
-                                     {"role": "user", "content": "RODADAS:\n" + rodadas_json}],
-                            FERRAMENTA_CONSOLIDACAO, SCHEMA_CONSOLIDACAO, "consolidação", max_tokens=16000)
-                    if consolidado is None:
-                        tension_map = rodadas_validas[0][1]
-                        problemas = ["a consolidação falhou; usando a rodada 1 sem medir estabilidade"]
-                    else:
-                        tension_map = aplicar_estabilidade(consolidado, rodadas_validas, len(resultados), previstas=n_rodadas)
-                        problemas = validar(tension_map, SCHEMA_TENSION_MAP)
-                        if tension_map.get("estabilidade") is None:
-                            problemas.append("a consolidação não indicou de quais rodadas veio cada trade-off; estabilidade não medida")
-        except Exception as e:
-            erro = f"❌ Erro na API: {e}"
-
-        if erro:
-            st.error(erro)
-            if texto1:
+            with st.spinner("Deliberando..."):
+                st.session_state["resultado"] = deliberar(
+                    {c: st.session_state[c] for c in CAMPOS}, dossie, st.session_state.get("texto_relatorio", ""),
+                    st.session_state.get("completude"), configuracao, progresso=aviso.info,
+                    anterior=st.session_state.get("registro_anterior"))
+        except ErroDeliberacao as e:
+            st.error(str(e))
+            if e.texto_bruto:
                 with st.expander("Ver resposta bruta (para depuração)"):
-                    st.text(texto1)
-        else:
-            try:
-                base_verificacao = "\n".join([texto_dossie(dossie), relatorio, st.session_state["problema"],
-                                              st.session_state["lacunas"]])
-                tension_map, evidencias = verificar_evidencias(tension_map, base_verificacao, dossie, relatorio)
-                etapa_memo = "Fase 5" if debate else ("Etapa 2/2" if n_rodadas == 1 else "Etapa 3/3")
-                with st.spinner(f"{etapa_memo}: redigindo o memorando executivo e a matriz de risco..."):
-                    mensagens2 = [{"role": "system", "content": PROMPT_ETAPA_2},
-                                  {"role": "user", "content": cenario_completo
-                                   + ("\n\n" + txt_confronto if txt_confronto else "")
-                                   + "\n\nTENSION MAP (Fase 4, já verificado):\n"
-                                   + json.dumps(tension_map, ensure_ascii=False, indent=2)}]
-                    memorando, _, motivo2 = chamar_modelo(modelo, mensagens2, 16000, etapa="memorando")
-                    # Se ainda for cortado, pede para continuar de onde parou (até 2 vezes)
-                    for _ in range(2):
-                        if motivo2 != "length":
-                            break
-                        continuacao, _, motivo2 = chamar_modelo(
-                            modelo,
-                            mensagens2 + [{"role": "assistant", "content": memorando},
-                                          {"role": "user", "content": "Continue o memorando exatamente de onde parou, "
-                                           "sem repetir nada do que já escreveu e sem comentários."}],
-                            8000, etapa="memorando (continuação)")
-                        memorando = memorando.rstrip() + ("\n" if continuacao.lstrip().startswith(("|", "#", "-")) else " ") + continuacao.lstrip()
-                memorando = memorando.strip()
-                numeros = verificar_numeros(memorando, base_verificacao)
-                # Revisão de neutralidade com o modelo auxiliar: mais barato e diferente do que escreveu o memorando
-                with st.spinner("Revisando a neutralidade do memorando..."):
-                    try:
-                        neutralidade = revisar_neutralidade(modelo_extracao, memorando, tension_map)
-                    except Exception as e:
-                        neutralidade = {"erro": str(e), "modelo": modelo_extracao}
-                resumo_dos = resumo_dossie(dossie)
-                confianca = confianca_calculada(resumo_dos, tension_map.get("estabilidade"), evidencias, debate, completude)
-                memorando = inserir_sobre_documento(memorando, sobre_o_documento(
-                    resumo_dos, dossie.get("data_corte"), confianca, len(ler_personas(st.session_state["personas"]))))
-                uso = list(st.session_state.get("uso_rodada", []))
-                uso_preparo = list(dossie.get("uso") or []) + list(st.session_state.get("uso_insumos", []))
-                custo, custo_parcial = custo_estimado(uso)
-                custo_extracao, parcial_preparo = custo_estimado(uso_preparo)
-                versao_prompt = hashlib.md5((PROMPT_PESQUISA + PROMPT_INSUMOS + PROMPT_CONFRONTO + PROMPT_ETAPA_1
-                                             + PROMPT_CONSOLIDACAO + PROMPT_ETAPA_2 + PROMPT_NEUTRALIDADE).encode()).hexdigest()[:8]
-                assinatura = hashlib.md5((cenario_completo + relatorio).encode()).hexdigest()
-                registro_id = f"{versao_prompt}-{assinatura[:8]}"
-                resultado = {
-                    "tension_map": tension_map,
-                    "memorando": memorando,
-                    "memorando_cortado": motivo2 == "length",
-                    "problemas_formato": problemas,
-                    "evidencias": evidencias,
-                    "numeros": numeros,
-                    "completude": completude,
-                    "confianca": confianca,
-                    "resumo_dossie": resumo_dos,
-                    "confronto": confronto,
-                    "n_rodadas": rodadas_feitas,
-                    "n_rodadas_previstas": n_rodadas,
-                    "uso": uso,
-                    "custo": custo,
-                    "custo_extracao": custo_extracao,
-                    "custo_parcial": custo_parcial or parcial_preparo,
-                    "modelo": modelo,
-                    "modelo_extracao": modelo_extracao,
-                    "data": _data_extenso(date.today()),
-                    "assinatura_insumos": hashlib.md5(cenario_completo.encode()).hexdigest(),
-                    "registro_id": registro_id,
-                    "neutralidade": neutralidade,
-                    "debate": debate,
-                }
-                registro = {
-                    "id": registro_id, "gerado_em": datetime.now().isoformat(timespec="seconds"),
-                    "versao_app": APP_VERSAO, "versao_prompt": versao_prompt,
-                    "modelo_debate": modelo, "modelo_auxiliar": modelo_extracao, "modelo_pesquisa": dossie.get("modelo"),
-                    "rodadas": rodadas_feitas, "rodadas_previstas": n_rodadas,
-                    "arquivo": st.session_state.get("arquivo_nome", "") if relatorio else "",
-                    "assinatura_relatorio": hashlib.md5(relatorio.encode()).hexdigest() if relatorio else "",
-                    "insumos": {c: st.session_state[c] for c in CAMPOS},
-                    "dossie": json.loads(dossie_para_json(dossie)), "resumo_dossie": resumo_dos,
-                    "confronto": {k: v for k, v in confronto.items() if k != "uso"},
-                    "completude": completude, "confianca_calculada": confianca,
-                    "retrato_relatorio": retrato_relatorio(relatorio),
-                    "tension_maps_por_rodada": {f"R{i}": tm for i, tm in rodadas_validas},
-                    "modo_debate": "personas independentes" if debate else "rápido",
-                    "debate_independente": debate,
-                    "tension_map": tension_map, "memorando": memorando,
-                    "verificacao": {"evidencias": evidencias, "numeros": numeros, "problemas_formato": problemas,
-                                    "neutralidade": neutralidade},
-                    "uso_tokens": uso_preparo + uso, "custo_estimado_usd": round(custo + custo_extracao, 4),
-                }
-                resultado["registro_caminho"] = salvar_registro(registro)
-                resultado["retrato_relatorio"] = registro["retrato_relatorio"]
-                anterior = st.session_state.get("registro_anterior")
-                if anterior:
-                    with st.spinner("Comparando com a análise anterior..."):
-                        resultado["comparacao"] = comparar_analises(modelo_extracao, anterior, resultado)
-                    registro["comparacao_com"] = {"id": resultado["comparacao"]["anterior_id"],
-                                                  "resumo": markdown_comparacao(resultado["comparacao"])}
-                resultado["registro_json"] = json.dumps(registro, ensure_ascii=False, indent=2)
-                st.session_state["resultado"] = resultado
-            except Exception as e:
-                st.error(f"❌ Erro na API: {e}")
+                    st.text(e.texto_bruto)
+        aviso.empty()
 
 # --- DOSSIÊ (painel) ---------------------------------------------------------------
 

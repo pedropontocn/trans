@@ -1,0 +1,157 @@
+name: Processamento em lote (Drive)
+
+# Disparo manual: Actions > "Processamento em lote (Drive)" > Run workflow.
+# Lê a pasta DOCUMENTOS RECEBIDOS no Drive e gera o mapa de tensões de cada secretaria e órgão vinculado.
+# O resultado sai num zip CRIPTOGRAFADO (o repositório é público: artefatos e logs podem ser vistos por terceiros).
+#
+# Segredos do repositório (Settings > Secrets and variables > Actions):
+#   GOOGLE_SERVICE_ACCOUNT_JSON  conteúdo do JSON da conta de serviço
+#   DRIVE_PASTA_ID               ID da pasta DOCUMENTOS RECEBIDOS
+#   ANTHROPIC_API_KEY            chave da Anthropic
+#   GEMINI_API_KEY               chave do Gemini (só se algum modelo for Gemini)
+#   RESULTADOS_SENHA             senha do zip de resultados
+
+on:
+  workflow_dispatch:
+    inputs:
+      apenas_listar:
+        description: "Só listar órgãos e arquivos, sem chamar modelos (recomendado na primeira vez)"
+        type: boolean
+        default: true
+      orgaos:
+        description: "Só estes órgãos: siglas ou partes do nome, separadas por vírgula (vazio = todos)"
+        required: false
+        default: ""
+      partes:
+        description: "Execuções em paralelo"
+        type: choice
+        options: ["1", "2", "3", "4", "6"]
+        default: "4"
+      rodadas:
+        description: "Rodadas independentes do debate"
+        type: choice
+        options: ["1", "2", "3"]
+        default: "3"
+      modelo:
+        description: "Modelo do debate e do memorando"
+        default: "anthropic/claude-opus-5-5"
+      modelo_pesquisa:
+        description: "Modelo da pesquisa do dossiê"
+        default: "anthropic/claude-sonnet-5-5"
+      data_corte:
+        description: "Data de corte das fontes (dd/mm/aaaa; vazio = hoje)"
+        required: false
+        default: ""
+      foco:
+        description: "Foco da análise (opcional, vale para todos os órgãos)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: processamento-em-lote
+  cancel-in-progress: false
+
+jobs:
+  preparar:
+    runs-on: ubuntu-latest
+    outputs:
+      partes: ${{ steps.partes.outputs.lista }}
+    steps:
+      - id: partes
+        env:
+          PARTES: ${{ inputs.apenas_listar && '1' || inputs.partes }}
+        run: python3 -c "import json, os; print('lista=' + json.dumps(list(range(1, int(os.environ['PARTES']) + 1))))" >> "$GITHUB_OUTPUT"
+
+  processar:
+    needs: preparar
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        parte: ${{ fromJson(needs.preparar.outputs.partes) }}
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      DRIVE_PASTA_ID: ${{ secrets.DRIVE_PASTA_ID }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RESULTADOS_SENHA: ${{ secrets.RESULTADOS_SENHA }}
+      ORGAOS: ${{ inputs.orgaos }}
+      PARTES: ${{ inputs.apenas_listar && '1' || inputs.partes }}
+      RODADAS: ${{ inputs.rodadas }}
+      MODELO: ${{ inputs.modelo }}
+      MODELO_PESQUISA: ${{ inputs.modelo_pesquisa }}
+      DATA_CORTE: ${{ inputs.data_corte }}
+      FOCO: ${{ inputs.foco }}
+      APENAS_LISTAR: ${{ inputs.apenas_listar }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-lote.txt
+      - name: Conferir segredos
+        run: |
+          faltam=""
+          for s in GOOGLE_SERVICE_ACCOUNT_JSON DRIVE_PASTA_ID RESULTADOS_SENHA; do
+            [ -z "${!s}" ] && faltam="$faltam $s"
+          done
+          [ "$APENAS_LISTAR" != "true" ] && [ -z "$ANTHROPIC_API_KEY" ] && faltam="$faltam ANTHROPIC_API_KEY"
+          if [ -n "$faltam" ]; then echo "::error::Faltam os segredos:$faltam"; exit 1; fi
+      - name: Instalar dependências
+        run: pip install -r requirements.txt -r requirements-lote.txt
+      - name: Processar
+        run: |
+          args=(--pasta "$DRIVE_PASTA_ID" --parte "${{ matrix.parte }}" --partes "$PARTES" --orgaos "$ORGAOS"
+                --rodadas "$RODADAS" --modelo "$MODELO" --modelo-pesquisa "$MODELO_PESQUISA" --foco "$FOCO"
+                --saida resultados)
+          [ -n "$DATA_CORTE" ] && args+=(--data-corte "$DATA_CORTE")
+          [ "$APENAS_LISTAR" = "true" ] && args+=(--apenas-listar)
+          python lote.py "${args[@]}"
+      - name: Criptografar resultados
+        if: always()
+        run: |
+          command -v 7z >/dev/null || sudo apt-get install -y p7zip-full
+          mkdir -p resultados
+          7z a -tzip -mem=AES256 -p"$RESULTADOS_SENHA" "resultados_parte_${{ matrix.parte }}.zip" resultados/ > /dev/null
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultados-parte-${{ matrix.parte }}
+          path: resultados_parte_${{ matrix.parte }}.zip
+          retention-days: 5
+
+  juntar:
+    needs: processar
+    if: always() && needs.processar.result != 'skipped'
+    runs-on: ubuntu-latest
+    env:
+      RESULTADOS_SENHA: ${{ secrets.RESULTADOS_SENHA }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: resultados-parte-*
+          merge-multiple: true
+      - name: Juntar as partes num zip só
+        run: |
+          command -v 7z >/dev/null || sudo apt-get install -y p7zip-full
+          mkdir -p juntos
+          for z in resultados_parte_*.zip; do
+            7z x -y -p"$RESULTADOS_SENHA" -o"partes/${z%.zip}" "$z" > /dev/null
+            cp -r "partes/${z%.zip}/resultados/." juntos/ 2>/dev/null || true
+            [ -f "partes/${z%.zip}/resultados/resumo.md" ] && cp "partes/${z%.zip}/resultados/resumo.md" "juntos/resumo_${z%.zip}.md"
+            [ -f "partes/${z%.zip}/resultados/resumo.csv" ] && cp "partes/${z%.zip}/resultados/resumo.csv" "juntos/resumo_${z%.zip}.csv"
+          done
+          rm -f juntos/resumo.md juntos/resumo.csv
+          7z a -tzip -mem=AES256 -p"$RESULTADOS_SENHA" resultados.zip juntos/ > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resultados
+          path: resultados.zip
+          retention-days: 5
