@@ -52,8 +52,17 @@ def _norm(s):
     return unicodedata.normalize("NFD", str(s or "")).encode("ascii", "ignore").decode().lower().strip()
 
 
+OUVINTES_LOG = []          # funções que também recebem cada linha do log (o app mostra o andamento na tela)
+
+
 def log(msg):
-    print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
+    linha = f"[{datetime.now():%H:%M:%S}] {msg}"
+    print(linha, flush=True)
+    for ouvinte in list(OUVINTES_LOG):
+        try:
+            ouvinte(linha)
+        except Exception:
+            pass
 
 
 # --- APP ---------------------------------------------------------------------------
@@ -290,7 +299,10 @@ def processar_orgao(app, drive, orgao, cfg, saida):
              "confianca": "", "custo_usd": 0.0, "minutos": 0.0, "observacao": ""}
     app["st"].session_state.clear()
     try:
-        texto, manifesto = ler_documentos(drive, orgao, app["converter_arquivo"], app["LIMITE_CARACTERES"])
+        if orgao.get("documentos") is not None:          # texto já lido (ex.: relatório resumido enviado no app)
+            texto, manifesto = orgao["documentos"]
+        else:
+            texto, manifesto = ler_documentos(drive, orgao, app["converter_arquivo"], app["LIMITE_CARACTERES"])
         (pasta / "arquivos_lidos.json").write_text(json.dumps(manifesto, ensure_ascii=False, indent=2), encoding="utf-8")
         linha["arquivos_lidos"], linha["arquivos_pulados"] = len(manifesto["lidos"]), len(manifesto["pulados"])
         relatorio, _ = app["limpar_relatorio"](texto) if texto else ("", [])
@@ -320,7 +332,8 @@ def processar_orgao(app, drive, orgao, cfg, saida):
         completude = app["indice_completude"](relatorio) if relatorio else None
         resultado = app["deliberar"](
             insumos, dossie, relatorio, completude,
-            {**cfg, "uso_preparo": uso_insumos, "arquivo_nome": f"{len(manifesto['lidos'])} arquivos do Drive",
+            {**cfg, "uso_preparo": uso_insumos,
+             "arquivo_nome": orgao.get("descricao_documentos") or f"{len(manifesto['lidos'])} arquivos do Drive",
              "origem": "lote", "dossie_revisado": False},
             progresso=lambda t: log(f"  {t}"))
         tm, memo = resultado["tension_map"], resultado["memorando"]
@@ -427,21 +440,30 @@ def principal(argv=None, drive=None, app=None, cliente_batch=None):
         return linhas
 
     app = app or carregar_app()
-    fila = None
-    if a.economico:
-        # Todos os órgãos rodam em paralelo; cada chamada à Anthropic entra numa fila que vai à Batch API em lotes.
-        import lote_api
-        fila = lote_api.FilaBatch(cliente=cliente_batch, prazo=time.time() + a.prazo_minutos * 60, log=log,
-                                  **({"quieto": 0.2, "intervalo": 0.2} if cliente_batch is not None else {}))
-        app["completion"] = fila.completion(app["completion"])
-        app["st"] = lote_api.StPorFio(app["st"])
-        app["RODADAS_JUNTAS"] = True
-        log(f"Modo econômico: chamadas da Anthropic pela Batch API (metade do preço), até {a.paralelos} órgãos ao "
-            f"mesmo tempo, prazo de {a.prazo_minutos:.0f} min.")
     cfg = {"modelo_pesquisa": a.modelo_pesquisa, "modelo_auxiliar": a.modelo_auxiliar, "modelo": a.modelo,
            "n_rodadas": a.rodadas, "parar_cedo": a.rodadas >= 3, "modo_independente": False,
            "data_corte": a.data_corte, "foco": a.foco, "orgao_emissor": a.orgao_emissor, "unidade": a.unidade,
            "para": a.para}
+    return rodar_orgaos(app, drive, orgaos, cfg, saida, economico=a.economico, cliente_batch=cliente_batch,
+                        paralelos=a.paralelos, prazo_minutos=a.prazo_minutos)
+
+
+def rodar_orgaos(app, drive, orgaos, cfg, saida, economico=False, cliente_batch=None, paralelos=40, prazo_minutos=320):
+    """Analisa os órgãos e grava os arquivos de cada um em `saida`. Usado pelo lote no GitHub e pelo app.
+    No modo econômico, os órgãos rodam em paralelo e as chamadas à Anthropic vão pela Batch API."""
+    import lote_api
+    saida = Path(saida)
+    saida.mkdir(parents=True, exist_ok=True)
+    app["st"] = lote_api.StPorFio(app["st"] if not isinstance(app["st"], lote_api.StPorFio) else app["st"]._st)
+    fila = None
+    if economico:
+        # Todos os órgãos rodam em paralelo; cada chamada à Anthropic entra numa fila que vai à Batch API em lotes.
+        fila = lote_api.FilaBatch(cliente=cliente_batch, prazo=time.time() + prazo_minutos * 60, log=log,
+                                  **({"quieto": 0.2, "intervalo": 0.2} if cliente_batch is not None else {}))
+        app["completion"] = fila.completion(app["completion"])
+        app["RODADAS_JUNTAS"] = True
+        log(f"Modo econômico: chamadas da Anthropic pela Batch API (metade do preço), até {paralelos} órgãos ao "
+            f"mesmo tempo, prazo de {prazo_minutos:.0f} min.")
     # A camada do Estado (situação fiscal, dívida, previdência, calendário, cenário político) é a mesma para todos os
     # órgãos: é pesquisada uma vez e reaproveitada. Se falhar, cada órgão pesquisa a sua.
     custo_estado = 0.0
@@ -486,7 +508,7 @@ def principal(argv=None, drive=None, app=None, cliente_batch=None):
         return linha
 
     try:
-        with ThreadPoolExecutor(max_workers=max(1, min(a.paralelos, len(orgaos) or 1))) as ex:
+        with ThreadPoolExecutor(max_workers=max(1, min(paralelos, len(orgaos) or 1))) as ex:
             linhas = list(ex.map(lambda par: um(*par), enumerate(orgaos, 1)))
     finally:
         fila.encerrar()

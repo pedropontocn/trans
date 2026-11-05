@@ -17,6 +17,7 @@ from copy import deepcopy
 import os
 import re
 import tempfile
+import threading
 import unicodedata
 import zipfile
 from datetime import date, datetime
@@ -52,7 +53,7 @@ LIMITE_CARACTERES = 150_000
 CAMPOS = ["problema", "fatos", "personas", "lacunas", "sem_voz"]
 TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
-APP_VERSAO = "2.3"
+APP_VERSAO = "2.5"
 PASTA_REGISTROS = Path(os.environ.get("PAINEL_REGISTROS") or Path(__file__).resolve().parent / "registros")
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).
 # O Haiku 5.5 cobra mais caro acima de 100 mil tokens de entrada; a estimativa usa o preço base.
@@ -2941,6 +2942,117 @@ def inserir_sobre_documento(memorando, quadro):
     return (quadro + "\n\n" + memorando).strip()
 
 
+# --- VÁRIOS ÓRGÃOS DE UMA VEZ (relatórios resumidos em .zip) ---------------------------
+# Cada arquivo Word ou PDF do .zip é o relatório resumido de um órgão. A análise roda em segundo plano, com o mesmo
+# código do lote (lote.rodar_orgaos): pesquisa do Estado uma vez, dossiê, insumos, deliberação e memorando de cada
+# órgão, sem revisão humana no meio. O resultado sai num .zip para baixar.
+
+EXTENSOES_RESUMO = (".docx", ".pdf")
+CLIENTE_BATCH = None           # só para testes: uma Batch API falsa
+
+
+def nome_do_orgao_pelo_arquivo(nome):
+    base = RE_SUFIXO_ZIP_DRIVE.sub("", Path(nome).stem)
+    base = re.sub(r"[_]+", " ", base).strip()
+    base = re.sub(r"^(relat[oó]rio\s+resumido|resumo|relat[oó]rio)\s*[-–:]*\s*(d[aeo]s?\s+)?", "", base, flags=re.I).strip()
+    return re.sub(r"\s{2,}", " ", base) or Path(nome).stem
+
+
+def resumos_do_envio(arquivos):
+    """Lista (arquivo, órgão sugerido, bytes) dos relatórios resumidos: os Word e PDF de dentro dos .zip e os enviados
+    soltos. Ignora pastas, arquivos temporários do Word e outros formatos."""
+    itens = []
+    for nome, conteudo in arquivos:
+        if nome.lower().endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
+                for info in z.infolist():
+                    interno = Path(info.filename.replace("\\", "/"))
+                    if (info.is_dir() or interno.name.startswith(("~$", "._")) or "__MACOSX" in interno.parts
+                            or interno.suffix.lower() not in EXTENSOES_RESUMO):
+                        continue
+                    itens.append({"arquivo": interno.name, "orgao": nome_do_orgao_pelo_arquivo(interno.name),
+                                  "conteudo": z.read(info)})
+        elif nome.lower().endswith(EXTENSOES_RESUMO):
+            itens.append({"arquivo": nome, "orgao": nome_do_orgao_pelo_arquivo(nome), "conteudo": conteudo})
+    return sorted(itens, key=lambda i: i["orgao"].lower())
+
+
+@st.cache_resource(show_spinner=False)
+def _trabalhos():
+    """Trabalhos em segundo plano. Ficam na memória do app (todas as sessões veem) até ele reiniciar."""
+    return {}
+
+
+def trabalho_atual():
+    trabalhos = _trabalhos()
+    return trabalhos[max(trabalhos)] if trabalhos else None
+
+
+def iniciar_trabalho(itens, cfg, economico):
+    """Começa a análise dos órgãos em segundo plano. Devolve o trabalho (um dicionário que o fio vai atualizando)."""
+    atual = trabalho_atual()
+    if atual and atual["situacao"] == "rodando":
+        raise RuntimeError("já há uma análise de vários órgãos em andamento")
+    trabalho = {"id": datetime.now().strftime("%Y%m%d%H%M%S%f"), "situacao": "rodando", "inicio": datetime.now(),
+                "fim": None, "log": [], "total": len(itens), "economico": economico, "zip": None, "erro": None,
+                "saida": Path(tempfile.mkdtemp(prefix="analise_varios_"))}
+    _trabalhos()[trabalho["id"]] = trabalho
+    trabalho["fio"] = threading.Thread(target=_executar_trabalho, args=(trabalho, itens, dict(cfg), economico),
+                                       name="analise-varios-orgaos", daemon=True)
+    trabalho["fio"].start()
+    return trabalho
+
+
+def _executar_trabalho(trabalho, itens, cfg, economico):
+    lote = _modulo_lote()
+    ouvinte = lambda linha: trabalho["log"].append(linha) if len(trabalho["log"]) < 5000 else None
+    lote.OUVINTES_LOG.append(ouvinte)
+    try:
+        ns = lote.carregar_app()             # cópia das funções do app: o modo econômico troca a chamada ao modelo nela
+        orgaos = []
+        for item in itens:
+            try:
+                texto = ns["converter_arquivo"](item["arquivo"], item["conteudo"]) or ""
+                manifesto = {"lidos": [{"arquivo": item["arquivo"], "caracteres": len(texto)}], "pulados": [],
+                             "erros": [], "cortados": []}
+            except Exception as e:
+                texto, manifesto = "", {"lidos": [], "pulados": [], "cortados": [],
+                                        "erros": [{"arquivo": item["arquivo"], "erro": f"{type(e).__name__}: {e}"[:300]}]}
+            orgaos.append({"nome": item["orgao"], "sigla": _modulo_lote().sigla(item["orgao"]), "vinculada_a": "",
+                           "documentos": (_modulo_lote().limpar_dados_pessoais(texto), manifesto),
+                           "descricao_documentos": f"relatório resumido ({item['arquivo']})"})
+        lote.log(f"{len(orgaos)} órgão(s) para analisar.")
+        lote.rodar_orgaos(ns, None, orgaos, cfg, trabalho["saida"], economico=economico, cliente_batch=CLIENTE_BATCH,
+                          paralelos=40, prazo_minutos=23 * 60)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
+            for arquivo in sorted(trabalho["saida"].rglob("*")):
+                if arquivo.is_file():
+                    z.write(arquivo, arquivo.relative_to(trabalho["saida"]))
+        trabalho["zip"] = buffer.getvalue()
+        trabalho["situacao"] = "concluído"
+    except Exception as e:
+        trabalho["erro"] = f"{type(e).__name__}: {e}"[:500]
+        trabalho["situacao"] = "erro"
+    finally:
+        trabalho["fim"] = datetime.now()
+        if ouvinte in lote.OUVINTES_LOG:
+            lote.OUVINTES_LOG.remove(ouvinte)
+
+
+def linhas_do_trabalho(trabalho):
+    """O resumo.csv que o lote regrava a cada órgão concluído."""
+    import csv
+    caminho = Path(trabalho["saida"]) / "resumo.csv"
+    if not caminho.exists():
+        return []
+    try:
+        with open(caminho, encoding="utf-8-sig") as f:
+            return list(csv.DictReader(f, delimiter=";"))
+    except (OSError, csv.Error):
+        return []
+
+
 # --- ESTADO INICIAL ---------------------------------------------------------
 
 st.set_page_config(page_title="Mapa de Tensões da Transição", page_icon="🏛️", layout="wide")
@@ -3239,6 +3351,110 @@ with st.sidebar:
     if len(itens_incluidos(dossie_atual)) < MIN_ITENS_DOSSIE:
         st.caption(f"Para deliberar, o dossiê precisa de pelo menos {MIN_ITENS_DOSSIE} itens incluídos.")
     botao_gerar = st.button("🚀 Iniciar deliberação", width="stretch", type="primary")
+
+# --- VÁRIOS ÓRGÃOS DE UMA VEZ (tela) ----------------------------------------------------
+
+@st.fragment(run_every=15)
+def painel_trabalho():
+    """Andamento da análise em segundo plano; atualiza sozinho a cada 15 segundos."""
+    trabalho = trabalho_atual()
+    if not trabalho:
+        return
+    linhas = linhas_do_trabalho(trabalho)
+    feitos = len(linhas)
+    minutos = ((trabalho["fim"] or datetime.now()) - trabalho["inicio"]).total_seconds() / 60
+    if trabalho["situacao"] == "rodando":
+        st.info(f"⏳ Analisando {trabalho['total']} órgão(s) em segundo plano"
+                + (" no modo econômico (Batch API)" if trabalho["economico"] else "")
+                + f": {feitos} concluído(s), {minutos:.0f} min até agora. Pode fechar a página: a análise continua. "
+                  "Não faça merge nem reinicie o app até terminar.")
+        st.progress(feitos / max(trabalho["total"], 1))
+    elif trabalho["situacao"] == "concluído":
+        ok = sum(1 for l in linhas if l.get("situacao") == "concluído")
+        custo = sum(float(l.get("custo_usd") or 0) for l in linhas)
+        st.success(f"✅ Análise concluída em {minutos:.0f} min: {ok} de {trabalho['total']} órgão(s) com memorando. "
+                   f"Custo estimado dos órgãos: US$ {custo:.2f}".replace(".", ",", 1)
+                   + " (o resumo no .zip traz também a pesquisa do Estado).")
+    else:
+        st.error(f"A análise parou: {trabalho['erro']}")
+    if linhas:
+        st.dataframe([{"Órgão": l.get("orgao"), "Situação": l.get("situacao"), "Itens do dossiê": l.get("itens_dossie"),
+                       "Trade-offs": l.get("trade_offs"), "Confiança": l.get("confianca"),
+                       "Custo (US$)": l.get("custo_usd"), "Observação": l.get("observacao")} for l in linhas],
+                     hide_index=True, width="stretch")
+    with st.expander("Registro do andamento"):
+        st.code("\n".join(trabalho["log"][-200:]) or "(começando)", language=None)
+    if trabalho["situacao"] != "rodando" and st.session_state.get("trabalho_visto") != trabalho["id"]:
+        st.session_state["trabalho_visto"] = trabalho["id"]
+        st.rerun(scope="app")           # mostra o botão de download fora do trecho que se atualiza sozinho
+
+
+trabalho = trabalho_atual()
+with st.expander("📦 Analisar vários órgãos de uma vez (relatórios resumidos em .zip)",
+                 expanded=bool(trabalho and trabalho["situacao"] == "rodando")):
+    st.caption("Suba o .zip da pasta com os relatórios resumidos (Word ou PDF, um arquivo por órgão). Para cada órgão, "
+               "o app pesquisa o dossiê, prepara os insumos, delibera e escreve o memorando, com os modelos e as "
+               "rodadas escolhidos na barra lateral, sem parar para revisão. O contexto do Estado é pesquisado uma vez.")
+    if trabalho:
+        painel_trabalho()
+        if trabalho["situacao"] != "rodando":
+            if trabalho.get("zip"):
+                st.download_button("⬇️ Baixar os resultados (.zip)", trabalho["zip"], width="stretch", type="primary",
+                                   file_name=f"mapas_de_tensoes_{trabalho['inicio']:%Y-%m-%d_%H%M}.zip",
+                                   mime="application/zip")
+            st.button("Começar outra análise de vários órgãos",
+                      on_click=lambda: _trabalhos().pop(trabalho["id"], None))
+    if not trabalho or trabalho["situacao"] != "rodando":
+        if not trabalho:
+            enviados = st.file_uploader("Pasta de relatórios resumidos (.zip, ou os arquivos Word/PDF)",
+                                        type=["zip", "docx", "pdf"], accept_multiple_files=True, key="up_varios")
+            if enviados and not isinstance(enviados, list):
+                enviados = [enviados]
+            if enviados:
+                assinatura_varios = hashlib.md5(b"".join(a.name.encode() + a.getvalue() for a in enviados)).hexdigest()
+                if st.session_state.get("varios_lidos") != assinatura_varios:
+                    try:
+                        st.session_state["varios_itens"] = resumos_do_envio([(a.name, a.getvalue()) for a in enviados])
+                    except zipfile.BadZipFile as e:
+                        st.session_state["varios_itens"] = []
+                        st.error(f"Não foi possível abrir o .zip: {e}")
+                    st.session_state["varios_lidos"] = assinatura_varios
+                    st.session_state.pop("editor_varios", None)
+                itens_varios = st.session_state.get("varios_itens") or []
+                if not itens_varios:
+                    st.warning("Não achei nenhum arquivo Word ou PDF no envio.")
+                else:
+                    tabela = st.data_editor(
+                        [{"analisar": True, "orgao": i["orgao"], "arquivo": i["arquivo"]} for i in itens_varios],
+                        key="editor_varios", hide_index=True, width="stretch", disabled=["arquivo"],
+                        column_config={"analisar": st.column_config.CheckboxColumn("Analisar"),
+                                       "orgao": st.column_config.TextColumn("Órgão (corrija se precisar)"),
+                                       "arquivo": st.column_config.TextColumn("Arquivo")})
+                    linhas_tabela = tabela.to_dict("records") if hasattr(tabela, "to_dict") else list(tabela)
+                    escolhidos = [dict(i, orgao=str(l["orgao"]).strip() or i["orgao"])
+                                  for i, l in zip(itens_varios, linhas_tabela) if l.get("analisar")]
+                    economico_varios = st.checkbox(
+                        "Modo econômico (Batch API: metade do preço; cada etapa espera a fila, de minutos a uma hora)",
+                        value=True, key="varios_economico")
+                    por_orgao = (0.45, 0.85) if economico_varios else (0.7, 1.4)
+                    st.caption(f"Estimativa: US$ {por_orgao[0] * len(escolhidos):.0f} a {por_orgao[1] * len(escolhidos):.0f} "
+                               f"para {len(escolhidos)} órgão(s), com os modelos da barra lateral. O valor real sai no "
+                               "resumo." + (" O modo \"Personas independentes\" não é usado aqui: vale o modo rápido."
+                                            if modo_independente else ""))
+                    if st.button(f"▶️ Analisar {len(escolhidos)} órgão(s)", type="primary", width="stretch",
+                                 disabled=not escolhidos):
+                        cfg_varios = {
+                            "modelo_pesquisa": modelo_pesquisa, "modelo_auxiliar": modelo_extracao, "modelo": modelo,
+                            "n_rodadas": n_rodadas if not modo_independente else 3,
+                            "parar_cedo": (n_rodadas if not modo_independente else 3) >= 3, "modo_independente": False,
+                            "data_corte": data_corte.strftime("%d/%m/%Y"), "foco": st.session_state["foco"].strip(),
+                            "orgao_emissor": st.session_state["orgao"], "unidade": st.session_state["unidade"],
+                            "para": st.session_state["para"]}
+                        try:
+                            iniciar_trabalho(escolhidos, cfg_varios, economico_varios)
+                            st.rerun()
+                        except RuntimeError as e:
+                            st.error(str(e))
 
 # --- DELIBERAÇÃO --------------------------------------------------------------
 

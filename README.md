@@ -161,6 +161,24 @@ O GitHub Actions roda os testes a cada push na `main` e a cada pull request (`.g
 | `requirements-lote.txt` | Dependências extras do lote (acesso ao Google Drive e à Batch API). |
 | `extraido/lacunas_oficio/` | Diagnóstico de lacunas e minuta de ofício, retirados do painel na versão 2.0. Ponto de partida da ferramenta própria de triagem; não é usado pelo `app.py`. |
 
+## Vários órgãos de uma vez (relatórios resumidos)
+
+A documentação bruta de cada órgão é resumida fora deste app, num relatório menor em Word ou PDF. Com a pasta dos
+resumos baixada como .zip, abra **📦 Analisar vários órgãos de uma vez**, no topo da tela, e suba o .zip.
+
+- Cada arquivo Word ou PDF vira um órgão. O nome sai do nome do arquivo (sem "Resumo", "Relatório resumido" etc.) e
+  pode ser corrigido na tabela; dá para desmarcar órgãos.
+- **Analisar** roda, para cada órgão, o mesmo caminho do lote: dossiê (o contexto do Estado é pesquisado uma vez),
+  insumos, deliberação e memorando, com os modelos e as rodadas da barra lateral, sem parada para revisão. O resumo do
+  órgão entra como autodeclaração, confrontada com o dossiê.
+- O **modo econômico** (marcado por padrão) usa a Batch API da Anthropic: metade do preço dos tokens, mas cada etapa
+  espera a fila, de minutos a uma hora. Os órgãos rodam ao mesmo tempo.
+- A análise roda em segundo plano, no servidor do app: dá para fechar a página e voltar depois. O andamento se atualiza
+  sozinho. **Não faça merge nem reinicie o app enquanto ela roda**: isso a interrompe.
+- No fim, **Baixar os resultados** entrega um .zip com a pasta de cada órgão (memorando em Word e Markdown, mapa de
+  tensões, dossiê, registro) e o resumo geral (`resumo.md` e `resumo.csv`, com situação e custo de cada órgão). O .zip
+  fica disponível até o app reiniciar: baixe logo.
+
 ## Drive no app
 
 **Sem configurar nada: envie a pasta em .zip.** No Drive, clique com o botão direito na pasta da secretaria e escolha
