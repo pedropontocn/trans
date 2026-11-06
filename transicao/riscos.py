@@ -59,7 +59,8 @@ Entregue:
 - "decisoes": as 2 ou 3 decisões mais difíceis, que não se resolvem só cumprindo um prazo. Cada uma com 2 ou 3
   opções de mesmo peso ("nome" com verbo; "o_que_e" em uma frase), "o_que_falta_saber" e os riscos ligados ("riscos":
   ["R1"]).
-- "pedir": até 6 documentos ou dados a pedir à secretaria, cada um dizendo a que risco ou decisão serve.
+- "pedir": até 6 documentos ou dados a pedir à secretaria, cada um dizendo a que risco ou decisão serve. Se houver
+  CHECKLIST OBRIGATÓRIO com pontos NÃO PROCURADOS, eles entram aqui antes dos demais (cite o id, ex.: "C5").
 
 Numere os riscos R1, R2... e as decisões Q1, Q2... Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
 {"situacao": ["..."], "riscos": [{"id": "R1", ...}], "decisoes": [{"id": "Q1", "pergunta": "...", "opcoes": [{"nome":
@@ -105,7 +106,7 @@ def vencimentos_numerados(eventos, limite=15):
     return {f"V{k}": e for k, e in enumerate(escolhidos, 1)}
 
 
-def material(orgao, diag, vencimentos, txt_confronto="", data_corte=""):
+def material(orgao, diag, vencimentos, txt_confronto="", data_corte="", txt_checklist=""):
     """O material da análise e dos agentes, em texto compacto e com ids."""
     linhas = [f"SECRETARIA: {orgao}" + (f" · data de corte {data_corte}" if data_corte else ""), "", "DIAGNÓSTICO:"]
     for sec in (diag or {}).get("secoes") or []:
@@ -130,6 +131,8 @@ def material(orgao, diag, vencimentos, txt_confronto="", data_corte=""):
             linhas.append(f"Limite da base: {LIMITE_SIGA}")
     if txt_confronto:
         linhas += ["", txt_confronto]
+    if txt_checklist:
+        linhas += ["", txt_checklist]
     return "\n".join(linhas)
 
 
@@ -141,20 +144,31 @@ def analisar(modelo, texto_material, uso):
                        12000, etapa="análise de riscos", uso_lista=uso) or {}
 
 
-def revisar_por_agentes(modelo, texto_material, analise, uso):
-    """Os cinco agentes, em paralelo e sem ver as respostas uns dos outros."""
-    pedido = texto_material + "\n\nANÁLISE A REVISAR:\n" + json.dumps(analise, ensure_ascii=False, indent=1)
+def modelos_dos_agentes(principal, lista=None):
+    """O modelo de cada agente. lista: nomes de modelos (LiteLLM) que se revezam entre os cinco; vazia, todos usam o
+    principal. Agentes em modelos de provedores diferentes deixam de repetir os mesmos pontos cegos."""
+    lista = [m.strip() for m in (lista or []) if str(m or "").strip()]
+    if not lista:
+        return [principal] * len(PAPEIS)
+    return [lista[k % len(lista)] for k in range(len(PAPEIS))]
 
-    def um(papel):
+
+def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
+    """Os cinco agentes, em paralelo e sem ver as respostas uns dos outros. modelos: um por agente (ver
+    modelos_dos_agentes); sem a lista, todos usam `modelo`."""
+    pedido = texto_material + "\n\nANÁLISE A REVISAR:\n" + json.dumps(analise, ensure_ascii=False, indent=1)
+    modelos = modelos or [modelo] * len(PAPEIS)
+
+    def um(papel, modelo_agente):
         _, nome, criterio = papel
         try:
-            r = chamar_json(modelo, [{"role": "system", "content": PROMPT_AGENTE.format(
+            r = chamar_json(modelo_agente, [{"role": "system", "content": PROMPT_AGENTE.format(
                 papel=nome, criterio=criterio, esquema=ESQUEMA_RISCO)},
                 {"role": "user", "content": pedido}], 6000, etapa=f"agente: {nome}", uso_lista=uso)
         except Exception as e:
-            return {"papel": nome, "erro": f"{type(e).__name__}: {e}"[:200]}
-        return {"papel": nome, **(r if isinstance(r, dict) else {"erro": "resposta ilegível"})}
-    return _em_paralelo([lambda p=p: um(p) for p in PAPEIS])
+            return {"papel": nome, "modelo": modelo_agente, "erro": f"{type(e).__name__}: {e}"[:200]}
+        return {"papel": nome, "modelo": modelo_agente, **(r if isinstance(r, dict) else {"erro": "resposta ilegível"})}
+    return _em_paralelo([lambda p=p, m=m: um(p, m) for p, m in zip(PAPEIS, modelos)])
 
 
 def consolidar(modelo, texto_material, analise, revisoes, uso):
@@ -277,9 +291,15 @@ def revisar_neutralidade(modelo, texto, uso_lista=None):
             "decisoes_desequilibradas": [d for d in revisao.get("decisoes_desequilibradas") or [] if isinstance(d, dict)]}
 
 
-def confianca(resumo_dossie, riscos):
-    """Confiança da análise por regras explícitas: conferência do dossiê e firmeza dos fatos que sustentam os riscos."""
+def confianca(resumo_dossie, riscos, cobertura=None):
+    """Confiança da análise por regras explícitas: conferência do dossiê, firmeza dos fatos que sustentam os riscos e
+    cobertura do checklist obrigatório (ponto não procurado derruba a confiança: alta só sem nenhum em branco)."""
     nivel, motivos = 2, []
+    if cobertura:
+        em_branco = [c["id"] for c in cobertura if c["estado"] == "não procurado"]
+        motivos.append(f"{len(cobertura) - len(em_branco)} de {len(cobertura)} pontos do checklist obrigatório procurados"
+                       + (f" (não procurados: {', '.join(em_branco)})" if em_branco else ""))
+        nivel = min(nivel, 0 if len(em_branco) > len(cobertura) / 2 else 1 if em_branco else 2)
     if resumo_dossie and resumo_dossie.get("itens"):
         c = resumo_dossie["conferidos"] / resumo_dossie["itens"]
         motivos.append(f"{resumo_dossie['conferidos']} de {resumo_dossie['itens']} fatos do dossiê conferidos na fonte "

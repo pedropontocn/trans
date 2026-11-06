@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-from . import confronto as conf, documentos, entrada, modelo, painel, pesquisa, produtos, riscos, verificacao
+from . import checklist, confronto as conf, documentos, entrada, modelo, painel, pesquisa, produtos, riscos, verificacao
 from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO
 
 JUNTAS = False          # no modo econômico, as etapas independentes vão juntas para a mesma fila da Batch API
@@ -57,17 +57,18 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
                           + (": confira se o arquivo traz fatos com link [título](https://...) ou a planilha de contratos)"
                              if dossie.get("origem") == "arquivo" else ")"))
 
-    # confronto, calendário e diagnóstico leem o mesmo material (em cache): na Batch API vão juntos
-    progresso("Diagnóstico, calendário e confronto com as fontes...")
+    # confronto, calendário, diagnóstico e checklist leem o mesmo material (em cache): na Batch API vão juntos
+    progresso("Diagnóstico, calendário, checklist e confronto com as fontes...")
     tarefas = [_seguro(lambda: conf.confrontar(auxiliar, dossie, relatorio),
                        {"divergencias": [], "descartadas": 0, "uso": []}),
                _seguro(lambda: produtos.extrair_calendario(auxiliar, dossie, relatorio, nome, cfg["data_corte"]),
                        {"eventos": [], "descartados": [], "uso": []}),
                _seguro(lambda: produtos.extrair_diagnostico(auxiliar, dossie, relatorio, nome),
-                       {"secoes": [], "descartados": 0, "uso": []})]
+                       {"secoes": [], "descartados": 0, "uso": []}),
+               _seguro(lambda: checklist.responder(auxiliar, dossie, relatorio, nome), {"respostas": {}, "uso": []})]
     feitos = modelo._em_paralelo(tarefas) if JUNTAS else [t() for t in tarefas]
-    confronto, calendario, diagnostico = feitos
-    for parte, rotulo in zip(feitos, ("confronto", "calendário", "diagnóstico")):
+    confronto, calendario, diagnostico, respostas_checklist = feitos
+    for parte, rotulo in zip(feitos, ("confronto", "calendário", "diagnóstico", "checklist")):
         uso.extend(parte.pop("uso", None) or [])
         if parte.get("erro"):
             problemas.append(f"{rotulo}: {parte['erro']}")
@@ -79,23 +80,27 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     if not any(s["itens"] for s in diagnostico.get("secoes") or []):
         raise ErroAnalise("o diagnóstico não trouxe nenhuma afirmação conferida"
                           + (f" ({diagnostico['erro']})" if diagnostico.get("erro") else ""))
+    # o checklist: cada resposta conferida por código; o que ficou em branco vira lacuna visível
+    cobertura = checklist.conferir(respostas_checklist.get("respostas") or {}, dossie, relatorio, eventos)
 
     progresso("Analisando riscos e decisões...")
     vencimentos = riscos.vencimentos_numerados(eventos)
-    material = riscos.material(nome, diagnostico, vencimentos, conf.texto_confronto(confronto), cfg["data_corte"])
+    material = riscos.material(nome, diagnostico, vencimentos, conf.texto_confronto(confronto), cfg["data_corte"],
+                               checklist.texto_para_analise(cobertura))
     analise = riscos.analisar(principal, material, uso)
     if not analise.get("riscos"):
         raise ErroAnalise("a análise de riscos não devolveu riscos legíveis")
     progresso("Cinco agentes revisando a análise...")
-    revisoes = riscos.revisar_por_agentes(principal, material, analise, uso)
+    modelos_agentes = riscos.modelos_dos_agentes(principal, cfg.get("modelos_agentes"))
+    revisoes = riscos.revisar_por_agentes(principal, material, analise, uso, modelos_agentes)
     progresso("Consolidando...")
     final = riscos.consolidar(principal, material, analise, revisoes, uso)
     resultado = riscos.conferir_e_ordenar(final, diagnostico, vencimentos, dossie, cfg["data_corte"])
-    confianca = riscos.confianca(resumo_dos, resultado["riscos"])
+    confianca = riscos.confianca(resumo_dos, resultado["riscos"], cobertura)
 
     ficha = produtos.ficha_contratos(eventos)
-    corpo = "\n\n".join([documentos.em_uma_pagina(resultado), documentos.markdown_diagnostico(diagnostico, ficha),
-                          documentos.markdown_riscos(resultado)])
+    corpo = "\n\n".join([documentos.em_uma_pagina(resultado, cobertura), documentos.markdown_diagnostico(diagnostico, ficha),
+                          checklist.markdown(cobertura), documentos.markdown_riscos(resultado)])
     base = "\n".join([pesquisa.texto_dossie(dossie), relatorio, material])
     numeros = verificacao.verificar_numeros(corpo, base)
     progresso("Revisando a neutralidade...")
@@ -104,15 +109,16 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     uso_total = list(dossie.get("uso") or []) + uso
     custo, parcial = modelo.custo_estimado(uso_total)
     versao_prompt = hashlib.md5((pesquisa.PROMPT_PESQUISA + conf.PROMPT_CONFRONTO + produtos.PROMPT_CALENDARIO
-                                 + produtos.PROMPT_DIAGNOSTICO_ORGAO + riscos.PROMPT_ANALISE + riscos.PROMPT_AGENTE
-                                 + riscos.PROMPT_CONSOLIDACAO).encode()).hexdigest()[:8]
+                                 + produtos.PROMPT_DIAGNOSTICO_ORGAO + checklist.PROMPT_CHECKLIST + riscos.PROMPT_ANALISE
+                                 + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO).encode()).hexdigest()[:8]
     registro_id = f"{versao_prompt}-{hashlib.md5((material + relatorio).encode()).hexdigest()[:8]}"
-    modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal}
+    modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal,
+               "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes))}
     texto_doc = documentos.documento_secretaria(
-        resultado, diagnostico, ficha, eventos, dossie, confronto, resumo_dos,
+        resultado, diagnostico, ficha, eventos, dossie, confronto, resumo_dos, checklist.markdown(cobertura),
         documentos.markdown_metodo(registro_id, modelos, resumo_dos, confianca, numeros, neutralidade, revisoes,
                                    resultado),
-        documentos.sobre_o_documento(cfg["data_corte"], confianca))
+        documentos.sobre_o_documento(cfg["data_corte"], confianca), cobertura=cobertura)
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
             "assunto": nome, "tipo": "Diagnóstico, riscos e decisões urgentes da transição",
             "data": documentos._data_extenso(date.today()),
@@ -124,7 +130,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
         "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "confronto": confronto, "diagnostico": diagnostico,
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
-        "riscos": para_json(resultado), "documento_md": texto_doc,
+        "riscos": para_json(resultado), "checklist": cobertura, "documento_md": texto_doc,
         "verificacao": {"numeros": numeros, "problemas": problemas, "neutralidade": neutralidade,
                         "confianca": confianca},
         "uso_tokens": uso_total, "custo_estimado_usd": round(custo, 4), "custo_parcial": parcial,
@@ -138,13 +144,14 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
             "conferidos": resumo_dos["conferidos"], "n_riscos": len(resultado["riscos"]),
             "riscos_maxima_alta": sum(r["prioridade"] in ("Máxima", "Alta") for r in resultado["riscos"]),
             "agentes": sum(not r.get("erro") for r in revisoes),
+            "nao_procurados": len(checklist.resumo(cobertura)["nao_procurados"]),
             "observacao": "; ".join([a.replace("⚠️ ", "") for a in avisos if "cortado" in a] + problemas)[:300]}
 
 
 # --- VÁRIOS ÓRGÃOS ------------------------------------------------------------------------
 
 COLUNAS_RESUMO = ["orgao", "situacao", "dossie", "itens_dossie", "conferidos", "riscos", "riscos_maxima_alta",
-                  "agentes", "datas_calendario", "confianca",
+                  "agentes", "datas_calendario", "nao_procurados", "confianca",
                   "custo_usd", "minutos", "observacao"]
 
 
@@ -166,6 +173,56 @@ def _gravar_resumo(saida, linhas, custo_estado):
         "Documentos gerados com apoio de IA, sem revisão da equipe: confira antes de usar.\n", encoding="utf-8")
 
 
+# --- RETOMADA DO DISCO ---------------------------------------------------------------------
+# Cada órgão concluído deixa em auditoria/<pasta>_resultado.json o que o lote precisa dele (linha do resumo, eventos,
+# riscos, situação). Se a análise cair no meio (reinício do app, queda de rede), rodar de novo na mesma pasta pula os
+# órgãos prontos e só refaz o que faltou; o painel e o calendário são remontados com todos.
+
+def _para_json(obj):
+    if isinstance(obj, date):
+        return {"__data__": obj.isoformat()}
+    raise TypeError(f"não sei gravar {type(obj).__name__}")
+
+
+def _de_json(d):
+    if "__data__" in d and len(d) == 1:
+        return date.fromisoformat(d["__data__"])
+    return d
+
+
+def gravar_resultado(saida, pasta, linha, r):
+    (Path(saida) / "auditoria" / f"{pasta}_resultado.json").write_text(json.dumps(
+        {"versao": VERSAO, "linha": linha, "eventos": r["eventos"], "descartados": r["descartados"],
+         "riscos": r["riscos"], "situacao": r["situacao"]}, ensure_ascii=False, default=_para_json), encoding="utf-8")
+
+
+def resultado_pronto(saida, pasta):
+    """O resultado gravado de um órgão já concluído nesta pasta, ou None. Exige o documento junto."""
+    saida = Path(saida)
+    caminho = saida / "auditoria" / f"{pasta}_resultado.json"
+    if not caminho.exists() or not (saida / "documentos" / f"{pasta}.docx").exists():
+        return None
+    try:
+        dados = json.loads(caminho.read_text(encoding="utf-8"), object_hook=_de_json)
+    except (OSError, ValueError):
+        return None
+    if dados.get("versao") != VERSAO or dados.get("linha", {}).get("situacao") != "concluído":
+        return None
+    return dados
+
+
+def prontos(saida):
+    """Os órgãos já concluídos numa pasta de saída (nome -> pasta), para a tela dizer o que vai ser pulado."""
+    saida = Path(saida)
+    nomes = {}
+    for caminho in sorted((saida / "auditoria").glob("*_resultado.json")) if (saida / "auditoria").exists() else []:
+        pasta = caminho.name[:-len("_resultado.json")]
+        dados = resultado_pronto(saida, pasta)
+        if dados:
+            nomes[dados["linha"]["orgao"]] = pasta
+    return nomes
+
+
 def _gravar_calendario(saida, todos_eventos, todos_descartados, data_corte):
     if todos_eventos:
         (saida / "calendario_consolidado.xlsx").write_bytes(documentos.calendario_xlsx(
@@ -173,10 +230,12 @@ def _gravar_calendario(saida, todos_eventos, todos_descartados, data_corte):
 
 
 def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, paralelos=40, prazo_minutos=23 * 60,
-                 log=print):
+                 log=print, retomar=True):
     """Analisa os órgãos e grava os resultados em `saida`. orgaos: lista de {"nome", "texto"} ou {"nome", "ler"}
     (ler() devolve o texto e o manifesto do que foi lido; ver entrada.orgaos_do_envio).
-    No modo econômico, os órgãos rodam em paralelo e as chamadas à Anthropic vão pela Batch API (metade do preço)."""
+    No modo econômico, os órgãos rodam em paralelo e as chamadas à Anthropic vão pela Batch API (metade do preço).
+    Com retomar, um órgão já concluído na mesma pasta de saída (auditoria/<pasta>_resultado.json e o documento) não é
+    analisado de novo: o lote reaproveita o resultado e só refaz o que faltou."""
     global JUNTAS
     saida = Path(saida)
     (saida / "documentos").mkdir(parents=True, exist_ok=True)
@@ -209,6 +268,17 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
             linha = {c: "" for c in COLUNAS_RESUMO}
             linha.update(orgao=nome, situacao="erro", custo_usd=0.0)
             pasta = pastas[k - 1]
+            pronto = resultado_pronto(saida, pasta) if retomar else None
+            if pronto and pronto["linha"].get("orgao") == nome:
+                linha = pronto["linha"]
+                with trava:
+                    eventos[k], descartados[k] = pronto["eventos"], pronto["descartados"]
+                    todos_riscos[k], situacoes[k] = pronto["riscos"], (nome, pronto["situacao"])
+                    linhas[k] = linha
+                    _gravar_resumo(saida, [linhas[i] for i in sorted(linhas)], custo_estado)
+                log(f"[{k}/{len(orgaos)}] {nome}: já estava pronto nesta pasta, reaproveitado")
+                modelo.usar_completion(None)
+                return linha
             log(f"[{k}/{len(orgaos)}] {nome}: começando")
             try:
                 texto = orgao.get("texto", "")
@@ -229,11 +299,13 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                     json.dumps(r["registro"], ensure_ascii=False, indent=2, default=str), encoding="utf-8")
                 linha.update(situacao="concluído", dossie=r["dossie"], itens_dossie=r["itens_dossie"], conferidos=r["conferidos"],
                              riscos=r["n_riscos"], riscos_maxima_alta=r["riscos_maxima_alta"], agentes=r["agentes"],
-                             datas_calendario=len(r["eventos"]), confianca=r["confianca"],
+                             datas_calendario=len(r["eventos"]), nao_procurados=r["nao_procurados"],
+                             confianca=r["confianca"],
                              custo_usd=round(r["custo"], 3), observacao=r["observacao"])
                 with trava:
                     eventos[k], descartados[k] = r["eventos"], r["descartados"]
                     todos_riscos[k], situacoes[k] = r["riscos"], (nome, r["situacao"])
+                gravar_resultado(saida, pasta, dict(linha, minutos=round((time.time() - inicio) / 60, 1)), r)
             except Exception as e:
                 linha["observacao"] = f"{type(e).__name__}: {e}"[:300]
                 custo, _ = modelo.custo_estimado(modelo.uso_do_fio())
@@ -290,10 +362,12 @@ def _pastas_unicas(nomes):
     return pastas
 
 
-def zipar(pasta):
+def zipar(pasta, ignorar=()):
+    """O .zip da pasta de saída. ignorar: nomes (na raiz da pasta) que ficam de fora, como a entrada gravada."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
         for arquivo in sorted(Path(pasta).rglob("*")):
-            if arquivo.is_file():
-                z.write(arquivo, arquivo.relative_to(pasta))
+            relativo = arquivo.relative_to(pasta)
+            if arquivo.is_file() and relativo.parts[0] not in ignorar:
+                z.write(arquivo, relativo)
     return buffer.getvalue()

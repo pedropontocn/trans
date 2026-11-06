@@ -86,7 +86,7 @@ Regras:
 - Em "nao_encontrado", liste por bloco o que você procurou e não achou em fonte confiável. Isso é tão importante
   quanto o que achou: evita pedir ao decisor um dado que já é público, ou tratar como público o que não é.
 - No máximo 6 itens por bloco.
-
+<<<OBRIGATORIOS>>>
 Responda SOMENTE com JSON entre [INÍCIO DO JSON] e [FIM DO JSON]:
 {"itens": [{"bloco": "...", "afirmacao": "...", "fonte": "documento e órgão emissor", "data_fonte": "...",
 "url": "https://...", "trecho": "...", "tipo_fonte": "...", "confianca": "alta|media|baixa"}],
@@ -290,6 +290,18 @@ GRUPOS_PESQUISA = [
 ]
 
 
+def _pontos_obrigatorios(blocos):
+    """Os pontos do checklist obrigatório que caem nos blocos deste grupo: a pesquisa precisa procurar cada um e,
+    se não achar, registrar em nao_encontrado com o id. É isso que separa "procurado" de "não procurado"."""
+    from .checklist import PERGUNTAS
+    pontos = [(cid, pergunta, onde) for cid, _, pergunta, blocos_p, onde in PERGUNTAS if set(blocos_p) & set(blocos)]
+    if not pontos:
+        return ""
+    return ("- PONTOS OBRIGATÓRIOS destes blocos. Procure cada um; o que não achar em fonte confiável entra em "
+            "\"nao_encontrado\" com o id no início de \"procurado\" (ex.: \"C4: restos a pagar ...\"):\n"
+            + "\n".join(f"  - {cid}: {pergunta} (procurar em {onde})" for cid, pergunta, onde in pontos))
+
+
 SEM_JSON = "a resposta não trouxe o JSON do dossiê"
 
 
@@ -321,7 +333,8 @@ def pesquisar_grupo(modelo, camada, blocos, orgao, data_corte, foco=""):
         alvo += f"\nFoco indicado pela equipe (use para priorizar a busca, não como fato): {foco}"
     prompt = (PROMPT_PESQUISA.replace("<<<CAMADA>>>", "Estado" if camada == "estado" else "órgão")
               .replace("<<<DATA>>>", data_corte).replace("<<<ALVO>>>", alvo)
-              .replace("<<<BLOCOS>>>", "\n".join(f"- {b}: {descricoes[b]}" for b in blocos)))
+              .replace("<<<BLOCOS>>>", "\n".join(f"- {b}: {descricoes[b]}" for b in blocos))
+              .replace("<<<OBRIGATORIOS>>>", _pontos_obrigatorios(blocos) if camada == "orgao" else ""))
     uso, diag = [], {"camada": camada, "blocos": blocos, "erro": None, "motivo": None, "continuacao": False,
                      "itens": 0, "resposta": ""}
     mensagens = [{"role": "user", "content": prompt}]

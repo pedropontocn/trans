@@ -9,8 +9,9 @@ A senha de acesso (APP_SENHA=...) fica no mesmo lugar; sem ela, o app abre para 
 import csv
 import hashlib
 import hmac
+import json
 import os
-import tempfile
+import shutil
 import threading
 import zipfile
 from datetime import date, datetime
@@ -31,6 +32,12 @@ CUSTO_POR_ORGAO = {True: (0.7, 1.2), False: (1.3, 2.2)}
 PESO_COM_PESQUISA = 1.5
 
 
+# Cada análise grava numa pasta própria em registros/ (fora do Git). O que foi enviado e escolhido fica em
+# entrada.json e entrada/, e cada órgão concluído deixa seu resultado: se o app reiniciar no meio, a tela oferece
+# retomar e só o que faltou é analisado de novo.
+REGISTROS = Path(os.getenv("PASTA_REGISTROS") or "registros")
+
+
 @st.cache_resource(show_spinner=False)
 def _trabalhos():
     """A análise roda num fio à parte e fica na memória do app (todas as abas veem) até ele reiniciar."""
@@ -42,28 +49,104 @@ def trabalho_atual():
     return t[max(t)] if t else None
 
 
-def iniciar(orgaos, cfg, economico):
+def montar_orgaos(enviados, dossies_enviados, cada_pasta):
+    """Lê os envios (lista de (nome, bytes)) e devolve a lista de órgãos da tabela e os dossiês por rótulo."""
+    orgaos_lidos = entrada.orgaos_do_envio(enviados, cada_pasta)
+    todos_dossies = entrada.dossies_do_envio(dossies_enviados)
+    dossies = {d["orgao"]: d for d in todos_dossies}
+    sobrando = entrada.casar_dossies(orgaos_lidos, todos_dossies)
+    # secretaria com dossiê e sem documento enviado: pode ser analisada só com o dossiê (desmarcada)
+    return orgaos_lidos + entrada.orgaos_so_com_dossie(sobrando), dossies
+
+
+def aplicar_escolhas(orgaos, dossies, escolhas):
+    """escolhas: [{"indice", "nome", "dossie"}] da tabela. Devolve os órgãos a analisar, com o dossiê escolhido."""
+    escolhidos = []
+    for e in escolhas:
+        o = orgaos[e["indice"]]
+        escolhido = dict(o, nome=e["nome"] or o["nome"])
+        if e.get("dossie") in dossies:
+            escolhido["ler_dossie"] = entrada.ler_dossie_de(dossies[e["dossie"]])
+        else:
+            escolhido.pop("ler_dossie", None)
+        escolhidos.append(escolhido)
+    return escolhidos
+
+
+def guardar_entrada(saida, enviados, dossies_enviados, cada_pasta, escolhas, cfg, economico):
+    """Grava o que foi enviado e escolhido, para a análise poder ser retomada depois de um reinício."""
+    for sub, arquivos in (("arquivos", enviados), ("dossies", dossies_enviados)):
+        pasta = saida / "entrada" / sub
+        pasta.mkdir(parents=True, exist_ok=True)
+        for k, (nome, dados) in enumerate(arquivos):
+            (pasta / f"{k:03d}_{Path(nome).name}").write_bytes(dados)
+    (saida / "entrada.json").write_text(json.dumps(
+        {"inicio": datetime.now().isoformat(timespec="seconds"), "cada_pasta": cada_pasta, "escolhas": escolhas,
+         "cfg": cfg, "economico": economico, "total": len(escolhas)}, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def ler_entrada(saida):
+    """O que foi gravado por guardar_entrada, ou None se a pasta não tiver uma entrada completa."""
+    try:
+        dados = json.loads((saida / "entrada.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    envios = {}
+    for sub in ("arquivos", "dossies"):
+        pasta = saida / "entrada" / sub
+        envios[sub] = [(a.name[4:], a.read_bytes()) for a in sorted(pasta.iterdir())] if pasta.exists() else []
+    return {**dados, **envios}
+
+
+def interrompida():
+    """A pasta da análise mais recente que ficou sem terminar (tem entrada e não tem o .zip), ou None."""
+    if not REGISTROS.exists():
+        return None
+    for pasta in sorted(REGISTROS.glob("analise_*"), reverse=True):
+        if (pasta / "entrada.json").exists() and not (pasta / "resultados.zip").exists():
+            return pasta
+        if (pasta / "resultados.zip").exists():
+            return None                           # a mais recente terminou: nada a retomar
+    return None
+
+
+def iniciar(orgaos, cfg, economico, saida=None):
     atual = trabalho_atual()
     if atual and atual["situacao"] == "rodando":
         raise RuntimeError("já há uma análise em andamento")
-    trabalho = {"id": datetime.now().strftime("%Y%m%d%H%M%S%f"), "situacao": "rodando", "inicio": datetime.now(),
-                "fim": None, "log": [], "total": len(orgaos), "economico": economico, "zip": None, "erro": None,
-                "saida": Path(tempfile.mkdtemp(prefix="analise_"))}
+    ident = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    saida = saida or REGISTROS / f"analise_{ident}"
+    saida.mkdir(parents=True, exist_ok=True)
+    trabalho = {"id": ident, "situacao": "rodando", "inicio": datetime.now(), "fim": None, "log": [],
+                "total": len(orgaos), "economico": economico, "zip": None, "erro": None, "saida": saida,
+                "ja_prontos": len(analise.prontos(saida))}
     _trabalhos()[trabalho["id"]] = trabalho
     threading.Thread(target=_executar, args=(trabalho, orgaos, dict(cfg), economico), daemon=True).start()
+    return trabalho
 
 
 def _executar(trabalho, orgaos, cfg, economico):
     log = lambda linha: trabalho["log"].append(f"{datetime.now():%H:%M:%S} {linha}") if len(trabalho["log"]) < 5000 else None
     try:
         analise.rodar_orgaos(orgaos, cfg, trabalho["saida"], economico=economico, log=log)
-        trabalho["zip"] = analise.zipar(trabalho["saida"])
+        trabalho["zip"] = analise.zipar(trabalho["saida"], ignorar=("entrada", "entrada.json", "resultados.zip"))
+        (Path(trabalho["saida"]) / "resultados.zip").write_bytes(trabalho["zip"])
         trabalho["situacao"] = "concluído"
     except Exception as e:
         trabalho["erro"] = f"{type(e).__name__}: {e}"[:500]
         trabalho["situacao"] = "erro"
     finally:
         trabalho["fim"] = datetime.now()
+
+
+def retomar(saida):
+    """Remonta os órgãos a partir do que foi gravado e continua a análise na mesma pasta."""
+    dados = ler_entrada(saida)
+    if not dados:
+        raise RuntimeError("a entrada gravada desta análise não pôde ser lida")
+    orgaos, dossies = montar_orgaos(dados["arquivos"], dados["dossies"], dados["cada_pasta"])
+    escolhidos = aplicar_escolhas(orgaos, dossies, dados["escolhas"])
+    return iniciar(escolhidos, dados["cfg"], dados["economico"], saida=saida)
 
 
 def linhas(trabalho):
@@ -115,6 +198,12 @@ with st.sidebar:
                                    help="Diagnóstico, calendário, confronto com o relatório e revisão de neutralidade.")
     modelo_debate = st.selectbox("Riscos e agentes", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"),
                                  help="Escreve a análise de riscos, faz os cinco agentes revisores e a consolidação.")
+    modelos_agentes = st.text_input(
+        "Modelos dos agentes revisores (opcional)", value="",
+        placeholder="ex.: anthropic/claude-opus-5-5, gemini/gemini-2.5-pro, openai/gpt-5",
+        help="Nomes de modelos (LiteLLM) separados por vírgula, que se revezam entre os cinco agentes. Vazio: todos "
+             "usam o modelo de riscos. Modelos de outros provedores precisam da chave deles nos Secrets "
+             "(GEMINI_API_KEY, OPENAI_API_KEY) e não entram na estimativa de custo.")
     economico = st.checkbox("Modo econômico (Batch API)", value=True,
                             help="Metade do preço dos tokens. Cada etapa espera a fila da Anthropic: o total leva de "
                                  "uma a algumas horas, com todos os órgãos em paralelo.")
@@ -129,6 +218,24 @@ with st.sidebar:
 
 trabalho = trabalho_atual()
 
+if not trabalho and (pendente := interrompida()):
+    dados = ler_entrada(pendente) or {}
+    feitos = len(analise.prontos(pendente))
+    st.warning(f"⚠️ A análise iniciada em {dados.get('inicio', '?')[:16].replace('T', ' ')} foi interrompida (o app "
+               f"reiniciou): {feitos} de {dados.get('total', '?')} secretaria(s) já estavam prontas. "
+               "Retomar continua só o que faltou, na mesma pasta.")
+    col1, col2 = st.columns(2)
+    if col1.button("▶️ Retomar a análise interrompida", type="primary", width="stretch"):
+        try:
+            retomar(pendente)
+            st.rerun()
+        except Exception as e:
+            st.error(f"Não foi possível retomar: {type(e).__name__}: {e}")
+    if col2.button("Descartar e começar outra", width="stretch"):
+        shutil.rmtree(pendente, ignore_errors=True)
+        st.rerun()
+    st.stop()
+
 
 @st.fragment(run_every=15)
 def andamento():
@@ -139,8 +246,9 @@ def andamento():
     minutos = ((t["fim"] or datetime.now()) - t["inicio"]).total_seconds() / 60
     if t["situacao"] == "rodando":
         st.info(f"⏳ Analisando {t['total']} secretaria(s)" + (" no modo econômico" if t["economico"] else "")
+                + (f" (retomada: {t['ja_prontos']} já estavam prontas)" if t.get("ja_prontos") else "")
                 + f": {len(feitas)} pronto(s), {minutos:.0f} min até agora. Pode fechar a página: a análise continua. "
-                  "Não reinicie o app nem faça merge no GitHub até terminar.")
+                  "Se o app reiniciar, a tela oferece retomar do ponto em que parou.")
         st.progress(len(feitas) / max(t["total"], 1))
     elif t["situacao"] == "concluído":
         ok = sum(l.get("situacao") == "concluído" for l in feitas)
@@ -193,12 +301,9 @@ if not trabalho or trabalho["situacao"] != "rodando":
                                      + str(cada_pasta).encode()).hexdigest()
             if st.session_state.get("lidos") != assinatura:
                 try:
-                    orgaos_lidos = entrada.orgaos_do_envio([(a.name, a.getvalue()) for a in enviados], cada_pasta)
-                    todos_dossies = entrada.dossies_do_envio([(a.name, a.getvalue()) for a in dossies_enviados])
-                    st.session_state["dossies"] = {d["orgao"]: d for d in todos_dossies}
-                    sobrando = entrada.casar_dossies(orgaos_lidos, todos_dossies)
-                    # secretaria com dossiê e sem documento enviado: pode ser analisada só com o dossiê (desmarcada)
-                    st.session_state["orgaos"] = orgaos_lidos + entrada.orgaos_so_com_dossie(sobrando)
+                    st.session_state["orgaos"], st.session_state["dossies"] = montar_orgaos(
+                        [(a.name, a.getvalue()) for a in enviados], [(a.name, a.getvalue()) for a in dossies_enviados],
+                        cada_pasta)
                 except zipfile.BadZipFile as e:
                     st.session_state["orgaos"] = []
                     st.error(f"Não foi possível abrir o .zip: {e}")
@@ -226,16 +331,9 @@ if not trabalho or trabalho["situacao"] != "rodando":
                                        "Dossiê (escolha se não casou)", options=[SEM_DOSSIE] + list(dossies),
                                        required=True)})
                 registros = tabela.to_dict("records") if hasattr(tabela, "to_dict") else list(tabela)
-                escolhidos = []
-                for o, r in zip(orgaos, registros):
-                    if not r.get("analisar"):
-                        continue
-                    escolhido = dict(o, nome=str(r["orgao"]).strip() or o["nome"])
-                    if r.get("dossie") in dossies:                  # o dossiê escolhido na tabela vale
-                        escolhido["ler_dossie"] = entrada.ler_dossie_de(dossies[r["dossie"]])
-                    else:
-                        escolhido.pop("ler_dossie", None)
-                    escolhidos.append(escolhido)
+                escolhas = [{"indice": i, "nome": str(r["orgao"]).strip(), "dossie": r.get("dossie")}
+                            for i, r in enumerate(registros) if r.get("analisar")]
+                escolhidos = aplicar_escolhas(orgaos, dossies, escolhas)   # o dossiê escolhido na tabela vale
                 faixa = CUSTO_POR_ORGAO[economico]
                 peso = sum(1 if o.get("ler_dossie") else PESO_COM_PESQUISA for o in escolhidos)
                 st.caption(f"Estimativa: US$ {faixa[0] * peso:.0f} a {faixa[1] * peso:.0f} para "
@@ -243,10 +341,16 @@ if not trabalho or trabalho["situacao"] != "rodando":
                 if st.button(f"▶️ Analisar {len(escolhidos)} secretaria(s)", type="primary", width="stretch",
                              disabled=not escolhidos):
                     cfg = {"modelo_pesquisa": modelo_pesquisa, "modelo_auxiliar": modelo_auxiliar, "modelo": modelo_debate,
+                           "modelos_agentes": [m.strip() for m in modelos_agentes.split(",") if m.strip()],
                            "data_corte": data_corte.strftime("%d/%m/%Y"),
                            "foco": foco.strip(), "orgao_emissor": orgao_emissor, "unidade": unidade, "para": para}
                     try:
-                        iniciar(escolhidos, cfg, economico)
+                        saida = REGISTROS / f"analise_{datetime.now():%Y%m%d%H%M%S%f}"
+                        saida.mkdir(parents=True, exist_ok=True)
+                        guardar_entrada(saida, [(a.name, a.getvalue()) for a in enviados],
+                                        [(a.name, a.getvalue()) for a in dossies_enviados], cada_pasta, escolhas, cfg,
+                                        economico)
+                        iniciar(escolhidos, cfg, economico, saida=saida)
                         st.rerun()
                     except RuntimeError as e:
                         st.error(str(e))

@@ -173,6 +173,9 @@ class LLMFalso:
                                  {"trecho": "Retomar as licitações agora ou esperar", "por_que": "soa como ordem"},
                                  {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
         self.falhar_neutralidade = False
+        self.checklist = {"respostas": [
+            {"id": "C3", "resposta": "LOA 2026 de R$ 412 milhões.", "itens": ["O1"], "trechos": []},
+            {"id": "C5", "resposta": "O TCE-RJ apontou atraso na prestação de contas de convênios.", "itens": ["O4"]}]}
         self.texto_relatorio = RELATORIO           # o que o MarkItDown falso devolve
 
     def _resp(self, conteudo="", nome=None, args=None, motivo="stop", entrada=10000, saida=2000, buscas=None):
@@ -214,6 +217,9 @@ class LLMFalso:
         if "Você escreve o DIAGNÓSTICO" in contexto:
             self.mensagem_diagnostico_orgao = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.diagnostico_orgao) + "[FIM DO JSON]")
+        if "Você responde ao CHECKLIST obrigatório" in contexto:
+            self.mensagem_checklist = ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.checklist) + "[FIM DO JSON]")
         if "Você monta o calendário de vencimentos críticos" in contexto:
             self.mensagem_calendario = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.calendario) + "[FIM DO JSON]")
@@ -309,7 +315,7 @@ def llm(monkeypatch):
     return falso
 
 
-MODULOS = ["config", "modelo", "entrada", "pesquisa", "verificacao", "confronto", "produtos", "riscos", "documentos",
+MODULOS = ["config", "modelo", "entrada", "pesquisa", "verificacao", "confronto", "produtos", "checklist", "riscos", "documentos",
            "painel", "analise"]
 
 

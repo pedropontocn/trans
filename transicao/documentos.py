@@ -247,7 +247,8 @@ def _desenhar_tabela(alvo, linhas):
     for c in range(ncol):
         textos = [len(l[c]) if c < len(l) else 0 for l in linhas]
         cabecalho_len = len(linhas[0][c]) if c < len(linhas[0]) else 0
-        medias.append(max(12, cabecalho_len + 2, min(60, sum(textos) / len(textos))))
+        curta = all(len(l[c]) <= 4 for l in linhas[1:] if c < len(l))      # coluna de ids (C1, R2...): estreita
+        medias.append(max(5 if curta else 12, cabecalho_len + 2, min(60, sum(textos) / len(textos))))
     total = sum(medias)
     larguras = [Cm(17 * m / total) for m in medias]
     tabela.autofit = False
@@ -639,9 +640,13 @@ def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
     return "\n".join(linhas)
 
 
-def em_uma_pagina(resultado):
-    """A abertura: situação, os três riscos mais urgentes e as decisões em aberto, em uma página."""
+def em_uma_pagina(resultado, cobertura=None):
+    """A abertura: situação, os três riscos mais urgentes, as decisões em aberto e as lacunas, em uma página."""
+    from .checklist import linha_essencial
     linhas = ["## O essencial"] + [f"- {x}" for x in resultado.get("situacao") or []]
+    lacunas = linha_essencial(cobertura) if cobertura else ""
+    if lacunas:
+        linhas.append(f"- {lacunas}")
     riscos = resultado.get("riscos") or []
     if riscos:
         linhas.append("## Os riscos mais urgentes")
@@ -676,8 +681,12 @@ def markdown_metodo(registro_id, modelos, resumo_dossie, confianca, numeros, neu
                       f"ou do SIGA/PNCP; {resumo_dossie['nao_encontrado']} assunto(s) procurado(s) sem fonte.")
     opinaram = [r["papel"] for r in revisoes or [] if not r.get("erro")]
     falharam = [r["papel"] for r in revisoes or [] if r.get("erro")]
+    usados = sorted({r.get("modelo") for r in revisoes or [] if r.get("modelo")})
     linhas.append(f"- **Agentes que revisaram:** {len(opinaram)} de {len(revisoes or [])}"
-                  + (f" (sem resposta: {', '.join(falharam)})" if falharam else "") + ".")
+                  + (f" (sem resposta: {', '.join(falharam)})" if falharam else "")
+                  + (f". Modelos dos agentes: {', '.join(usados)}" + (" (provedores diferentes: os pontos cegos de um "
+                     "modelo não se repetem nos cinco)" if len({m.split('/')[0] for m in usados}) > 1 else "")
+                     if usados else "") + ".")
     invalidos = sorted({f for r in resultado.get("riscos") or [] for f in r.get("fatos_invalidos") or []})
     if invalidos:
         linhas.append(f"- **Referências citadas que não existem no material (ignoradas):** {', '.join(invalidos)}.")
@@ -698,13 +707,16 @@ def _papeis():
     return PAPEIS
 
 
-def documento_secretaria(resultado, diag, ficha, eventos, dossie, confronto, resumo_dossie, metodo_md, sobre_md):
-    """O documento de cada secretaria, em Markdown: abertura em uma página, diagnóstico, riscos e decisões, anexos."""
+def documento_secretaria(resultado, diag, ficha, eventos, dossie, confronto, resumo_dossie, cobertura_md, metodo_md,
+                         sobre_md, cobertura=None):
+    """O documento de cada secretaria, em Markdown: abertura em uma página, diagnóstico, cobertura do checklist,
+    riscos e decisões, anexos."""
     venc = markdown_vencimentos(eventos, limite=20)
     venc = ("## Anexo 2 – Vencimentos prioritários\n" + venc.split("\n", 1)[1]) if venc else ""
     cobre_siga = any(e.get("origem", "").startswith("Contratos") for e in eventos or [])
-    partes = [sobre_md, em_uma_pagina(resultado), markdown_diagnostico(diag, ficha, resumo_dossie),
-              markdown_riscos(resultado, cobre_siga=cobre_siga), markdown_fontes(dossie, confronto), venc, metodo_md]
+    partes = [sobre_md, em_uma_pagina(resultado, cobertura), markdown_diagnostico(diag, ficha, resumo_dossie),
+              cobertura_md, markdown_riscos(resultado, cobre_siga=cobre_siga), markdown_fontes(dossie, confronto), venc,
+              metodo_md]
     return "\n\n".join(p for p in partes if p)
 
 

@@ -1,5 +1,5 @@
 """Configuração: modelos, preços e limites."""
-VERSAO = "5.0"
+VERSAO = "5.1"
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
 
 MODELOS = [
@@ -40,6 +40,11 @@ PRECO_BUSCA_ANTHROPIC = 0.01
 
 
 MIN_ITENS_DOSSIE = 5
+
+
+# Modelos de outros provedores para os agentes revisores (nomes do LiteLLM). Cada um precisa da chave do provedor no
+# .env ou nos Secrets (GEMINI_API_KEY, OPENAI_API_KEY...). O custo desses modelos não é estimado (não estão em PRECOS).
+MODELOS_OUTROS_PROVEDORES = ["gemini/gemini-2.5-pro", "openai/gpt-5"]
 
 
 # Sem o modo econômico, quantas secretarias rodam ao mesmo tempo. Cada uma já faz até 8 chamadas em paralelo

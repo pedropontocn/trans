@@ -429,3 +429,40 @@ def test_planilha_excel_entra_como_documento_da_secretaria(llm):
     assert {o["nome"]: sorted(o["arquivos"]) for o in orgaos} == {"SECID": ["SECID.docx", "SECID.xlsx"], "SES": ["SES.xls"]}
     texto, manifesto = orgaos[0]["ler"]()
     assert texto.count("# ARQUIVO:") == 2 and len(manifesto["lidos"]) == 2
+
+
+def test_rodar_de_novo_na_mesma_pasta_pula_os_prontos(llm, tmp_path):
+    import docx
+    from transicao import analise
+    orgaos = [{"nome": n, "texto": RELATORIO} for n in ("Secretaria de Exemplo - SEX", "Secretaria de Ypsilon - SEY")]
+    llm.texto_relatorio = RELATORIO
+    linhas = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=lambda *_: None)
+    assert [l["situacao"] for l in linhas] == ["concluído", "concluído"]
+    assert set(analise.prontos(tmp_path)) == {"Secretaria de Exemplo - SEX", "Secretaria de Ypsilon - SEY"}
+    chamadas_antes = len(llm.chamadas)
+    # simula a queda: o segundo órgão não terminou (sem resultado gravado) e o painel se perdeu
+    (tmp_path / "auditoria" / "secretaria_de_ypsilon_sey_resultado.json").unlink()
+    (tmp_path / "painel_estadual.docx").unlink()
+    registros = []
+    linhas2 = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=registros.append)
+    assert [l["situacao"] for l in linhas2] == ["concluído", "concluído"]
+    assert any("já estava pronto" in r and "SEX" in r for r in registros)
+    pedidos_sex = [c for c in llm.chamadas[chamadas_antes:] if "Secretaria de Exemplo" in str(c["mensagens"])]
+    assert not any("Você é analista de riscos" in str(c["mensagens"][0]["content"]) for c in pedidos_sex)
+    # o painel e o calendário foram remontados com os dois órgãos
+    assert (tmp_path / "painel_estadual.docx").exists()
+    doc = docx.Document(tmp_path / "painel_estadual.docx")
+    texto = "\n".join(p.text for p in doc.paragraphs) + "\n".join(c.text for t in doc.tables for c in t._cells)
+    assert "SEX: Licitações adiadas" in texto and "SEY: Licitações adiadas" in texto
+    import openpyxl
+    planilha = openpyxl.load_workbook(tmp_path / "calendario_consolidado.xlsx")
+    orgaos_na_planilha = {str(c.value) for ws in planilha.worksheets for linha in ws.iter_rows() for c in linha if c.value}
+    assert any("SEX" in v for v in orgaos_na_planilha) and any("SEY" in v for v in orgaos_na_planilha)
+    # sem retomar, refaz tudo; e um resultado de outra versão do app não é reaproveitado
+    linhas3 = analise.rodar_orgaos(orgaos[:1], CFG, tmp_path, log=lambda *_: None, retomar=False)
+    assert linhas3[0]["situacao"] == "concluído" and not any("já estava pronto" in r for r in registros[-1:])
+    import json
+    caminho = tmp_path / "auditoria" / "secretaria_de_exemplo_sex_resultado.json"
+    dados = json.loads(caminho.read_text(encoding="utf-8"))
+    caminho.write_text(json.dumps(dict(dados, versao="0.0")), encoding="utf-8")
+    assert analise.resultado_pronto(tmp_path, "secretaria_de_exemplo_sex") is None
