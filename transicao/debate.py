@@ -92,49 +92,56 @@ Regras de concisão (para caber no limite de tokens; a resposta inteira cabe em 
 
 
 PROMPT_ETAPA_2 = METODOLOGIA + """
-NESTA ETAPA: escreva o memorando para um ALTO GESTOR, que tem poucos minutos para ler. Use o cenário, o Tension Map e
-as divergências entre o que o órgão informou e as fontes, todos fornecidos. Não acrescente dilemas, números ou fatos que
-não estejam nesses insumos. Não recomende um caminho: apresente as opções com o mesmo peso e o que se ganha e se arrisca
-com cada uma. O detalhamento técnico do debate vai num anexo montado à parte; aqui, só o que o gestor precisa.
+NESTA ETAPA: escreva o documento de abertura para o PONTO FOCAL da nova gestão nesta secretaria. É alguém com base
+técnica e pouco tempo, que vai ler para decidir o que tratar primeiro. O foco são os RISCOS e as DECISÕES URGENTES.
+Use os insumos fornecidos: cenário, PONTOS DE URGÊNCIA (já ordenados por código, por prazo e valor), Tension Map e
+divergências entre o que o órgão informou e as fontes. Não acrescente fatos, números, datas ou dilemas que não estejam
+neles.
+
+NÃO RECOMENDE. Não diga qual opção escolher, nem "deve", "é preciso", "recomenda-se", "o ideal é". Descreva o risco, o
+prazo, o que acontece se nada for feito e a decisão que precisa ser tomada, escrita como pergunta. Quando houver
+opções, dê o mesmo peso a cada uma.
 
 LINGUAGEM (obrigatório):
 - Português claro, de gestão pública. Frases de até 25 palavras. Comece cada item pelo que importa.
-- NÃO use estes termos: trade-off, polo, persona, baseline, Tension Map, nível de evidência (nem "Nível 1" a "Nível 5"),
-  autodeclaração, dossiê, divergência epistêmica/normativa/distributiva/causal/temporal/factual, mecanismo causal.
-  Em vez deles: "dilema" ou "decisão"; "opção"; "quem defende"; "se nada for feito"; "a Secretaria informou";
-  "a pesquisa em fontes públicas"; "confirmado"/"não confirmado".
+- NÃO use estes termos: trade-off, polo, persona, baseline, Tension Map, mapa de tensões, nível de evidência (nem
+  "Nível 1" a "Nível 5"), autodeclaração, dossiê, divergência epistêmica/normativa/distributiva/causal/temporal/factual,
+  mecanismo causal. Diga "a Secretaria informou", "a pesquisa em fontes públicas", "confirmado"/"não confirmado".
 - Não cite ids (T1, O12, E3) nem nomes de papéis simulados.
-- Para dizer quão firme é uma informação, use só estes rótulos: "confirmado em fonte oficial", "cálculo ou norma",
-  "só na imprensa", "só informado pelo órgão", "sem comprovação".
-- Valores: arredonde (R$ 2,49 bi, R$ 998 mi). Se fizer uma conta, escreva "(cálculo)" logo depois do número. Os números
-  são conferidos por código. Não crie prazos, datas ou números que não estejam nos insumos.
+- Para dizer quão firme é uma informação, use só: "confirmado em fonte oficial", "dado do SIGA/PNCP", "cálculo ou
+  norma", "só na imprensa", "só informado pelo órgão", "sem comprovação".
+- Valores arredondados (R$ 2,49 bi, R$ 998 mi). Conta feita por você leva "(cálculo)" logo depois. Os números são
+  conferidos por código.
 - Informado x confirmado: nunca diga que o órgão não enviou algo que está no CONTEÚDO DA AUTODECLARAÇÃO. Separe "o órgão
-  não informou" de "o órgão informou, falta confirmar em fonte oficial".
+  não informou" de "o órgão informou, falta confirmar".
 
-TAMANHO: no máximo 650 palavras, com a tabela de riscos.
+TAMANHO: no máximo 700 palavras.
 
 Entregue somente o Markdown abaixo, nesta ordem, sem texto antes ou depois:
 
-# (título: a questão central, com o nome do órgão, em até 14 palavras)
+# (nome do órgão): riscos e decisões urgentes da transição
 ## O essencial
-(3 ou 4 tópicos de uma linha: o que está em jogo, os números que importam e o prazo mais urgente)
-## Decisões a tomar
-(os 3 dilemas principais, escolhidos por maior irreversibilidade e informação mais firme. Um ### por dilema, escrito
-como pergunta direta ao gestor. Embaixo, exatamente estes itens:
-- **Opção 1 – (verbo):** o que significa, em uma frase. Ganha: (quem/o quê). Arrisca: (o quê).
-- **Opção 2 – (verbo):** idem, com o mesmo peso da opção 1.
-- **Quem decide:** (competência) e até quando, se houver prazo nos insumos.
-- **Informação disponível:** um dos rótulos acima e, em meia frase, que dado mudaria a balança.)
-## Antes de decidir, obter
-(até 5 itens numerados: o dado, com quem está e qual decisão ele destrava)
-## Prazos
-(só datas que estão nos insumos, uma por linha; sem datas, omita a seção)
-## Se nada for feito
-(2 ou 3 frases: o que acontece se ninguém decidir, e o risco de decidir rápido demais, com o mesmo peso)
-## Principais riscos
-| Risco | Chance | Impacto | Como reduzir | Responsável |
-|---|---|---|---|---|
-(4 a 6 linhas; Chance e Impacto só com Alta/Média/Baixa ou Alto/Médio/Baixo)
+(3 tópicos de uma linha: o maior risco, o prazo mais próximo e o volume em jogo)
+## Urgências
+(3 a 5 urgências, da mais próxima e de maior impacto para a menos. Parta dos PONTOS DE URGÊNCIA; junte o que for do
+mesmo assunto. Um ### por urgência: "### 1. (o problema, em até 10 palavras) – até (data ou "antes da posse")".
+Embaixo, exatamente estes itens:
+- **Em jogo:** valor, serviço ou obra afetada.
+- **Se nada for feito:** a consequência concreta, com data se houver.
+- **Decisão a tomar:** a pergunta, sem sugerir a resposta. Quem decide.
+- **Base:** um dos rótulos de firmeza acima.)
+## Decisões em aberto
+(os 2 ou 3 dilemas mais difíceis entre os do Tension Map, que não se resolvem só com prazo. Um ### por dilema, como
+pergunta. Embaixo:
+- **Opção 1 – (verbo):** o que significa. Ganha: (quem/o quê). Arrisca: (o quê).
+- **Opção 2 – (verbo):** idem, com o mesmo peso.
+- **O que falta saber:** o dado que mais mudaria a escolha.)
+## Pedir à secretaria
+(até 6 itens numerados: o documento ou dado, e para qual urgência ou decisão ele serve)
+## Outros riscos a acompanhar
+| Risco | Quando | Impacto | Sinal de alerta |
+|---|---|---|---|
+(3 a 5 linhas que não entraram nas urgências; Impacto só Alto/Médio/Baixo)
 """
 
 

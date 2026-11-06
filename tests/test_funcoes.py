@@ -387,7 +387,8 @@ def test_memorando_novo_sem_jargao_no_prompt_e_titulo_no_word(funcoes):
     import io
     import docx
     p = funcoes.PROMPT_ETAPA_2
-    assert "ALTO GESTOR" in p and "## Decisões a tomar" in p and "NÃO use estes termos" in p
+    assert "PONTO FOCAL" in p and "## Urgências" in p and "NÃO RECOMENDE" in p and "NÃO use estes termos" in p
+    assert p.index("## Urgências") < p.index("## Decisões em aberto") < p.index("## Outros riscos")
     memo = ("# Carteira de obras da SECID depende de dados ainda não confirmados\n\n## O essencial\n- ponto\n\n"
             "## Decisões a tomar\n### Prorrogar já?\n- **Opção 1 – Prorrogar:** x.\n\n## Anexo 1 – O debate em detalhe\ntexto")
     doc = docx.Document(io.BytesIO(funcoes.gerar_docx(memo, {"orgao": "Equipe de Transição", "assunto": ""})))
@@ -499,3 +500,21 @@ def test_resposta_cortada_e_repetida_com_mais_espaco(funcoes, llm):
     finally:
         funcoes.usar_completion(None)
     assert pedidos == [8000, 16000]
+
+
+def test_pontos_de_urgencia_ordenados_por_prazo_e_valor(funcoes):
+    from datetime import date
+    def ev(dias, valor, nome):
+        return {"data": date(2026, 11, 6), "dias": dias, "valor": valor, "evento": nome, "objeto": "",
+                "valor_texto": f"R$ {valor}", "origem": "Contratos do Estado (SIGA/PNCP)"}
+    eventos = [ev(60, 300e6, "grande e distante"), ev(10, 1e6, "pequeno e próximo"), ev(20, 50e6, "médio e próximo"),
+               ev(200, 900e6, "fora da janela")]
+    d = dossie_exemplo(funcoes)
+    texto = funcoes.pontos_de_urgencia(eventos, d, {"divergencias": [
+        {"situacao": "contradiz", "o_orgao_declara": "100 obras", "as_fontes_mostram": "80 obras"}]})
+    linhas = texto.splitlines()
+    assert linhas[1].startswith("- 2 vencimento(s) em até 30 dias, somando R$ 51,0 mi")
+    ordem = [l for l in linhas if "dias):" in l]
+    assert ["médio" in ordem[0], "pequeno" in ordem[1], "grande" in ordem[2]] == [True, True, True]
+    assert "fora da janela" not in texto and "Controle/Judiciário" in texto and "80 obras" in texto
+    assert funcoes.pontos_de_urgencia([], {"itens": []}) == ""

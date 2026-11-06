@@ -149,12 +149,14 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     base = "\n".join([pesquisa.texto_dossie(dossie), relatorio, insumos["problema"], insumos["lacunas"]])
     tm, evidencias = verificacao.verificar_evidencias(tm, base, dossie, relatorio)
 
-    progresso("Escrevendo o memorando...")
+    urgencias = produtos.pontos_de_urgencia(calendario.get("eventos") or [], dossie, confronto)
+    progresso("Escrevendo o documento (riscos e decisões urgentes)...")
     cenario_completo = _cenario(insumos, dossie, com_dossie=True)
     memorando, cortado = _memorando(modelo_debate, [
         {"role": "system", "content": debate.PROMPT_ETAPA_2},
         {"role": "user", "content": cenario_completo + "\n\n" + debate.conteudo_autodeclaracao(relatorio)
          + ("\n\n" + txt_confronto if txt_confronto else "")
+         + ("\n\n" + urgencias if urgencias else "")
          + "\n\nTENSION MAP (já verificado):\n" + json.dumps(tm, ensure_ascii=False, indent=2)}])
     if cortado:
         problemas.append("o memorando foi cortado pelo limite de tokens")
@@ -180,7 +182,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
         memorando, diagnostico, eventos, dossie, confronto,
         documentos.anexo_debate(tm, insumos["personas"]), verificacao_md)
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
-            "assunto": nome, "tipo": "Análise de transição", "data": documentos._data_extenso(date.today()),
+            "assunto": nome, "tipo": "Riscos e decisões urgentes da transição", "data": documentos._data_extenso(date.today()),
             "rodape_extra": f"apoio de IA, processamento automático, reg. {registro_id}"}
     registro = {
         "id": registro_id, "orgao": nome, "gerado_em": datetime.now().isoformat(timespec="seconds"),

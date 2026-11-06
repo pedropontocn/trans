@@ -190,6 +190,33 @@ def juntar_eventos(dos_contratos, extraidos):
     return sorted(dos_contratos + resto, key=lambda x: (x["data"], -(x["valor"] or 0)))
 
 
+def pontos_de_urgencia(eventos, dossie, confronto=None, limite=10):
+    """O que é urgente, ordenado por código (prazo e valor), para o documento começar pelos riscos certos.
+    Junta os vencimentos do calendário, as decisões de controle e as contradições entre o órgão e as fontes."""
+    linhas = []
+    proximos = [e for e in eventos or [] if -30 <= e["dias"] <= 90]
+    for janela, ate in (("até 30 dias", 30), ("de 31 a 90 dias", 90)):
+        grupo = [e for e in proximos if (e["dias"] <= 30) == (ate == 30)]
+        if grupo:
+            total = sum(e.get("valor") or 0 for e in grupo)
+            mi = f"{total / 1e6:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            linhas.append(f"- {len(grupo)} vencimento(s) em {janela}" + (f", somando R$ {mi} mi" if total else "") + ".")
+    peso = lambda e: ((e["dias"] > 30), -(e.get("valor") or 0))          # primeiro os de 30 dias, depois o valor
+    for e in sorted(proximos, key=peso)[:limite]:
+        linhas.append(f"- {e['data']:%d/%m/%Y} ({e['dias']} dias): {e['evento']}"
+                      + (f" – {e['objeto'][:120]}" if e.get("objeto") else "")
+                      + (f" – {e['valor_texto']}" if e.get("valor_texto") else "") + f" [{e['origem']}]")
+    controle = [i for i in itens_incluidos(dossie) if i.get("bloco") == "controle_judicializacao" and i.get("camada") == "orgao"]
+    controle.sort(key=lambda i: i.get("checagem") != "conferido")
+    for i in controle[:4]:
+        linhas.append(f"- Controle/Judiciário: {i['afirmacao'][:220]}")
+    for d in ((confronto or {}).get("divergencias") or [])[:3]:
+        if d.get("situacao") == "contradiz":
+            linhas.append(f"- O órgão informa \"{d.get('o_orgao_declara', '')[:120]}\", mas as fontes mostram "
+                          f"\"{d.get('as_fontes_mostram', '')[:120]}\".")
+    return ("PONTOS DE URGÊNCIA (ordenados por código: prazo e valor):\n" + "\n".join(linhas)) if linhas else ""
+
+
 SECOES_DIAGNOSTICO = ["Missão e competências", "Como o órgão se organiza hoje", "Pessoas", "Orçamento e execução",
                       "Contratos, convênios e obras", "Controle, passivos e judicialização", "Pontos críticos"]
 

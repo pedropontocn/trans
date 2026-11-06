@@ -619,7 +619,8 @@ def sobre_o_documento(resumo, data_corte, confianca):
             "Apoio à decisão gerado com IA a partir de pesquisa em fontes públicas"
             f" (data de corte: {data_corte or 'não informada'}) e do que o órgão informou. Não recomenda decisões. "
             f"Confiança da análise: {confianca['nivel']}. Gerado em processamento automático, sem revisão da equipe. "
-            "Diagnóstico, fontes, debate e verificação vêm depois das decisões.")
+            "As urgências seguem a ordem de prazo e valor calculada a partir dos dados; diagnóstico, fontes e "
+            "verificação vêm depois.")
 
 
 def inserir_sobre_documento(memorando, quadro):
