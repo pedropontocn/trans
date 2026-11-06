@@ -154,11 +154,11 @@ if not trabalho or trabalho["situacao"] != "rodando":
                         help="Resumos: o nome do órgão vem do nome do arquivo. Documentos brutos: suba o .zip da pasta "
                              "que tem uma subpasta por órgão; o app lê os Word, PDF e planilhas de cada uma.")
         dossies_enviados = st.file_uploader(
-            "Dossiês das secretarias (opcional: .zip, Word, PDF ou Markdown)", type=["zip", "docx", "pdf", "md", "txt"],
+            "Dossiês das secretarias (opcional: o .zip da equipe, ou Word, PDF e Markdown)", type=["zip", "docx", "pdf", "md", "txt"],
             accept_multiple_files=True,
-            help="Um arquivo por secretaria, com o nome dela no nome do arquivo. Para o órgão que tiver dossiê, o app não "
-                 "pesquisa a web: usa o dossiê e confere cada link e trecho. Cada fato precisa de Afirmação, Fonte, Link "
-                 "e Trecho literal.")
+            help="O .zip de dossiês da equipe (por sigla: pesquisa com citações, painel do SIGA/PNCP e planilha de "
+                 "vencimentos) ou um arquivo por secretaria. Para o órgão que tiver dossiê, o app não pesquisa a web: "
+                 "confere os links do dossiê e põe os vencimentos da planilha direto no calendário.")
         if enviados:
             cada_pasta = modo.startswith("Cada pasta")
             assinatura = hashlib.md5(b"".join(a.name.encode() + a.getvalue() for a in enviados + (dossies_enviados or []))

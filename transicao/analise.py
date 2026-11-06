@@ -110,9 +110,9 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
         dossie = pesquisa.montar_dossie(cfg["modelo_pesquisa"], nome, cfg["data_corte"], cfg.get("foco", ""),
                                         estado=estado)
     resumo_dos = pesquisa.resumo_dossie(dossie)
-    if resumo_dos["itens"] < MIN_ITENS_DOSSIE:
-        raise ErroAnalise(f"dossiê insuficiente ({resumo_dos['itens']} itens"
-                          + (", confira se o arquivo segue o formato Afirmação / Fonte / Link / Trecho literal)"
+    if resumo_dos["itens"] < MIN_ITENS_DOSSIE or resumo_dos["orgao"] < 3:
+        raise ErroAnalise(f"dossiê insuficiente ({resumo_dos['orgao']} itens sobre o órgão"
+                          + (": confira se o arquivo traz fatos com link [título](https://...) ou a planilha de contratos)"
                              if dossie.get("origem") == "arquivo" else ")"))
 
     progresso("Preparando os insumos do debate...")
@@ -132,6 +132,9 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
                        {"secoes": [], "lacunas": [], "descartados": 0, "uso": []})]
     feitos = modelo._em_paralelo(tarefas) if debate.RODADAS_JUNTAS else [t() for t in tarefas]
     confronto, calendario, diagnostico = feitos
+    if dossie.get("contratos"):               # vencimentos da planilha de contratos: entram por código, sem o modelo
+        calendario["eventos"] = produtos.juntar_eventos(
+            produtos.eventos_de_contratos(dossie["contratos"], nome, cfg["data_corte"]), calendario.get("eventos") or [])
     for parte in feitos:
         uso.extend(parte.pop("uso", None) or [])
 
@@ -250,13 +253,11 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
 
     try:
         modelo.usar_completion(chamada)
-        estado, custo_estado = None, 0.0
-        if any(not o.get("ler_dossie") for o in orgaos):      # só pesquisa o Estado se algum órgão for pesquisado
-            log("Pesquisando o contexto do Estado (uma vez para os órgãos sem dossiê enviado)...")
-            modelo.novo_uso_do_fio()
-            estado = pesquisa.pesquisar_estado(cfg["modelo_pesquisa"], cfg["data_corte"], cfg.get("foco", ""))
-            custo_estado, _ = modelo.custo_estimado(estado.get("uso") or [])
-            log(f"Estado: {len(estado.get('itens') or [])} itens.")
+        log("Pesquisando o contexto do Estado (uma vez para todos os órgãos)...")
+        modelo.novo_uso_do_fio()
+        estado = pesquisa.pesquisar_estado(cfg["modelo_pesquisa"], cfg["data_corte"], cfg.get("foco", ""))
+        custo_estado, _ = modelo.custo_estimado(estado.get("uso") or [])
+        log(f"Estado: {len(estado.get('itens') or [])} itens.")
 
         linhas, eventos, descartados, trava = {}, {}, {}, threading.Lock()
 
@@ -279,7 +280,7 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                 dossie = None
                 if orgao.get("ler_dossie"):
                     log(f"[{k}] Conferindo os links do dossiê enviado...")
-                    dossie = pesquisa.dossie_enviado(orgao["ler_dossie"](), nome, cfg["data_corte"])
+                    dossie = pesquisa.dossie_enviado(orgao["ler_dossie"](), nome, cfg["data_corte"], estado=estado)
                 r = analisar_orgao(nome, texto, cfg, estado=estado, dossie=dossie,
                                    progresso=lambda t: log(f"[{k}] {t}"))
                 (saida / "documentos" / f"{pasta}.docx").write_bytes(r["documento"])

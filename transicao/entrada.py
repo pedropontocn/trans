@@ -459,7 +459,7 @@ def orgaos_do_envio(arquivos, cada_pasta=False):
 
 EXTENSOES_DOSSIE = (".docx", ".pdf", ".md", ".txt")
 PALAVRAS_GENERICAS = {"secretaria", "estado", "de", "do", "da", "dos", "das", "e", "rj", "rio", "janeiro", "dossie",
-                      "perplexity", "orgao", "sobre", "para", "transicao", "governo", "final", "v1", "v2"}
+                      "perplexity", "orgao", "sobre", "para", "transicao", "final", "v1", "v2"}
 
 
 def _palavras(nome):
@@ -479,37 +479,77 @@ def _parecidos(a, b):
     return len(pa & pb) / len(pa | pb)
 
 
-def dossies_do_envio(arquivos):
-    """Os dossiês enviados: Word, PDF, Markdown ou texto, soltos ou dentro de .zip. O nome do órgão vem do arquivo."""
-    itens = []
+RE_PARTE_DOSSIE = [  # o pacote de dossiês da equipe: uma sigla, três arquivos
+    ("contratos", re.compile(r"^([A-Z][A-Z0-9]{1,14})_vencimentos_180d\.csv$")),
+    ("pesquisa", re.compile(r"^([A-Z][A-Z0-9]{1,14})_pesquisa\.(md|txt)$")),
+    ("completo", re.compile(r"^DOSSIE_([A-Z][A-Z0-9]{1,14})\.(md|txt)$")),
+    ("dossie", re.compile(r"^([A-Z][A-Z0-9]{1,14})\.(md|txt)$")),
+]
+IGNORAR_DOSSIE = re.compile(r"^(00_|README|PAINEL|unidades_|vencimentos_180d_estado|AUTONOMOS|DOSSIE_AUTONOMOS)", re.I)
 
-    def incluir(nome, conteudo):
-        if Path(nome).name.startswith(("~$", "._")) or Path(nome).suffix.lower() not in EXTENSOES_DOSSIE:
+
+def dossies_do_envio(arquivos):
+    """Os dossiês enviados, um por órgão. Reconhece o pacote da equipe (por sigla: SIGLA.md, SIGLA_pesquisa.md e
+    SIGLA_vencimentos_180d.csv; os nomes por extenso vêm da tabela de 00_CONSOLIDACAO) e, fora dele, aceita um
+    arquivo por órgão (Word, PDF ou Markdown, com o nome do órgão no nome do arquivo).
+    Devolve [{"orgao", "arquivos", "partes"}], em que partes traz os bytes de "pesquisa", "dossie" e "contratos"."""
+    grupos, nomes, soltos = {}, {}, []
+
+    def incluir(caminho, conteudo):
+        nome = Path(caminho).name
+        if nome.startswith(("~$", "._")) or "__MACOSX" in caminho or "/referencia/" in "/" + caminho:
             return
-        base = re.sub(r"(?i)\bdossi[eê]\b\s*[-–:]*\s*(d[aeo]s?\s+)?", " ", Path(nome).stem)
-        itens.append({"arquivo": Path(nome).name, "orgao": nome_do_orgao_pelo_arquivo(base.strip() + ".x"),
-                      "conteudo": conteudo})
+        if nome.startswith("00_CONSOLIDACAO"):
+            texto = conteudo.decode("utf-8", errors="replace")
+            nomes.update({s: n.strip() for s, n in re.findall(r"^\|\s*([A-Z][A-Z0-9]{1,14})\s*\|\s*([^|]+?)\s*\|", texto, re.M)})
+            return
+        if IGNORAR_DOSSIE.search(nome):
+            return
+        for parte, padrao in RE_PARTE_DOSSIE:
+            m = padrao.match(nome)
+            if m:
+                grupo = grupos.setdefault(m.group(1), {"arquivos": [], "partes": {}})
+                grupo["arquivos"].append(nome)
+                grupo["partes"][parte] = conteudo
+                return
+        if Path(nome).suffix.lower() in EXTENSOES_DOSSIE:
+            soltos.append((nome, conteudo))
 
     for nome, conteudo in arquivos:
         if nome.lower().endswith(".zip"):
             with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
                 for info in z.infolist():
-                    if not info.is_dir() and "__MACOSX" not in info.filename:
+                    if not info.is_dir():
                         incluir(info.filename.replace("\\", "/"), z.read(info))
         else:
             incluir(nome, conteudo)
+    itens = [{"orgao": f"{nomes[s]} - {s}" if s in nomes else s, "arquivos": g["arquivos"], "partes": g["partes"]}
+             for s, g in sorted(grupos.items()) if g["partes"].keys() & {"pesquisa", "dossie", "contratos"}]
+    for nome, conteudo in soltos:
+        base = re.sub(r"(?i)\bdossi[eê]\b\s*[-–:]*\s*(d[aeo]s?\s+)?", " ", Path(nome).stem)
+        itens.append({"orgao": nome_do_orgao_pelo_arquivo(base.strip() + ".x"), "arquivos": [nome],
+                      "partes": {"arquivo": (nome, conteudo)}})
     return itens
 
 
 def _texto_dossie(d):
-    if d["arquivo"].lower().endswith((".md", ".txt")):
-        return d["conteudo"].decode("utf-8", errors="replace")
-    return converter_arquivo(d["arquivo"], d["conteudo"]) or ""
+    """Os textos do dossiê: pesquisa (com citações), dossiê reduzido e planilha de contratos."""
+    textos = {}
+    for parte, valor in d["partes"].items():
+        if parte == "arquivo":
+            nome, conteudo = valor
+            textos["pesquisa"] = (conteudo.decode("utf-8", errors="replace") if nome.lower().endswith((".md", ".txt"))
+                                  else converter_arquivo(nome, conteudo) or "")
+        elif parte != "completo":
+            textos[parte] = valor.decode("utf-8-sig", errors="replace")
+    if "pesquisa" not in textos and "completo" in d["partes"]:
+        textos["pesquisa"] = d["partes"]["completo"].decode("utf-8-sig", errors="replace")
+    return textos
 
 
 def casar_dossies(orgaos, dossies):
     """Liga cada órgão ao seu dossiê pelo nome (sigla ou palavras do nome). Devolve os dossiês que não acharam órgão.
-    O órgão ligado ganha "dossie_arquivo" e "ler_dossie" (devolve o texto)."""
+    O órgão ligado ganha "dossie_arquivo" e "ler_dossie" (devolve os textos do dossiê)."""
     livres = list(dossies)
     for o in orgaos:
         o.pop("ler_dossie", None)
@@ -517,6 +557,6 @@ def casar_dossies(orgaos, dossies):
         notas = sorted(((_parecidos(o["nome"], d["orgao"]), i) for i, d in enumerate(livres)), reverse=True)
         if notas and notas[0][0] >= 0.5:
             d = livres.pop(notas[0][1])
-            o["dossie_arquivo"] = d["arquivo"]
+            o["dossie_arquivo"] = ", ".join(d["arquivos"])
             o["ler_dossie"] = lambda d=d: _texto_dossie(d)
     return livres

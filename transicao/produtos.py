@@ -153,6 +153,43 @@ def extrair_calendario(modelo, dossie, relatorio, orgao, data_corte=None):
     return {"eventos": eventos, "descartados": descartados, "uso": uso}
 
 
+def eventos_de_contratos(contratos, orgao, data_corte=None):
+    """Os vencimentos da planilha de contratos (SIGA, com a vigência conferida no PNCP ou no DOERJ) como eventos do
+    calendário. Vêm de dado estruturado: não passam pelo modelo."""
+    base_dia = (_ler_data(data_corte) or (date.today(), False))[0] if data_corte else date.today()
+    eventos = []
+    for c in contratos:
+        lida = _ler_data(c.get("fim"))
+        if not lida:
+            continue
+        dia = lida[0]
+        valor = c.get("valor_atualizado") or c.get("valor") or ""
+        try:
+            reais = float(str(valor).replace(",", "."))
+        except ValueError:
+            reais = None
+        objeto = re.sub(r"\s+", " ", c.get("objeto") or "").strip()
+        dias = (dia - base_dia).days
+        eventos.append({
+            "data": dia, "so_mes": False, "dias": dias, "criticidade": criticidade(dias), "orgao": orgao,
+            "tipo": "Contrato", "evento": f"Fim do contrato {c.get('contratacao', '')} – {c.get('fornecedor', '').strip()}"
+                                          + (" (emergencial)" if c.get("flag_emerg") == "True" else ""),
+            "objeto": objeto[:200], "valor": reais,
+            "valor_texto": ("R$ " + f"{reais:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")) if reais else "",
+            "consequencia": "", "decisao": "Renovar, licitar de novo ou encerrar",
+            "origem": "Contratos do Estado (SIGA/PNCP)", "fonte": c.get("url_pncp") or "Base SIGA de contratos",
+            "trecho": c.get("fonte_vigencia") or "SIGA"})
+    return sorted(eventos, key=lambda x: (x["data"], -(x["valor"] or 0)))
+
+
+def juntar_eventos(dos_contratos, extraidos):
+    """Junta os vencimentos da planilha aos eventos extraídos do texto; um evento de contrato extraído na mesma data de
+    um contrato da planilha é tido como repetido."""
+    datas = {e["data"] for e in dos_contratos}
+    resto = [e for e in extraidos if not (e["tipo"] == "Contrato" and e["data"] in datas)]
+    return sorted(dos_contratos + resto, key=lambda x: (x["data"], -(x["valor"] or 0)))
+
+
 SECOES_DIAGNOSTICO = ["Missão e competências", "Como o órgão se organiza hoje", "Pessoas", "Orçamento e execução",
                       "Contratos, convênios e obras", "Controle, passivos e judicialização", "Pontos críticos"]
 

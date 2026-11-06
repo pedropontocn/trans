@@ -259,96 +259,123 @@ def test_custo_com_desconto_do_lote(funcoes):
 
 # --- DOSSIÊ ENVIADO PELA EQUIPE ---------------------------------------------------------------------
 
-DOSSIE_PERPLEXITY = """# Dossiê – Secretaria de Exemplo
-
-### Fato
-- **Afirmação:** A LOA 2026 da Secretaria é de R$ 412.000.000,00.
-- **Tema:** Orçamento e execução
-- **Fonte:** LOA 2026
-- **Data da fonte:** 01/2026
-- **Link:** [LOA 2026](https://transparencia.exemplo.gov.br/loa-sex)
-- **Trecho literal:** "LOA 2026 da Secretaria de Exemplo:
-  R$ 412.000.000,00"
-- **Tipo:** documento oficial
-
-### Fato
-- Afirmação: Quatro concorrências estão adiadas, somando R$ 120,5 milhões.
-- Tema: Contratos e convênios
-- Fonte: Painel de compras
-- Data: 10/2026
-- Link: https://transparencia.exemplo.gov.br/licitacoes
-- Trecho literal: Quatro concorrências estão adiadas sine die, somando R$ 120.500.000,00
-- Tipo: dado oficial
-
-### Fato
-- Afirmação: O TCE-RJ apontou atraso na prestação de contas de convênios.
-- Tema: Controle (TCE, MP) e judicialização
-- Fonte: TCE-RJ
-- Link: https://tce.exemplo.gov.br/decisao-123
-- Trecho literal: frase que não está na página
-- Tipo: decisão de controle
-
-### Fato
-- Afirmação: O governo eleito promete reduzir o número de secretarias.
-- Tema: Compromissos do governo eleito
-- Fonte: Jornal Exemplo
-- Link: https://jornal.exemplo/materia
-- Trecho literal: Governo eleito promete reduzir o número de secretarias
-- Tipo: declaração política
-
-### Fato
-- Afirmação: A Secretaria tem 1.200 servidores efetivos.
-- Tema: Pessoal
-- Fonte: sem link
-- Tipo: dado oficial
-
-## Procurado e não encontrado
-- Número de terceirizados nos contratos de custeio
-- Organograma atualizado
+CONSOLIDACAO = """# Consolidação estadual
+| Sigla | Secretaria | Fim futuro |
+|---|---|---|
+| SEX | Secretaria de Estado de Exemplo | 3 |
 """
+REDUZIDO = """# Dossiê reduzido — Secretaria de Exemplo (SEX)
+
+## 3. Investimentos e contratos
+| Indicador | Valor |
+|---|---|
+| Contratos com data de fim futura (SIGA/PNCP) | 3 contratos, R$ 30,0 mi |
+| Vencem em até 30 dias | 1 contratos, R$ 10,0 mi |
+
+## 4. Indicadores críticos
+| Indicador | Valor | Meta | Status |
+|---|---|---|---|
+| Contratos sem fiscal/gestor designado | Não consta no SIGA | 0 | Solicitar à secretaria |
+
+## 5. Alertas vermelhos
+- 1 contrato(s) vencem em até 30 dias (R$ 10,0 mi).
+- 2 contrato(s) com fornecedor em recuperação judicial.
+- O TCE-RJ apontou atraso. [TCE](https://tce.exemplo.gov.br/decisao-123)
+"""
+PESQUISA = """# Pesquisa aprofundada — SEX
+
+Gerada pela equipe.
+
+### Alertas vermelhos
+- **Licitações:** quatro concorrências estão adiadas, somando R$ 120.500.000,00. [Painel de compras](https://transparencia.exemplo.gov.br/licitacoes)
+O Tribunal apontou atraso na prestação de contas de convênios da Secretaria. [TCE-RJ: decisão](https://tce.exemplo.gov.br/decisao-123)
+
+### Contratos e serviços críticos
+- A Secretaria tem 9.999 servidores em greve. [Jornal](https://jornal.exemplo/materia)
+- **TCE-RJ:** nada encontrado nas fontes consultadas sobre decisões recentes. [Jornal](https://jornal.exemplo/materia)
+
+### Lacunas da pesquisa
+- Número de terceirizados nos contratos de custeio. [Jornal](https://jornal.exemplo/materia)
+
+### Fontes consultadas
+1. [Painel de compras](https://transparencia.exemplo.gov.br/licitacoes) — 2026-10-14
+"""
+CONTRATOS = ("\ufeffcontratacao;fornecedor;objeto;fim;dias_para_vencer;valor;valor_atualizado;flag_emerg;url_pncp;"
+             "fonte_vigencia;a_pagar_liquidado\n"
+             "2025000001;OBRAS ALFA LTDA;PAVIMENTAÇÃO DE VIAS;20/11/2026;14;10000000.0;10000000.0;False;"
+             "https://pncp.gov.br/app/contratos/1;PNCP (1 termo(s)): https://pncp.gov.br/app/contratos/1;0.0\n"
+             "2025000002;LIMPEZA BETA LTDA;LIMPEZA PREDIAL;15/03/2027;129;20000000.0;20000000.0;True;;SIGA;150000.0\n")
 
 
-def test_dossie_enviado_e_lido_e_conferido(llm):
-    from transicao import pesquisa
-    d = pesquisa.dossie_enviado(DOSSIE_PERPLEXITY, "Secretaria de Exemplo", "04/11/2026")
-    por_bloco = {i["bloco"]: i for i in d["itens"]}
-    assert len(d["itens"]) == 5 and set(por_bloco) >= {"orcamento_execucao", "contratos_convenios",
-                                                        "controle_judicializacao", "compromissos_governo", "pessoal"}
-    assert por_bloco["orcamento_execucao"]["checagem"] == "conferido"          # trecho em duas linhas, link em Markdown
-    assert por_bloco["contratos_convenios"]["checagem"] == "conferido"
-    assert por_bloco["controle_judicializacao"]["checagem"] == "trecho_nao_encontrado"
-    assert por_bloco["pessoal"]["checagem"] == "sem_trecho"
-    assert por_bloco["compromissos_governo"]["camada"] == "estado"
-    assert por_bloco["compromissos_governo"]["tipo_fonte"] == "declaracao_politica"
-    assert por_bloco["controle_judicializacao"]["tipo_fonte"] == "decisao_controle_judicial"
-    assert [n["procurado"] for n in d["nao_encontrado"]] == ["Número de terceirizados nos contratos de custeio",
-                                                             "Organograma atualizado"]
-    assert {i["id"][0] for i in d["itens"]} == {"E", "O"}
+def _pacote():
+    return [("Transicao_RJ_dossies.zip", _zip({
+        "dossies/00_CONSOLIDACAO_ESTADUAL.md": CONSOLIDACAO, "dossies/SEX.md": REDUZIDO,
+        "dossies_automaticos/pesquisas/SEX_pesquisa.md": PESQUISA,
+        "dossies_automaticos/dados_vencimentos/SEX_vencimentos_180d.csv": CONTRATOS.encode("utf-8"),
+        "dossies_automaticos/DOSSIE_SEX.md": "# completo", "dossies_automaticos/PAINEL_URGENCIAS.md": "x",
+        "dossies_automaticos/vencimentos_180d_estado.csv": "x", "README.md": "x",
+        "referencia/REVISAO_QUALIDADE.md": "x"}))]
 
 
-def test_dossies_casam_com_os_orgaos_pelo_nome(llm):
+def test_pacote_de_dossies_e_lido_por_sigla(llm):
     from transicao import entrada
-    orgaos = [{"nome": n} for n in ("Secretaria de Estado das Cidades - SECID", "SETUR - Turismo", "SEFAZ")]
-    dossies = entrada.dossies_do_envio([("dossies.zip", _zip({
-        "Dossiê - SECID.md": b"x", "Dossie Secretaria de Turismo.pdf": b"y", "Dossiê SEEDUC.docx": b"z",
-        "~$lixo.docx": b"", "notas.xlsx": b""}))])
-    sobrando = entrada.casar_dossies(orgaos, dossies)
-    assert [o.get("dossie_arquivo") for o in orgaos] == ["Dossiê - SECID.md", "Dossie Secretaria de Turismo.pdf", None]
-    assert [d["arquivo"] for d in sobrando] == ["Dossiê SEEDUC.docx"]
-    assert orgaos[0]["ler_dossie"]() == "x"
+    dossies = entrada.dossies_do_envio(_pacote())
+    assert [d["orgao"] for d in dossies] == ["Secretaria de Estado de Exemplo - SEX"]
+    assert sorted(dossies[0]["partes"]) == ["completo", "contratos", "dossie", "pesquisa"]
+    orgaos = [{"nome": "SEX - Exemplo"}, {"nome": "Secretaria de Estado de Exemplo"}, {"nome": "SEFAZ"}]
+    assert entrada.casar_dossies(orgaos, dossies) == []
+    assert [bool(o.get("ler_dossie")) for o in orgaos] == [True, False, False]       # cada dossiê casa uma vez
+    textos = orgaos[0]["ler_dossie"]()
+    assert set(textos) == {"pesquisa", "dossie", "contratos"} and textos["pesquisa"].startswith("# Pesquisa")
 
 
-def test_com_dossie_enviado_o_app_nao_pesquisa(llm, tmp_path):
+def test_dossie_enviado_confere_links_e_numeros(llm):
+    from transicao import pesquisa
+    d = pesquisa.dossie_enviado({"pesquisa": PESQUISA, "dossie": REDUZIDO, "contratos": CONTRATOS},
+                                "Secretaria de Estado de Exemplo - SEX", "06/11/2026")
+    web = {i["url"].split("/")[-1]: i for i in d["itens"] if not i.get("conferido_pela_equipe")}
+    assert web["licitacoes"]["checagem"] == "conferido" and web["licitacoes"]["conferencia"] == "numeros"
+    assert web["licitacoes"]["afirmacao"].startswith("Licitações: quatro") and web["licitacoes"]["data_fonte"] == "14/10/2026"
+    assert web["licitacoes"]["tipo_fonte"] == "documento_oficial"
+    assert web["decisao-123"]["checagem"] == "sem_trecho"                         # parágrafo sem número: não conferido
+    assert web["materia"]["checagem"] == "trecho_nao_encontrado"                  # o número não está na página
+    equipe = [i["afirmacao"] for i in d["itens"] if i.get("conferido_pela_equipe")]
+    assert any(a.startswith("Vencem em até 30 dias") for a in equipe)
+    assert not any(a.startswith("1 contrato(s) vencem") for a in equipe)          # alerta que repete a tabela
+    assert any("recuperação judicial" in a for a in equipe) and not any("Não consta" in a for a in equipe)
+    assert any("2025000002" in a and "emergencial" in a and "R$ 150.000,00" in a for a in equipe)
+    assert {n["procurado"][:12] for n in d["nao_encontrado"]} == {"TCE-RJ: nada", "Número de te"}
+    assert len(d["contratos"]) == 2
+
+
+def test_vencimentos_da_planilha_vao_para_o_calendario(llm):
+    from transicao import pesquisa, produtos
+    contratos = pesquisa.ler_contratos(CONTRATOS)
+    eventos = produtos.eventos_de_contratos(contratos, "SEX", "06/11/2026")
+    assert [e["dias"] for e in eventos] == [14, 129] and eventos[0]["criticidade"].startswith("Crítico")
+    assert eventos[1]["evento"].endswith("(emergencial)") and eventos[0]["valor_texto"] == "R$ 10.000.000,00"
+    extraido = dict(eventos[0], origem="Informado pelo órgão")
+    assert len(produtos.juntar_eventos(eventos, [extraido])) == 2                 # repetido na mesma data sai
+
+
+def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
+    import docx
     from transicao import analise
-    orgaos = [{"nome": "Secretaria de Exemplo", "texto": RELATORIO, "ler_dossie": lambda: DOSSIE_PERPLEXITY}]
+    partes = {"pesquisa": PESQUISA, "dossie": REDUZIDO, "contratos": CONTRATOS}
+    orgaos = [{"nome": "Secretaria de Exemplo", "texto": RELATORIO, "ler_dossie": lambda: partes}]
     linhas = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=lambda *_: None)
     assert linhas[0]["situacao"] == "concluído" and linhas[0]["dossie"] == "enviado"
-    assert not any("Monte a camada" in json.dumps(c["mensagens"], ensure_ascii=False) for c in llm.chamadas)
-    assert _resumo(tmp_path)[0]["dossie"] == "enviado"
+    pedidos = [json.dumps(c["mensagens"][0]["content"], ensure_ascii=False) for c in llm.chamadas]
+    assert not any("Monte a camada" in p and 'camada\\n\\"Estado\\"' not in p for p in pedidos)   # só o Estado
+    texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "documentos").glob("*.docx"))).paragraphs)
+    assert "Anexo 1 – Fontes consultadas" in texto
+    import openpyxl
+    planilha = openpyxl.load_workbook(tmp_path / "calendario_consolidado.xlsx").active
+    assert any("2025000001" in str(c.value) for linha in planilha.iter_rows() for c in linha)
 
 
-def test_dossie_fora_do_formato_avisa(llm, tmp_path):
+def test_dossie_sem_fatos_avisa(llm, tmp_path):
     from transicao import analise
-    orgaos = [{"nome": "Secretaria de Exemplo", "texto": RELATORIO, "ler_dossie": lambda: "Texto corrido sem fatos."}]
+    orgaos = [{"nome": "Secretaria de Exemplo", "texto": RELATORIO, "ler_dossie": lambda: {"pesquisa": "Texto corrido."}}]
     linhas = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=lambda *_: None)
-    assert linhas[0]["situacao"] == "erro" and "formato" in linhas[0]["observacao"]
+    assert linhas[0]["situacao"] == "erro" and "dossiê insuficiente" in linhas[0]["observacao"]

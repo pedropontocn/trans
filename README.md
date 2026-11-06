@@ -19,10 +19,15 @@ Um `.zip` com:
 
 1. Suba os arquivos: o `.zip` com os resumos (um Word ou PDF por órgão, o nome do órgão no nome do arquivo) ou o
    `.zip` da pasta com uma subpasta de documentos brutos por órgão.
-2. Opcional: suba os **dossiês das secretarias** montados fora do app (por exemplo, no Perplexity), um arquivo por
-   secretaria com o nome ou a sigla no nome do arquivo. Para quem tiver dossiê, o app não pesquisa a web: usa o
-   dossiê e confere cada link e trecho. Cada fato vem num bloco com `Afirmação`, `Tema`, `Fonte`, `Data da fonte`,
-   `Link`, `Trecho literal` e `Tipo`; no fim, uma seção "Procurado e não encontrado".
+2. Opcional: suba o **pacote de dossiês das secretarias** (.zip) montado pela equipe. Por sigla, o app usa
+   `SIGLA_pesquisa.md` (pesquisa web com citações `[título](link)`), `SIGLA.md` (painel de contratos do SIGA/PNCP) e
+   `SIGLA_vencimentos_180d.csv` (contratos que vencem em 180 dias); os nomes por extenso vêm de
+   `00_CONSOLIDACAO_ESTADUAL.md`. Também aceita um arquivo por secretaria (Word, PDF ou Markdown) com fatos citados.
+   Para quem tiver dossiê, o app não pesquisa a web sobre o órgão:
+   - cada fato da pesquisa tem o link aberto pelo código, e os números da afirmação precisam estar na página;
+   - os números do SIGA/PNCP entram como dado oficial conferido pela equipe;
+   - os vencimentos da planilha vão direto para o calendário, sem passar pelo modelo.
+   O contexto do Estado continua pesquisado pelo app, uma vez para todos.
 3. Confira a tabela de órgãos (dá para corrigir nomes e desmarcar; a coluna Dossiê mostra qual arquivo casou).
 4. Clique em **Analisar**. A análise roda em segundo plano; pode fechar a página.
 5. Baixe o `.zip`.
