@@ -406,3 +406,26 @@ def test_painel_estadual_consolida_as_secretarias(llm, tmp_path):
     assert "SEX" in celulas and "SEY" in celulas and "Obras e projetos" in celulas
     assert "SEX:R1" in llm.pedido_temas
     assert "painel estadual" in (tmp_path / "LEIA-ME.txt").read_text(encoding="utf-8")
+
+
+def test_dossie_casado_pelo_conteudo_quando_o_nome_do_arquivo_nao_diz(llm):
+    from transicao import entrada
+    orgaos = entrada.orgaos_do_envio([("TRANSIÇÃO.docx", b"x")])        # o texto (falso) fala da "Secretaria de Exemplo (SEX)"
+    dossies = entrada.dossies_do_envio(_pacote())
+    sobrando = entrada.casar_dossies(orgaos, dossies)
+    assert sobrando == [] and orgaos[0]["nome"] == "Secretaria de Estado de Exemplo - SEX"
+    assert orgaos[0]["ler_dossie"]()["pesquisa"].startswith("# Pesquisa")
+    outros = entrada.orgaos_do_envio([("TRANSIÇÃO.docx", b"x")])
+    llm.texto_relatorio = "Relatório sem nome de secretaria."
+    from transicao import entrada as e2
+    e2.converter_arquivo.cache_clear()
+    assert len(e2.casar_dossies(outros, e2.dossies_do_envio(_pacote()))) == 1      # sem pista: não liga
+
+
+def test_planilha_excel_entra_como_documento_da_secretaria(llm):
+    from transicao import entrada
+    orgaos = entrada.orgaos_do_envio([("docs.zip", _zip({"SECID.docx": b"a", "SECID.xlsx": b"b", "SES.xls": b"c",
+                                                         "notas.txt": b"d"}))])
+    assert {o["nome"]: sorted(o["arquivos"]) for o in orgaos} == {"SECID": ["SECID.docx", "SECID.xlsx"], "SES": ["SES.xls"]}
+    texto, manifesto = orgaos[0]["ler"]()
+    assert texto.count("# ARQUIVO:") == 2 and len(manifesto["lidos"]) == 2

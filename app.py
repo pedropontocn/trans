@@ -23,6 +23,7 @@ load_dotenv()
 
 # custo por secretaria com dossiê enviado, em US$ (Sonnet no auxiliar, Opus nos riscos e agentes): estimativa a partir
 # das chamadas do modelo novo; quando o app pesquisa o dossiê, soma cerca de 50%
+SEM_DOSSIE = "— (o app pesquisa)"
 CUSTO_POR_ORGAO = {True: (0.7, 1.2), False: (1.3, 2.2)}
 PESO_COM_PESQUISA = 1.5
 
@@ -144,7 +145,8 @@ if trabalho:
 
 if not trabalho or trabalho["situacao"] != "rodando":
     if not trabalho:
-        enviados = st.file_uploader("Arquivos dos órgãos (.zip, Word ou PDF)", type=["zip", "docx", "pdf"],
+        enviados = st.file_uploader("Arquivos das secretarias (.zip, Word, PDF ou Excel)",
+                                    type=["zip", "docx", "pdf", "xlsx", "xls"],
                                     accept_multiple_files=True)
         modo = st.radio("Como os arquivos estão organizados?",
                         ["Cada arquivo é o resumo de um órgão", "Cada pasta é um órgão (documentos brutos)"],
@@ -165,8 +167,9 @@ if not trabalho or trabalho["situacao"] != "rodando":
             if st.session_state.get("lidos") != assinatura:
                 try:
                     orgaos_lidos = entrada.orgaos_do_envio([(a.name, a.getvalue()) for a in enviados], cada_pasta)
-                    sobrando = entrada.casar_dossies(
-                        orgaos_lidos, entrada.dossies_do_envio([(a.name, a.getvalue()) for a in dossies_enviados]))
+                    todos_dossies = entrada.dossies_do_envio([(a.name, a.getvalue()) for a in dossies_enviados])
+                    st.session_state["dossies"] = {d["orgao"]: d for d in todos_dossies}
+                    sobrando = entrada.casar_dossies(orgaos_lidos, todos_dossies)
                     # secretaria com dossiê e sem documento enviado: pode ser analisada só com o dossiê (desmarcada)
                     st.session_state["orgaos"] = orgaos_lidos + entrada.orgaos_so_com_dossie(sobrando)
                 except zipfile.BadZipFile as e:
@@ -175,26 +178,37 @@ if not trabalho or trabalho["situacao"] != "rodando":
                 st.session_state["lidos"] = assinatura
                 st.session_state.pop("tabela", None)
             orgaos = st.session_state.get("orgaos") or []
+            dossies = st.session_state.get("dossies") or {}
             so_dossie = [o for o in orgaos if o.get("so_dossie")]
             if so_dossie and enviados:
                 st.caption(f"{len(so_dossie)} secretaria(s) têm dossiê, mas nenhum documento enviado: aparecem no fim da "
-                           "tabela, desmarcadas. Marque as que quiser analisar só com o dossiê. Se uma delas tem "
-                           "documento, renomeie o arquivo com o nome ou a sigla da secretaria.")
+                           "tabela, desmarcadas. Marque as que quiser analisar só com o dossiê. Se o dossiê é de uma "
+                           "secretaria que tem documento, escolha-o na coluna Dossiê da linha do documento.")
             if not orgaos:
                 st.warning("Não achei nenhum órgão no envio. Confira se escolheu a organização certa acima.")
             else:
                 tabela = st.data_editor(
                     [{"analisar": not o.get("so_dossie") or not enviados, "orgao": o["nome"],
                       "arquivos": ", ".join(o["arquivos"])[:200] or "— (só o dossiê)",
-                      "dossie": o.get("dossie_arquivo") or "— (o app pesquisa)"} for o in orgaos],
-                    key="tabela", hide_index=True, width="stretch", disabled=["arquivos", "dossie"],
+                      "dossie": o.get("dossie_rotulo") or SEM_DOSSIE} for o in orgaos],
+                    key="tabela", hide_index=True, width="stretch", disabled=["arquivos"],
                     column_config={"analisar": st.column_config.CheckboxColumn("Analisar"),
                                    "orgao": st.column_config.TextColumn("Órgão (corrija se precisar)"),
                                    "arquivos": st.column_config.TextColumn("Arquivos ou pastas"),
-                                   "dossie": st.column_config.TextColumn("Dossiê")})
+                                   "dossie": st.column_config.SelectboxColumn(
+                                       "Dossiê (escolha se não casou)", options=[SEM_DOSSIE] + list(dossies),
+                                       required=True)})
                 registros = tabela.to_dict("records") if hasattr(tabela, "to_dict") else list(tabela)
-                escolhidos = [dict(o, nome=str(r["orgao"]).strip() or o["nome"])
-                              for o, r in zip(orgaos, registros) if r.get("analisar")]
+                escolhidos = []
+                for o, r in zip(orgaos, registros):
+                    if not r.get("analisar"):
+                        continue
+                    escolhido = dict(o, nome=str(r["orgao"]).strip() or o["nome"])
+                    if r.get("dossie") in dossies:                  # o dossiê escolhido na tabela vale
+                        escolhido["ler_dossie"] = entrada.ler_dossie_de(dossies[r["dossie"]])
+                    else:
+                        escolhido.pop("ler_dossie", None)
+                    escolhidos.append(escolhido)
                 faixa = CUSTO_POR_ORGAO[economico]
                 peso = sum(1 if o.get("ler_dossie") else PESO_COM_PESQUISA for o in escolhidos)
                 st.caption(f"Estimativa: US$ {faixa[0] * peso:.0f} a {faixa[1] * peso:.0f} para "

@@ -67,7 +67,7 @@ def nome_do_orgao_pelo_arquivo(nome):
     return re.sub(r"\s{2,}", " ", base) or Path(nome).stem
 
 
-EXTENSOES_RESUMO = (".docx", ".pdf")
+EXTENSOES_RESUMO = (".docx", ".pdf", ".xlsx", ".xls")
 
 
 PASTA_MIME = "application/vnd.google-apps.folder"
@@ -413,7 +413,7 @@ def resumos_do_envio(arquivos):
 
 def orgaos_do_envio(arquivos, cada_pasta=False):
     """Os órgãos de um envio. arquivos: lista de (nome, bytes).
-    - cada_pasta=False: cada Word ou PDF (solto ou dentro do .zip) é o resumo de um órgão; o nome vem do arquivo, e
+    - cada_pasta=False: cada Word, PDF ou Excel (solto ou dentro do .zip) é o resumo de um órgão; o nome vem do arquivo, e
       arquivos com o mesmo órgão são juntados.
     - cada_pasta=True: o .zip traz os documentos brutos, uma pasta por órgão (subpastas com cara de órgão viram
       órgãos vinculados).
@@ -451,8 +451,12 @@ def orgaos_do_envio(arquivos, cada_pasta=False):
                 manifesto["pulados"].append({"arquivo": r["arquivo"], "motivo": "sem texto (PDF digitalizado?)"})
         return "\n\n".join(partes), manifesto
 
-    return [{"nome": nome, "arquivos": [r["arquivo"] for r in itens], "ler": lambda itens=itens: ler(itens)}
-            for nome, itens in grupos.items()]
+    def previa(itens):
+        r = itens[0]
+        return (converter_arquivo(r["arquivo"], r["conteudo"]) or "")[:4000]
+
+    return [{"nome": nome, "arquivos": [r["arquivo"] for r in itens], "ler": lambda itens=itens: ler(itens),
+             "previa": lambda itens=itens: previa(itens)} for nome, itens in grupos.items()]
 
 
 # --- DOSSIÊS ENVIADOS ----------------------------------------------------------------------------
@@ -551,18 +555,50 @@ def casar_dossies(orgaos, dossies):
     """Liga cada órgão ao seu dossiê pelo nome (sigla ou palavras do nome). Devolve os dossiês que não acharam órgão.
     O órgão ligado ganha "dossie_arquivo" e "ler_dossie" (devolve os textos do dossiê)."""
     livres = list(dossies)
+
+    def ligar(o, d):
+        livres.remove(d)
+        o["dossie_arquivo"] = ", ".join(d["arquivos"])
+        o["dossie_rotulo"] = d["orgao"]
+        o["ler_dossie"] = lambda d=d: _texto_dossie(d)
+
     for o in orgaos:
         o.pop("ler_dossie", None)
         o.pop("dossie_arquivo", None)
         notas = sorted(((_parecidos(o["nome"], d["orgao"]), i) for i, d in enumerate(livres)), reverse=True)
         if notas and notas[0][0] >= 0.5:
-            d = livres.pop(notas[0][1])
-            o["dossie_arquivo"] = ", ".join(d["arquivos"])
-            o["ler_dossie"] = lambda d=d: _texto_dossie(d)
+            ligar(o, livres[notas[0][1]])
+    # O nome do arquivo não disse de qual secretaria é ("TRANSIÇÃO.docx"): procura no começo do documento a sigla
+    # ou o nome de um dossiê que sobrou. Só liga se exatamente um dossiê aparecer.
+    for o in orgaos:
+        if o.get("ler_dossie") or not o.get("previa") or not livres:
+            continue
+        try:
+            inicio = _norm(o["previa"]() or "")
+        except Exception:
+            continue
+        achados = [d for d in livres if _aparece(d["orgao"], inicio)]
+        if len(achados) == 1:
+            ligar(o, achados[0])
+            o["nome"] = achados[0]["orgao"]
     return livres
+
+
+def _aparece(nome_dossie, texto_norm):
+    """A sigla (palavra inteira) ou o nome por extenso do dossiê está no texto?"""
+    sig = sigla(nome_dossie) or (nome_dossie if re.fullmatch(r"[A-Z][A-Z0-9]{1,14}", nome_dossie) else "")
+    extenso = _norm(nome_dossie.rsplit(" - ", 1)[0])
+    return bool((sig and re.search(rf"\b{re.escape(sig.lower())}\b", texto_norm))
+                or (len(extenso) > 12 and extenso in texto_norm))
 
 
 def orgaos_so_com_dossie(dossies):
     """Secretarias que têm dossiê, mas nenhum documento enviado: analisadas só com o dossiê."""
     return [{"nome": d["orgao"], "arquivos": [], "texto": "", "so_dossie": True,
-             "dossie_arquivo": ", ".join(d["arquivos"]), "ler_dossie": lambda d=d: _texto_dossie(d)} for d in dossies]
+             "dossie_arquivo": ", ".join(d["arquivos"]), "dossie_rotulo": d["orgao"],
+             "ler_dossie": lambda d=d: _texto_dossie(d)} for d in dossies]
+
+
+def ler_dossie_de(dossie):
+    """A função que lê os textos de um dossiê escolhido à mão na tabela."""
+    return lambda: _texto_dossie(dossie)

@@ -20,7 +20,7 @@ Um `.zip` com:
 
 ## Como usar
 
-1. Suba os arquivos: o `.zip` com os resumos (um Word ou PDF por órgão, o nome do órgão no nome do arquivo) ou o
+1. Suba os arquivos: o `.zip` com os documentos (Word, PDF ou Excel; o nome ou a sigla da secretaria no nome do arquivo; arquivos com o mesmo nome são juntados) ou o
    `.zip` da pasta com uma subpasta de documentos brutos por órgão.
 2. Opcional: suba o **pacote de dossiês das secretarias** (.zip) montado pela equipe. Por sigla, o app usa
    `SIGLA_pesquisa.md` (pesquisa web com citações `[título](link)`), `SIGLA.md` (painel de contratos do SIGA/PNCP) e
