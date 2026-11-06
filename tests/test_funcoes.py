@@ -120,6 +120,31 @@ def test_enderecos_internos_nao_sao_abertos(funcoes, llm):
     assert "Quatro concorrências" in funcoes.baixar_pagina("https://transparencia.exemplo.gov.br/licitacoes")
 
 
+def test_nome_que_aponta_para_rede_interna_nao_e_aberto(funcoes, llm):
+    llm.dns["metadados.exemplo.com"] = {"169.254.169.254"}
+    llm.paginas["https://metadados.exemplo.com/x"] = "<p>segredo</p>"
+    assert funcoes.baixar_pagina("https://metadados.exemplo.com/x") is None
+    assert funcoes.baixar_pagina("file:///etc/passwd") is None
+    assert not funcoes._endereco_publico("ftp://transparencia.exemplo.gov.br/a")
+
+
+def test_redirecionamento_para_rede_interna_e_recusado(funcoes):
+    import urllib.error
+    import urllib.request
+    import pytest
+    manipulador = next(h for h in funcoes._abridor().handlers if isinstance(h, urllib.request.HTTPRedirectHandler))
+    pedido = urllib.request.Request("https://transparencia.exemplo.gov.br/a")
+    with pytest.raises(urllib.error.URLError):
+        manipulador.redirect_request(pedido, None, 302, "Found", {}, "http://169.254.169.254/latest")
+    seguinte = manipulador.redirect_request(pedido, None, 302, "Found", {}, "https://transparencia.exemplo.gov.br/b")
+    assert seguinte.full_url == "https://transparencia.exemplo.gov.br/b"
+
+
+def test_nomes_parecidos_nao_se_sobrescrevem(funcoes):
+    assert funcoes._pastas_unicas(["Secretaria de Saúde", "Secretaria de Saude", "SES"]) == [
+        "secretaria_de_saude", "secretaria_de_saude_2", "ses"]
+
+
 def test_html_vira_texto(funcoes):
     assert funcoes._html_para_texto("<p>a &amp; b</p><script>x()</script><style>p{}</style>").split() == ["a", "&", "b"]
 

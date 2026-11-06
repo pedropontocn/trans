@@ -40,3 +40,8 @@ PRECO_BUSCA_ANTHROPIC = 0.01
 
 
 MIN_ITENS_DOSSIE = 5
+
+
+# Sem o modo econômico, quantas secretarias rodam ao mesmo tempo. Cada uma já faz até 8 chamadas em paralelo
+# (os cinco agentes, por exemplo); mais que isso tende a esbarrar no limite de uso por minuto da API.
+PARALELOS_DIRETO = 3

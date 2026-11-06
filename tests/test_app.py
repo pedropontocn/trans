@@ -56,3 +56,20 @@ def test_so_com_dossies_a_tabela_ja_vem_marcada(llm, monkeypatch):
     at.run()
     assert not at.exception
     assert any(b.label.startswith("▶️ Analisar 2") for b in at.button)
+
+
+def test_com_senha_a_tela_pede_a_senha_antes(llm, monkeypatch):
+    import streamlit
+    from streamlit.testing.v1 import AppTest
+    streamlit.cache_resource.clear()
+    monkeypatch.setenv("APP_SENHA", "segredo")
+    monkeypatch.setattr(streamlit, "file_uploader", lambda *a, **k: [])
+    at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=60)
+    at.run()
+    assert not at.exception and not at.selectbox            # nada da tela antes da senha
+    at.text_input[0].input("errada")
+    at.button[0].click().run()
+    assert any("incorreta" in e.value for e in at.error) and not at.selectbox
+    at.text_input[0].input("segredo")
+    at.button[0].click().run()
+    assert not at.exception and at.selectbox

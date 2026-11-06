@@ -17,7 +17,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from . import confronto as conf, documentos, entrada, modelo, painel, pesquisa, produtos, riscos, verificacao
-from .config import MIN_ITENS_DOSSIE, VERSAO
+from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO
 
 JUNTAS = False          # no modo econômico, as etapas independentes vão juntas para a mesma fila da Batch API
 
@@ -199,14 +199,16 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
         log(f"Estado: {len(estado.get('itens') or [])} itens.")
 
         linhas, eventos, descartados, todos_riscos, situacoes, trava = {}, {}, {}, {}, {}, threading.Lock()
+        pastas = _pastas_unicas(o["nome"] for o in orgaos)
 
         def um(k, orgao):
             modelo.usar_completion(chamada)
+            modelo.novo_uso_do_fio()         # o fio é reaproveitado: sem isso, um erro cedo herdaria o custo do órgão anterior
             inicio = time.time()
             nome = orgao["nome"]
             linha = {c: "" for c in COLUNAS_RESUMO}
             linha.update(orgao=nome, situacao="erro", custo_usd=0.0)
-            pasta = entrada.slug(nome)
+            pasta = pastas[k - 1]
             log(f"[{k}/{len(orgaos)}] {nome}: começando")
             try:
                 texto = orgao.get("texto", "")
@@ -249,7 +251,7 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                 + f" ({linha['minutos']} min, US$ {linha['custo_usd']:.2f})")
             return linha
 
-        trabalhadores = max(1, min(paralelos, len(orgaos))) if fila else 1
+        trabalhadores = max(1, min(paralelos if fila else PARALELOS_DIRETO, len(orgaos)))
         with ThreadPoolExecutor(max_workers=trabalhadores) as ex:
             resultado = list(ex.map(lambda par: um(*par), enumerate(orgaos, 1)))
 
@@ -273,6 +275,19 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
         if fila:
             fila.encerrar()
             log(f"Modo econômico: {fila.enviados} lote(s) enviados à Batch API.")
+
+
+def _pastas_unicas(nomes):
+    """Nome de arquivo de cada órgão, sem repetir: nomes que só diferem em acento ou pontuação não se sobrescrevem."""
+    usadas, pastas = set(), []
+    for nome in nomes:
+        base = entrada.slug(nome)
+        pasta, n = base, 2
+        while pasta in usadas:
+            pasta, n = f"{base}_{n}", n + 1
+        usadas.add(pasta)
+        pastas.append(pasta)
+    return pastas
 
 
 def zipar(pasta):

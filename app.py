@@ -4,9 +4,12 @@ Execução local:
     pip install -r requirements.txt
     streamlit run app.py
 A chave da API fica no arquivo .env (ANTHROPIC_API_KEY=...) ou nos Secrets do Streamlit.
+A senha de acesso (APP_SENHA=...) fica no mesmo lugar; sem ela, o app abre para qualquer um que tenha o link.
 """
 import csv
 import hashlib
+import hmac
+import os
 import tempfile
 import threading
 import zipfile
@@ -79,6 +82,30 @@ st.title("🏛️ Análise da Transição")
 st.caption("Para cada secretaria, um documento curto: em uma página, diagnóstico, riscos e decisões urgentes, com "
            "anexos de fontes e vencimentos. Para o conjunto, o painel estadual de urgências e o calendário em Excel. "
            "Expõe riscos e escolhas para quem decide: não recomenda.")
+
+
+def _senha_do_app():
+    try:
+        senha = st.secrets.get("APP_SENHA")
+    except Exception:                       # sem arquivo de Secrets
+        senha = None
+    return senha or os.getenv("APP_SENHA") or ""
+
+
+# A análise em andamento e o .zip ficam na memória do app e valem para todas as abas: sem senha, quem tiver o link vê
+# o andamento e baixa os documentos das secretarias.
+SENHA = _senha_do_app()
+if SENHA and not st.session_state.get("autenticado"):
+    with st.form("entrar"):
+        digitada = st.text_input("Senha de acesso", type="password")
+        if st.form_submit_button("Entrar", type="primary"):
+            if hmac.compare_digest(digitada.encode(), SENHA.encode()):
+                st.session_state["autenticado"] = True
+                st.rerun()
+            st.error("Senha incorreta.")
+    st.stop()
+if not SENHA:
+    st.sidebar.warning("Sem senha de acesso: quem tiver o link vê e baixa as análises. Defina APP_SENHA nos Secrets.")
 
 with st.sidebar:
     st.header("Modelos")
