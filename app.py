@@ -7,6 +7,8 @@ A chave da API fica no arquivo .env (ANTHROPIC_API_KEY=...) ou nos Secrets do St
 """
 import csv
 import hashlib
+import importlib
+import sys
 import tempfile
 import threading
 import zipfile
@@ -16,7 +18,8 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from transicao import VERSAO, analise, entrada
+import transicao
+from transicao import analise, entrada
 from transicao.config import MODELOS
 
 load_dotenv()
@@ -63,6 +66,42 @@ def _executar(trabalho, orgaos, cfg, economico):
         trabalho["fim"] = datetime.now()
 
 
+# --- CÓDIGO ATUALIZADO --------------------------------------------------------------------------
+# O Streamlit Cloud recarrega o app.py quando o repositório muda, mas mantém na memória os módulos de transicao/ já
+# importados. Sem isto, a tela nova rodaria com a lógica antiga até alguém reiniciar o app.
+PASTA_CODIGO = Path(__file__).resolve().parent / "transicao"
+ORDEM_MODULOS = ["config", "modelo", "entrada", "pesquisa", "verificacao", "confronto", "produtos", "riscos",
+                 "documentos", "painel", "lote_api", "analise"]
+
+
+def _assinatura_codigo():
+    return hashlib.md5(b"".join(p.read_bytes() for p in sorted(PASTA_CODIGO.glob("*.py")))).hexdigest()
+
+
+@st.cache_resource(show_spinner=False)
+def _codigo_carregado():
+    return {"assinatura": _assinatura_codigo()}
+
+
+def atualizar_codigo():
+    """Recarrega transicao/ se o código mudou desde que foi carregado. Com análise em andamento, espera ela acabar
+    (recarregar no meio trocaria as funções que a análise está usando). Devolve True se o código está atualizado."""
+    carregado = _codigo_carregado()
+    atual = _assinatura_codigo()
+    if carregado["assinatura"] == atual:
+        return True
+    rodando = trabalho_atual()
+    if rodando and rodando["situacao"] == "rodando":
+        return False
+    for nome in ORDEM_MODULOS:
+        modulo = sys.modules.get(f"transicao.{nome}")
+        if modulo is not None:
+            importlib.reload(modulo)
+    importlib.reload(sys.modules["transicao"])
+    carregado["assinatura"] = atual
+    return True
+
+
 def linhas(trabalho):
     caminho = Path(trabalho["saida"]) / "resumo.csv"
     try:
@@ -75,6 +114,8 @@ def linhas(trabalho):
 # --- TELA ------------------------------------------------------------------------------------
 
 st.set_page_config(page_title="Análise da Transição", page_icon="🏛️", layout="wide")
+if not atualizar_codigo():
+    st.warning("Há uma versão nova do código. Ela entra em uso quando a análise em andamento terminar.")
 st.title("🏛️ Análise da Transição")
 st.caption("Para cada secretaria, um documento curto: em uma página, diagnóstico, riscos e decisões urgentes, com "
            "anexos de fontes e vencimentos. Para o conjunto, o painel estadual de urgências e o calendário em Excel. "
@@ -98,7 +139,7 @@ with st.sidebar:
         orgao_emissor = st.text_input("Órgão", value="Equipe de Transição")
         unidade = st.text_input("De (unidade)", value="")
         para = st.text_input("Para", value="")
-    st.caption(f"Versão {VERSAO}")
+    st.caption(f"Versão {transicao.VERSAO}")
 
 trabalho = trabalho_atual()
 
