@@ -13,7 +13,7 @@ Um `.zip` com:
 | Arquivo | O que é |
 |---|---|
 | `painel_estadual.docx` | As urgências de todas as secretarias na mesma régua: ranking, temas que se repetem, mapa de calor por categoria e cronograma de quando agir |
-| `documentos/<secretaria>.docx` | **Um documento curto por secretaria**: em uma página; Capítulo 1, diagnóstico (ficha padrão de seis blocos); Capítulo 2, riscos e decisões urgentes; anexos com fontes, vencimentos e método |
+| `documentos/<secretaria>.docx` | **Um documento curto por secretaria**: em uma página (com as lacunas do checklist); Capítulo 1, diagnóstico (ficha padrão de seis blocos) e a cobertura do checklist obrigatório; Capítulo 2, riscos e decisões urgentes; anexos com fontes, vencimentos e método |
 | `calendario_consolidado.xlsx` | Os vencimentos de todas as secretarias; a aba Prioridades vem primeiro |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
 | `auditoria/` | O registro completo de cada análise (inclusive a revisão de cada agente), para conferência técnica |
@@ -35,11 +35,14 @@ Um `.zip` com:
 4. Clique em **Analisar**. A análise roda em segundo plano; pode fechar a página.
 5. Baixe o `.zip`.
 
-Na barra lateral: modelos, modo econômico (Batch API, metade do preço, mais lento), data de corte,
-foco e cabeçalho do documento.
+Na barra lateral: modelos (inclusive um modelo por agente revisor, de provedores diferentes), modo econômico (Batch
+API, metade do preço, mais lento), data de corte, foco e cabeçalho do documento.
 
-**Não reinicie o app nem faça merge no GitHub com uma análise em andamento**: o Streamlit reinicia e a análise se perde.
-**Não envie documentos sigilosos** (licitações em curso, processos sob sigilo): o texto vai para a API da Anthropic.
+**Se o app reiniciar no meio** (merge no GitHub, queda), a tela oferece **retomar**: cada secretaria concluída fica
+gravada em `registros/` (fora do Git) e só o que faltou é analisado de novo. Um reinício durante a análise ainda
+custa tempo: evite fazer merge com análise em andamento.
+**Não envie documentos sigilosos** (licitações em curso, processos sob sigilo): o texto vai para a API da Anthropic
+(e dos outros provedores, se escolher modelos deles para os agentes).
 
 ## Como rodar
 
@@ -60,16 +63,23 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
 2. **Diagnóstico.** Seis blocos fixos (missão e estrutura; orçamento e execução; pessoas; contratos e fornecedores;
    entregas e programas; controle, passivos e judicialização), com uma ficha de números calculada por código. Cada
    afirmação cita o dossiê ou um trecho literal do relatório da secretaria; o que não confere é retirado.
-3. **Vencimentos.** Régua de risco por código: serviço essencial, impacto, data-limite para agir, tempo para nova
+3. **Checklist obrigatório.** Dez pontos que toda secretaria precisa responder (contratos a vencer, emergenciais,
+   execução, restos a pagar, TCE-RJ, judicialização, convênios federais, obras, pessoal, sistemas críticos). Cada um
+   sai com estado conferido por código: **encontrado** (com os fatos), **procurado e não encontrado** (a pesquisa
+   registrou a busca, ou o órgão informou que não há) ou **não procurado**. O que ficou em branco aparece na primeira
+   página do documento, entra no que pedir à secretaria e derruba a confiança: alta só sem nenhum ponto em branco.
+   A pesquisa do app recebe os pontos como obrigatórios e registra os que não achou.
+4. **Vencimentos.** Régua de risco por código: serviço essencial, impacto, data-limite para agir, tempo para nova
    licitação, aditivo recente no PNCP e prioridade (impacto × urgência).
-4. **Análise de riscos.** Uma análise lê o diagnóstico e os vencimentos e propõe riscos (causa → consequência),
+5. **Análise de riscos.** Uma análise lê o diagnóstico e os vencimentos e propõe riscos (causa → consequência),
    decisões em aberto e o que pedir à secretaria.
-5. **Cinco agentes independentes** revisam a análise sem ver uns aos outros: Fazenda e orçamento; controle e jurídico;
+6. **Cinco agentes independentes** revisam a análise sem ver uns aos outros: Fazenda e orçamento; controle e jurídico;
    área-fim e usuário do serviço; operação e servidores; nova gestão (prioridades e articulação). Apontam riscos que
-   faltaram, riscos exagerados e o que temem e valorizam em cada opção.
-6. **Consolidação e conferência.** Uma consolidação junta as revisões; o código confere os fatos citados por cada
+   faltaram, riscos exagerados e o que temem e valorizam em cada opção. Cada agente pode usar um modelo diferente
+   (inclusive de outro provedor, pelo LiteLLM): os pontos cegos de um modelo deixam de se repetir nos cinco.
+7. **Consolidação e conferência.** Uma consolidação junta as revisões; o código confere os fatos citados por cada
    risco, dá a firmeza da informação e calcula a prioridade. Um segundo modelo revisa a neutralidade.
-7. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
+8. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
    riscos de todas as secretarias; o modelo só aponta os temas que se repetem.
 
 ## Código
@@ -85,10 +95,11 @@ transicao/
   riscos.py            análise de riscos, cinco agentes, consolidação, prioridade e neutralidade
   painel.py            painel estadual
   produtos.py          calendário, régua de risco dos vencimentos e diagnóstico
+  checklist.py         checklist obrigatório: o estado de cada ponto (encontrado, procurado, não procurado)
   verificacao.py       conferência dos números do documento
   documentos.py        Word e Excel
   lote_api.py          modo econômico (Batch API)
-  analise.py           o fluxo de um órgão e de vários
+  analise.py           o fluxo de um órgão e de vários; retomada do disco
 tests/                 testes com um modelo falso: não chamam nenhuma API
 ```
 

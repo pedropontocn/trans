@@ -378,7 +378,7 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     diag = funcoes.extrair_diagnostico("m", d, rel, "Secretaria de Exemplo")
     resultado = _resultado_exemplo()
     texto = funcoes.documento_secretaria(resultado, diag, [("Contratos que vencem em até 180 dias", "3")], [], d, None,
-                                         funcoes.resumo_dossie(d), "## Anexo 3 – Como este documento foi feito\nx",
+                                         funcoes.resumo_dossie(d), "", "## Anexo 3 – Como este documento foi feito\nx",
                                          funcoes.sobre_o_documento("04/11/2026", {"nivel": "média"}))
     ordem = [texto.index(t) for t in ["## Sobre este documento", "## O essencial", "## Os riscos mais urgentes",
                                       "## Capítulo 1 – Diagnóstico", "### Ficha", "### Missão e estrutura",
@@ -440,3 +440,96 @@ def test_material_dos_riscos_tem_ids_e_limite_da_base(funcoes, llm):
     texto = funcoes.material("SEX", diag, funcoes.vencimentos_numerados([ev]), "DIVERGÊNCIAS: x", "04/11/2026")
     assert "[F1]" in texto and "[V1] vence 20/12/2026" in texto and "agir até 20/11/2026" in texto
     assert "contratos de gestão com OS" in texto and "DIVERGÊNCIAS: x" in texto
+
+
+# --- CHECKLIST OBRIGATÓRIO -----------------------------------------------------------------------
+
+def test_checklist_da_o_estado_de_cada_ponto(funcoes, llm):
+    rel, _ = funcoes.limpar_relatorio(RELATORIO)
+    d = dossie_exemplo(funcoes)
+    llm.checklist = {"respostas": [
+        {"id": "C3", "resposta": "LOA de R$ 412 mi; empenhado R$ 398,75 mi.", "itens": ["O1"],
+         "trechos": ["Empenhado até 23/10/2026: R$ 398.750.000,00"]},
+        {"id": "C5", "resposta": "O TCE-RJ apontou atraso em convênios.", "itens": ["O4"]},
+        {"id": "C6", "resposta": "Inventada, sem referência.", "itens": ["O999"], "trechos": ["frase que não existe"]},
+        {"id": "C7", "resposta": "Não há convênios federais.", "trechos": ["Empenhado até 23/10/2026: R$ 398.750.000,00"],
+         "nega": True}]}
+    brutas = funcoes.responder("m", d, rel, "Secretaria de Exemplo")["respostas"]
+    assert set(brutas) == {"C3", "C5", "C6", "C7"}
+    cob = {c["id"]: c for c in funcoes.conferir(brutas, d, rel, [])}
+    assert [c["id"] for c in funcoes.conferir(brutas, d, rel, [])] == [p[0] for p in funcoes.PERGUNTAS]
+    assert cob["C3"]["estado"] == "encontrado" and cob["C3"]["fatos"] == ["O1"] and cob["C3"]["trechos"]
+    assert cob["C3"]["firmeza"] == "confirmado em fonte oficial"      # a melhor entre as referências, como nos riscos
+    assert cob["C5"]["estado"] == "encontrado" and cob["C5"]["firmeza"] == "confirmado em fonte oficial"
+    assert cob["C7"]["estado"] == "procurado e não encontrado"            # o órgão informou que não há
+    # referência inventada vale como nada; o bloco ter itens na pesquisa não prova que o ponto foi procurado
+    assert cob["C6"]["estado"] == "não procurado" and not cob["C6"]["fatos"]
+    # pessoal: a pesquisa registrou o que procurou e não achou (palavra-chave "terceirizados", no bloco certo)
+    assert cob["C9"]["estado"] == "procurado e não encontrado" and "terceirizados" in cob["C9"]["resposta"]
+    assert cob["C8"]["estado"] == "não procurado"
+    # o registro pelo id vale em qualquer bloco; palavra solta fora do bloco não vale
+    d_id = dict(d, nao_encontrado=[{"bloco": "outro_orgao", "procurado": "C8: obras paradas na secretaria"},
+                                   {"bloco": "mandato_estrutura", "procurado": "aditivos de obras"}])
+    cob_id = {c["id"]: c for c in funcoes.conferir({}, d_id, rel, [])}
+    assert cob_id["C8"]["estado"] == "procurado e não encontrado" and "C8: obras" in cob_id["C8"]["resposta"]
+    assert cob_id["C9"]["estado"] == "não procurado"
+    d2 = dict(d, origem="arquivo", nao_encontrado=[])
+    cob2 = {c["id"]: c for c in funcoes.conferir(brutas, d2, rel, [])}
+    assert cob2["C6"]["estado"] == "não procurado" and cob2["C9"]["estado"] == "não procurado"
+    assert cob2["C5"]["estado"] == "encontrado"
+    r = funcoes.resumo(funcoes.conferir(brutas, d2, rel, []))
+    assert r["não procurado"] >= 5 and "C6" in r["nao_procurados"]
+    md = funcoes.markdown(funcoes.conferir(brutas, d2, rel, []))
+    assert "NÃO PROCURADO" in md and "procurar em: PGE e TJRJ" in md and "O4" in md
+    assert "não foram procurados" in funcoes.linha_essencial(funcoes.conferir(brutas, d2, rel, []))
+
+
+def test_checklist_responde_contratos_por_codigo(funcoes):
+    from datetime import date
+    eventos = [{"data": date(2026, 12, 1), "dias": 27, "evento": "Vencimento do contrato 1/2026 (emergencial)", "objeto": "limpeza",
+                "valor": 1_000_000.0, "origem": "Contratos (SIGA/PNCP)"},
+               {"data": date(2027, 1, 20), "dias": 77, "evento": "Vencimento do contrato 2/2026", "objeto": "vigilância",
+                "valor": 2_500_000.0, "origem": "Contratos (SIGA/PNCP)"}]
+    cob = {c["id"]: c for c in funcoes.conferir({}, {"itens": [], "origem": "arquivo"}, "", eventos)}
+    assert cob["C1"]["estado"] == "encontrado" and "2 contrato(s)" in cob["C1"]["resposta"] and "3.500.000" in cob["C1"]["resposta"]
+    assert cob["C1"]["firmeza"] == "dado do SIGA/PNCP"
+    assert cob["C2"]["estado"] == "encontrado" and "1 contrato(s) emergencial" in cob["C2"]["resposta"]
+    sem = {c["id"]: c for c in funcoes.conferir({}, {"itens": [], "origem": "arquivo"}, "",
+                                                  [dict(eventos[1], evento="Vencimento do contrato 2/2026")])}
+    assert sem["C2"]["estado"] == "procurado e não encontrado"           # a planilha existe e não tem emergencial
+
+
+def test_confianca_cai_com_ponto_nao_procurado(funcoes):
+    dossie_bom = {"itens": 10, "conferidos": 9, "nao_encontrado": 0}
+    riscos = [{"firmeza": "confirmado em fonte oficial"}] * 3
+    todos = [{"id": f"C{k}", "estado": "encontrado"} for k in range(1, 11)]
+    assert funcoes.confianca(dossie_bom, riscos, todos)["nivel"] == "alta"
+    um = todos[:9] + [{"id": "C10", "estado": "não procurado"}]
+    c = funcoes.confianca(dossie_bom, riscos, um)
+    assert c["nivel"] == "média" and "não procurados: C10" in c["motivos"][0]
+    muitos = todos[:4] + [{"id": f"C{k}", "estado": "não procurado"} for k in range(5, 11)]
+    assert funcoes.confianca(dossie_bom, riscos, muitos)["nivel"] == "baixa"
+
+
+def test_pesquisa_recebe_os_pontos_obrigatorios_do_checklist(funcoes, llm):
+    funcoes.montar_dossie("m", "Secretaria de Exemplo", "04/11/2026")
+    pedidos = [c["mensagens"][0]["content"] for c in llm.chamadas if "Monte a camada" in c["mensagens"][0]["content"]]
+    do_orgao = [p for p in pedidos if 'camada\n"órgão"' in p]
+    do_estado = [p for p in pedidos if 'camada\n"Estado"' in p]
+    assert do_orgao and all("PONTOS OBRIGATÓRIOS" in p for p in do_orgao)
+    assert not any("PONTOS OBRIGATÓRIOS" in p for p in do_estado)
+    grupo_controle = next(p for p in do_orgao if "- controle_judicializacao:" in p)
+    assert "C5:" in grupo_controle and "C6:" in grupo_controle and "C3:" not in grupo_controle
+
+
+def test_agentes_podem_usar_modelos_diferentes(funcoes, llm):
+    assert funcoes.modelos_dos_agentes("anthropic/claude-opus-5-5") == ["anthropic/claude-opus-5-5"] * 5
+    assert funcoes.modelos_dos_agentes("a", ["", None]) == ["a"] * 5
+    modelos = funcoes.modelos_dos_agentes("a", ["anthropic/claude-opus-5-5", " gemini/gemini-2.5-pro "])
+    assert modelos == ["anthropic/claude-opus-5-5", "gemini/gemini-2.5-pro"] * 2 + ["anthropic/claude-opus-5-5"]
+    revisoes = funcoes.revisar_por_agentes("a", "MATERIAL", {"riscos": []}, [], modelos)
+    assert [r["modelo"] for r in revisoes] == modelos and all(not r.get("erro") for r in revisoes)
+    chamadas = [c for c in llm.chamadas if "Você revisa a análise de riscos" in str(c["mensagens"][0]["content"])]
+    assert sorted(c["modelo"] for c in chamadas) == sorted(modelos)
+    md = funcoes.markdown_metodo("x", {}, None, {"nivel": "alta", "motivos": []}, [], None, revisoes, {"riscos": []})
+    assert "gemini/gemini-2.5-pro" in md and "provedores diferentes" in md
