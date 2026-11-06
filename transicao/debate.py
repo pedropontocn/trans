@@ -115,7 +115,7 @@ LINGUAGEM (obrigatório):
 - Informado x confirmado: nunca diga que o órgão não enviou algo que está no CONTEÚDO DA AUTODECLARAÇÃO. Separe "o órgão
   não informou" de "o órgão informou, falta confirmar".
 
-TAMANHO: no máximo 700 palavras.
+TAMANHO: no máximo 800 palavras.
 
 Entregue somente o Markdown abaixo, nesta ordem, sem texto antes ou depois:
 
@@ -123,11 +123,15 @@ Entregue somente o Markdown abaixo, nesta ordem, sem texto antes ou depois:
 ## O essencial
 (3 tópicos de uma linha: o maior risco, o prazo mais próximo e o volume em jogo)
 ## Urgências
-(3 a 5 urgências, da mais próxima e de maior impacto para a menos. Parta dos PONTOS DE URGÊNCIA; junte o que for do
-mesmo assunto. Um ### por urgência: "### 1. (o problema, em até 10 palavras) – até (data ou "antes da posse")".
+(3 a 5 urgências, na ordem de prioridade dos PONTOS DE URGÊNCIA, que já pesam impacto, serviço essencial e prazo
+para agir; junte o que for do mesmo assunto. Serviço essencial que vence vem antes de obra de valor maior. Um ### por
+urgência: "### 1. (o problema, em até 10 palavras) – agir até (a data-limite para agir, ou "antes da posse")".
 Embaixo, exatamente estes itens:
-- **Em jogo:** valor, serviço ou obra afetada.
-- **Se nada for feito:** a consequência concreta, com data se houver.
+- **Risco:** causa → consequência, numa frase (ex.: "contratos vencem sem substituto → recuperação de vias para em
+  janeiro").
+- **Em jogo:** valor, serviço ou obra afetada; diga se é serviço essencial.
+- **Prazo:** a data do evento e a data-limite para agir; se não há mais tempo para nova licitação, diga.
+- **O que já se sabe que está em curso:** só se houver aditivo publicado ou providência informada; senão, omita o item.
 - **Decisão a tomar:** a pergunta, sem sugerir a resposta. Quem decide.
 - **Base:** um dos rótulos de firmeza acima.)
 ## Decisões em aberto
@@ -142,6 +146,9 @@ pergunta. Embaixo:
 | Risco | Quando | Impacto | Sinal de alerta |
 |---|---|---|---|
 (3 a 5 linhas que não entraram nas urgências; Impacto só Alto/Médio/Baixo)
+## O que este documento não cobre
+(1 ou 2 frases: os limites da base usada, como contratos de gestão, convênios e concessões fora do SIGA, se os PONTOS DE
+URGÊNCIA indicarem; e o que o órgão não informou)
 """
 
 

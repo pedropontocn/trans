@@ -450,7 +450,7 @@ def test_calendario_em_excel(funcoes):
     ws = wb["Calendário"]
     assert ws["A2"].value.date() == date(2026, 11, 11) and ws["D3"].value == "SECID"     # ordenado por data
     assert ws["M2"].hyperlink.target == "https://alerj.exemplo/emendas" and ws.auto_filter.ref
-    assert ws["A3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Calendário", "Como ler", "Descartados"}
+    assert ws["A3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Prioridades", "Calendário", "Como ler", "Descartados"}
 
 
 def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
@@ -476,7 +476,7 @@ def test_documento_unico_do_orgao(funcoes, llm):
     assert eventos
     texto = funcoes.documento_orgao(MEMORANDO, diag, eventos, d, None, "## Anexo 2 – O debate em detalhe\nx",
                                     "## Anexo 3 – Como este documento foi feito\ny")
-    ordem = [texto.index(t) for t in ["# Memorando", "## Diagnóstico do órgão", "### Próximos vencimentos",
+    ordem = [texto.index(t) for t in ["# Memorando", "## Diagnóstico do órgão", "### Vencimentos prioritários",
                                       "## Anexo 1", "## Anexo 2", "## Anexo 3"]]
     assert ordem == sorted(ordem)
     dados = funcoes.gerar_docx(texto, {"orgao": "Equipe", "data": "6 de novembro de 2026"})
@@ -505,16 +505,50 @@ def test_resposta_cortada_e_repetida_com_mais_espaco(funcoes, llm):
 def test_pontos_de_urgencia_ordenados_por_prazo_e_valor(funcoes):
     from datetime import date
     def ev(dias, valor, nome):
-        return {"data": date(2026, 11, 6), "dias": dias, "valor": valor, "evento": nome, "objeto": "",
+        from datetime import timedelta
+        return {"data": date(2026, 11, 6) + timedelta(days=dias), "dias": dias, "valor": valor, "evento": nome, "objeto": "",
                 "valor_texto": f"R$ {valor}", "origem": "Contratos do Estado (SIGA/PNCP)"}
     eventos = [ev(60, 300e6, "grande e distante"), ev(10, 1e6, "pequeno e próximo"), ev(20, 50e6, "médio e próximo"),
                ev(200, 900e6, "fora da janela")]
+    for e in eventos:
+        e["tipo"] = "Contrato"
+    funcoes.avaliar_riscos(eventos, "06/11/2026")
     d = dossie_exemplo(funcoes)
     texto = funcoes.pontos_de_urgencia(eventos, d, {"divergencias": [
         {"situacao": "contradiz", "o_orgao_declara": "100 obras", "as_fontes_mostram": "80 obras"}]})
     linhas = texto.splitlines()
     assert linhas[1].startswith("- 2 vencimento(s) em até 30 dias, somando R$ 51,0 mi")
     ordem = [l for l in linhas if "dias):" in l]
-    assert ["médio" in ordem[0], "pequeno" in ordem[1], "grande" in ordem[2]] == [True, True, True]
+    assert ["médio" in ordem[0], "grande" in ordem[1], "pequeno" in ordem[2]] == [True, True, True]   # impacto × urgência
     assert "fora da janela" not in texto and "Controle/Judiciário" in texto and "80 obras" in texto
     assert funcoes.pontos_de_urgencia([], {"itens": []}) == ""
+
+
+def test_regua_de_risco_igual_para_todos(funcoes):
+    from datetime import date, timedelta
+    corte = date(2026, 11, 6)
+    def ev(dias, valor, objeto, termos=None, tipo="Contrato"):
+        return {"data": corte + timedelta(days=dias), "dias": dias, "valor": valor, "evento": "Fim do contrato",
+                "objeto": objeto, "tipo": tipo, "valor_texto": "", "origem": "Contratos do Estado (SIGA/PNCP)",
+                "termos": termos if termos is not None else ""}
+    eventos = funcoes.avaliar_riscos([
+        ev(40, 300e6, "PAVIMENTAÇÃO DE VIAS"),                                     # obra grande
+        ev(40, 2e6, "FORNECIMENTO DE ALIMENTAÇÃO PARA PRESOS"),                    # essencial pequeno
+        ev(40, 2e6, "ALIMENTAÇÃO HOSPITALAR", "Termo Aditivo Termo 1 (2026-10-20)"),  # essencial com aditivo
+        ev(200, 1e6, "MATERIAL DE ESCRITÓRIO"),
+    ], "06/11/2026")
+    obra, presos, hospital, escritorio = eventos
+    assert presos["essencial"] and presos["impacto"] == "Alto" and presos["categoria"].startswith("Continuidade")
+    assert obra["categoria"] == "Obra" and obra["impacto"] == "Alto"
+    assert presos["agir_ate"] == corte + timedelta(days=10) and presos["sem_tempo_licitar"]
+    assert presos["prioridade"] == "Máxima" and hospital["prioridade_nota"] < presos["prioridade_nota"]
+    assert "aditivo publicado em 20/10/2026" in hospital["situacao_pncp"]
+    assert escritorio["prioridade"] == "Baixa" and not escritorio["sem_tempo_licitar"]
+    md = funcoes.markdown_vencimentos(eventos)
+    assert md.index("ALIMENTAÇÃO PARA PRESOS") < md.index("ALIMENTAÇÃO HOSPITALAR") and "serviço essencial" in md
+    assert "contratos de gestão com OS" in md
+    import io
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(funcoes.calendario_xlsx([dict(e, orgao="SEX", criticidade="x", so_mes=False,
+                                consequencia="", decisao="", fonte="", trecho="") for e in eventos])))
+    assert wb.sheetnames[0] == "Prioridades" and wb["Prioridades"]["A2"].value == "Máxima"

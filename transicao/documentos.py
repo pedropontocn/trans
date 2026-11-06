@@ -553,14 +553,26 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
     ws.title = "Calendário"
     colunas = [("Data", 12), ("Dias até a data", 9), ("Criticidade", 20), ("Órgão", 30), ("Tipo", 16), ("Evento", 45),
                ("Objeto", 35), ("Valor (R$)", 16), ("Valor como informado", 18), ("O que acontece se nada for feito", 45),
-               ("Decisão necessária", 40), ("Origem da informação", 20), ("Fonte", 40), ("Trecho conferido", 60)]
+               ("Decisão necessária", 40), ("Origem da informação", 20), ("Fonte", 40), ("Trecho conferido", 60),
+               ("Prioridade", 11), ("Nota (impacto × urgência)", 10), ("Impacto", 9), ("Categoria", 24),
+               ("Serviço essencial", 10), ("Agir até", 12), ("Sem tempo para nova licitação", 12),
+               ("Situação no PNCP", 40)]
     ws.append([c for c, _ in colunas])
+    cores_prioridade = {"Máxima": "C00000", "Alta": "F4B183", "Média": "FFE699", "Baixa": "E2EFDA"}
     cores = {"Vencido": "C00000", "Crítico (até 30 dias)": "F4B183", "Atenção (31 a 90 dias)": "FFE699",
              "Acompanhar": "E2EFDA"}
     for e in sorted(eventos, key=lambda x: (x["data"], -(x["valor"] or 0))):
         ws.append([e["data"], e["dias"], e["criticidade"], e["orgao"], e["tipo"], e["evento"], e["objeto"], e["valor"],
-                   e["valor_texto"], e["consequencia"], e["decisao"], e["origem"], e["fonte"], e["trecho"]])
+                   e["valor_texto"], e["consequencia"], e["decisao"], e["origem"], e["fonte"], e["trecho"],
+                   e.get("prioridade", ""), e.get("prioridade_nota"), e.get("impacto", ""), e.get("categoria", ""),
+                   "sim" if e.get("essencial") else "não", e.get("agir_ate"),
+                   "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", "")])
         linha = ws.max_row
+        ws.cell(linha, 20).number_format = "dd/mm/yyyy"
+        if e.get("prioridade") in cores_prioridade:
+            ws.cell(linha, 15).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
+            if e["prioridade"] == "Máxima":
+                ws.cell(linha, 15).font = Font(color="FFFFFF", bold=True)
         ws.cell(linha, 1).number_format = "mm/yyyy" if e["so_mes"] else "dd/mm/yyyy"
         ws.cell(linha, 8).number_format = '#,##0.00'
         if e["criticidade"] in cores:
@@ -580,6 +592,28 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
             c.alignment = Alignment(wrap_text=True, vertical="top")
     ws.freeze_panes = "B2"
     ws.auto_filter.ref = ws.dimensions
+    prioridades = wb.create_sheet("Prioridades", 0)        # a primeira aba: o que tratar primeiro, em todos os órgãos
+    cab = ["Prioridade", "Agir até", "Vence em", "Órgão", "Categoria", "Serviço essencial", "Evento", "Valor (R$)",
+           "Sem tempo para nova licitação", "Situação no PNCP", "Fonte"]
+    prioridades.append(cab)
+    from .produtos import ordem_de_prioridade
+    for e in sorted([e for e in eventos if e["dias"] >= -30], key=ordem_de_prioridade)[:200]:
+        prioridades.append([e.get("prioridade", ""), e.get("agir_ate"), e["data"], e["orgao"], e.get("categoria", ""),
+                            "sim" if e.get("essencial") else "não", e["evento"], e["valor"],
+                            "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", ""), e["fonte"]])
+        linha = prioridades.max_row
+        for col in (2, 3):
+            prioridades.cell(linha, col).number_format = "dd/mm/yyyy"
+        prioridades.cell(linha, 8).number_format = '#,##0.00'
+        if e.get("prioridade") in cores_prioridade:
+            prioridades.cell(linha, 1).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
+    for j, largura in enumerate([11, 12, 12, 30, 24, 10, 50, 16, 12, 40, 40], 1):
+        prioridades.column_dimensions[get_column_letter(j)].width = largura
+        prioridades.cell(1, j).font = Font(bold=True, color="FFFFFF")
+        prioridades.cell(1, j).fill = PatternFill("solid", fgColor="1B2A41")
+        prioridades.cell(1, j).alignment = Alignment(wrap_text=True, vertical="center")
+    prioridades.freeze_panes = "A2"
+    prioridades.auto_filter.ref = prioridades.dimensions
     leia = wb.create_sheet("Como ler")
     for texto in [titulo, f"Data de corte: {data_corte}" if data_corte else "",
                   "Cada linha é um evento com data escrita nos documentos: vencimento de contrato ou convênio, prazo "
@@ -591,6 +625,16 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
                   "pública\" quer dizer que veio de documento ou notícia com link.",
                   "Criticidade (pela distância até a data de corte): Vencido; Crítico, até 30 dias; Atenção, de 31 a "
                   "90 dias; Acompanhar, mais de 90 dias.",
+                  "Prioridade (régua igual para todos os órgãos, calculada por código): impacto × urgência. Impacto "
+                  "Alto para serviço essencial (saúde, medicamentos, alimentação, custódia, vigilância, sistemas críticos "
+                  "etc.) a partir de R$ 1 mi, decisão de controle ou outro contrato a partir de R$ 50 mi; Médio para "
+                  "serviço essencial menor, outro contrato a partir de R$ 5 mi ou valor desconhecido; Baixo abaixo disso. Urgência pela data-limite para agir: já passou, até 30, até 90 ou mais de 90 dias. "
+                  "Aditivo publicado no PNCP nos últimos 120 dias reduz a urgência em um nível. Máxima: nota 9 ou mais; "
+                  "Alta: 6 a 8; Média: 3 a 5; Baixa: 1 ou 2.",
+                  "Agir até: para contratos, 30 dias antes do fim (tempo de assinar uma prorrogação). Sem tempo para "
+                  "nova licitação: o contrato vence em menos de 120 dias.",
+                  "A aba Prioridades mostra os 200 eventos de maior prioridade de todos os órgãos. Limite: "
+                  "contratos de gestão com OS, convênios e concessões não estão na base de contratos (SIGA).",
                   "Datas só com mês e ano aparecem como mm/aaaa.",
                   "Limite: só entram datas que estão escritas nos documentos. Se um relatório não traz a vigência dos "
                   "contratos, eles não aparecem aqui. Gerado com apoio de IA; confira antes de usar."]:
@@ -652,22 +696,29 @@ def markdown_diagnostico(diag):
 
 
 def markdown_vencimentos(eventos, limite=12, dias_passados=30):
-    """Os próximos vencimentos do órgão, em tabela curta. O calendário completo de todos os órgãos vai no Excel."""
-    proximos = [e for e in eventos or [] if e["dias"] >= -dias_passados]
-    if len(proximos) > limite:                 # muitos vencimentos: os de maior valor nos próximos 90 dias
-        janela = [e for e in proximos if e["dias"] <= 90] or proximos
-        proximos = sorted(janela, key=lambda x: -(x.get("valor") or 0))[:limite]
-    proximos.sort(key=lambda x: x["data"])
+    """Os vencimentos de maior prioridade do órgão, em tabela curta. O calendário completo vai no Excel."""
+    from .produtos import LIMITE_SIGA, ordem_de_prioridade
+    candidatos = [e for e in eventos or [] if e["dias"] >= -dias_passados]
+    proximos = sorted(candidatos, key=ordem_de_prioridade)[:limite]
     if not proximos:
         return ""
-    linhas = ["### Próximos vencimentos",
-              "| Data | Evento | Valor | Situação | Origem |", "|---|---|---|---|---|"]
+    linhas = ["### Vencimentos prioritários",
+              "Ordem por prioridade (impacto × urgência). \"Agir até\" desconta "
+              "o tempo de assinar uma prorrogação (30 dias); nova licitação costuma levar uns 120 dias.",
+              "| Prioridade | Agir até | Vence em | Evento | Valor | Situação |", "|---|---|---|---|---|---|"]
     for e in proximos:
         data = e["data"].strftime("%m/%Y" if e.get("so_mes") else "%d/%m/%Y")
-        evento = e["evento"] + (f" ({e['objeto']})" if e.get("objeto") else "")
-        linhas.append(f"| {data} | {evento} | {e.get('valor_texto') or '–'} | {e['criticidade']} | {e['origem']} |")
+        agir = e["agir_ate"].strftime("%d/%m/%Y") if e.get("agir_ate") else data
+        evento = (e["evento"] + (f" ({e['objeto'][:80]})" if e.get("objeto") else "")
+                  + (" – serviço essencial" if e.get("essencial") else ""))
+        situacao = "; ".join(x for x in [e.get("criticidade", ""), "sem tempo para nova licitação"
+                                         if e.get("sem_tempo_licitar") else "", e.get("situacao_pncp", "")] if x)
+        linhas.append(f"| {e.get('prioridade', '–')} | {agir} | {data} | {evento} | {e.get('valor_texto') or '–'} | "
+                      f"{situacao} |")
     if len(eventos) > len(proximos):
-        linhas.append(f"_Calendário completo, com {len(eventos)} data(s) conferida(s), no Excel consolidado._")
+        linhas.append(f"_Calendário completo, com {len(eventos)} data(s), no Excel consolidado._")
+    if any(e.get("origem", "").startswith("Contratos") for e in eventos):
+        linhas.append(f"_Limite: {LIMITE_SIGA}_")
     return "\n".join(linhas)
 
 

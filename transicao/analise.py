@@ -135,6 +135,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     if dossie.get("contratos"):               # vencimentos da planilha de contratos: entram por código, sem o modelo
         calendario["eventos"] = produtos.juntar_eventos(
             produtos.eventos_de_contratos(dossie["contratos"], nome, cfg["data_corte"]), calendario.get("eventos") or [])
+    produtos.avaliar_riscos(calendario.get("eventos") or [], cfg["data_corte"])
     for parte in feitos:
         uso.extend(parte.pop("uso", None) or [])
 

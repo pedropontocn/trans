@@ -1,6 +1,6 @@
 """Produtos derivados: calendário de vencimentos e diagnóstico do órgão, com cada data e afirmação conferida."""
 import re
-from datetime import date
+from datetime import date, timedelta
 
 from .modelo import _norm, chamar_json, mensagens_com_cache
 from .pesquisa import TIPOS_OFICIAIS, itens_incluidos, material_referencia
@@ -178,7 +178,7 @@ def eventos_de_contratos(contratos, orgao, data_corte=None):
             "valor_texto": ("R$ " + f"{reais:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")) if reais else "",
             "consequencia": "", "decisao": "Renovar, licitar de novo ou encerrar",
             "origem": "Contratos do Estado (SIGA/PNCP)", "fonte": c.get("url_pncp") or "Base SIGA de contratos",
-            "trecho": c.get("fonte_vigencia") or "SIGA"})
+            "trecho": c.get("fonte_vigencia") or "SIGA", "termos": c.get("termos_pncp") or ""})
     return sorted(eventos, key=lambda x: (x["data"], -(x["valor"] or 0)))
 
 
@@ -190,22 +190,103 @@ def juntar_eventos(dos_contratos, extraidos):
     return sorted(dos_contratos + resto, key=lambda x: (x["data"], -(x["valor"] or 0)))
 
 
+# --- RISCO DE CADA VENCIMENTO: régua comum a todas as secretarias -----------------------------------
+
+# Serviço essencial: o que não pode parar sem dano direto à população ou ao funcionamento do Estado.
+RE_ESSENCIAL = re.compile(
+    r"aliment|refei[çc]|merenda|hemodi|hospital|m[ée]dic|medicament|sa[úu]de|\buti\b|ambul[âa]n|oxig[êe]nio|"
+    r"vigil[âa]ncia|seguran[çc]a patrimonial|cust[óo]dia|presos|penitenci|prisional|limpeza hospitalar|lavanderia|"
+    r"combust[íi]vel|fornecimento de energia|bombeir|defesa civil|resgate|transporte escolar|escolta|"
+    r"data ?center|folha de pagamento|licen[çc]a de uso|telecom|link de dados",
+    re.I)
+RE_OBRA = re.compile(r"\bobra|paviment|constru[çc]|reforma|drenagem|implanta[çc][ãa]o de corredor|projeto executivo|urbaniza|recupera[çc][ãa]o de", re.I)
+ANTECEDENCIA_ADITIVO = 30       # dias antes do fim para assinar uma prorrogação, quando ela é possível
+ANTECEDENCIA_LICITACAO = 120    # dias, em geral, para uma nova licitação ficar pronta
+IMPACTO_PONTOS = {"Alto": 3, "Médio": 2, "Baixo": 1}
+
+
+def _aditivo_recente(termos, base_dia, janela=120):
+    """A data do termo aditivo mais recente publicado no PNCP, se for dos últimos `janela` dias."""
+    datas = []
+    for d in re.findall(r"Termo Aditivo[^;]*?\((\d{4}-\d{2}-\d{2})\)", termos or ""):
+        try:
+            datas.append(date.fromisoformat(d))
+        except ValueError:
+            pass
+    recentes = [d for d in datas if 0 <= (base_dia - d).days <= janela]
+    return max(recentes) if recentes else None
+
+
+def avaliar_riscos(eventos, data_corte=None):
+    """Põe em cada evento a mesma régua de risco, calculada por código: categoria, serviço essencial, impacto,
+    data-limite para agir, se ainda dá tempo de licitar de novo, aditivo recente e a prioridade (impacto × urgência)."""
+    base_dia = (_ler_data(data_corte) or (date.today(), False))[0] if data_corte else date.today()
+    for e in eventos:
+        texto = f"{e.get('evento', '')} {e.get('objeto', '')}"
+        e["essencial"] = bool(RE_ESSENCIAL.search(texto))
+        e["categoria"] = ("Continuidade de serviço essencial" if e["essencial"] else
+                          "Obra" if RE_OBRA.search(texto) else
+                          {"Contrato": "Outros contratos", "Convênio": "Convênio", "Controle/Judicial": "Controle e Judiciário",
+                           "Orçamento": "Fiscal", "Prazo legal": "Prazo legal"}.get(e.get("tipo"), "Outros"))
+        valor = e.get("valor") or 0
+        if e["essencial"]:                      # serviço essencial: alto a partir de R$ 1 mi (ou valor desconhecido)
+            e["impacto"] = "Alto" if valor >= 1e6 or not valor else "Médio"
+        else:
+            e["impacto"] = ("Alto" if valor >= 50e6 or e.get("tipo") == "Controle/Judicial" else
+                            "Médio" if valor >= 5e6 or not valor else "Baixo")
+        contrato = e.get("tipo") in ("Contrato", "Convênio")
+        e["agir_ate"] = e["data"] - timedelta(days=ANTECEDENCIA_ADITIVO) if contrato else e["data"]
+        dias_agir = (e["agir_ate"] - base_dia).days
+        e["sem_tempo_licitar"] = contrato and 0 <= e["dias"] < ANTECEDENCIA_LICITACAO
+        e["aditivo_recente"] = _aditivo_recente(e.get("termos"), base_dia)
+        urgencia = 4 if dias_agir <= 0 else 3 if dias_agir <= 30 else 2 if dias_agir <= 90 else 1
+        if e["aditivo_recente"]:
+            urgencia = max(1, urgencia - 1)             # há termo publicado: pode já estar sendo prorrogado
+        e["prioridade_nota"] = IMPACTO_PONTOS[e["impacto"]] * urgencia
+        e["prioridade"] = ("Máxima" if e["prioridade_nota"] >= 9 else "Alta" if e["prioridade_nota"] >= 6 else
+                           "Média" if e["prioridade_nota"] >= 3 else "Baixa")
+        e["situacao_pncp"] = (f"aditivo publicado em {e['aditivo_recente']:%d/%m/%Y}: pode haver prorrogação em curso"
+                              if e["aditivo_recente"] else "sem aditivo recente no PNCP" if e.get("termos") is not None
+                              and e.get("origem", "").startswith("Contratos") else "")
+    return eventos
+
+
+def ordem_de_prioridade(e):
+    return (-(e.get("prioridade_nota") or 0), e["dias"], -(e.get("valor") or 0))
+
+
+LIMITE_SIGA = ("a base de contratos (SIGA) não traz contratos de gestão com OS, convênios nem concessões; "
+               "o que vence nesses instrumentos não aparece aqui.")
+
+
 def pontos_de_urgencia(eventos, dossie, confronto=None, limite=10):
-    """O que é urgente, ordenado por código (prazo e valor), para o documento começar pelos riscos certos.
+    """O que é urgente, ordenado por código (impacto × urgência), para o documento começar pelos riscos certos.
     Junta os vencimentos do calendário, as decisões de controle e as contradições entre o órgão e as fontes."""
     linhas = []
-    proximos = [e for e in eventos or [] if -30 <= e["dias"] <= 90]
+    proximos = [e for e in eventos or [] if -30 <= e["dias"] <= ANTECEDENCIA_LICITACAO]
     for janela, ate in (("até 30 dias", 30), ("de 31 a 90 dias", 90)):
-        grupo = [e for e in proximos if (e["dias"] <= 30) == (ate == 30)]
+        grupo = [e for e in proximos if e["dias"] <= 90 and (e["dias"] <= 30) == (ate == 30)]
         if grupo:
             total = sum(e.get("valor") or 0 for e in grupo)
             mi = f"{total / 1e6:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
             linhas.append(f"- {len(grupo)} vencimento(s) em {janela}" + (f", somando R$ {mi} mi" if total else "") + ".")
-    peso = lambda e: ((e["dias"] > 30), -(e.get("valor") or 0))          # primeiro os de 30 dias, depois o valor
-    for e in sorted(proximos, key=peso)[:limite]:
+    essenciais = [e for e in proximos if e.get("essencial")]
+    if essenciais:
+        linhas.append(f"- {len(essenciais)} contrato(s) de serviço essencial vencem em até {ANTECEDENCIA_LICITACAO} dias.")
+    for e in sorted(proximos, key=ordem_de_prioridade)[:limite]:
+        marcas = [f"prioridade {e.get('prioridade', '?').lower()}", f"impacto {e.get('impacto', '?').lower()}"]
+        if e.get("essencial"):
+            marcas.append("serviço essencial")
+        if e.get("agir_ate"):
+            marcas.append(f"agir até {e['agir_ate']:%d/%m/%Y}")
+        if e.get("sem_tempo_licitar"):
+            marcas.append("já sem tempo para nova licitação antes do fim")
+        if e.get("situacao_pncp"):
+            marcas.append(e["situacao_pncp"])
         linhas.append(f"- {e['data']:%d/%m/%Y} ({e['dias']} dias): {e['evento']}"
                       + (f" – {e['objeto'][:120]}" if e.get("objeto") else "")
-                      + (f" – {e['valor_texto']}" if e.get("valor_texto") else "") + f" [{e['origem']}]")
+                      + (f" – {e['valor_texto']}" if e.get("valor_texto") else "")
+                      + f" [{'; '.join(marcas)}] [{e['origem']}]")
     controle = [i for i in itens_incluidos(dossie) if i.get("bloco") == "controle_judicializacao" and i.get("camada") == "orgao"]
     controle.sort(key=lambda i: i.get("checagem") != "conferido")
     for i in controle[:4]:
@@ -214,7 +295,10 @@ def pontos_de_urgencia(eventos, dossie, confronto=None, limite=10):
         if d.get("situacao") == "contradiz":
             linhas.append(f"- O órgão informa \"{d.get('o_orgao_declara', '')[:120]}\", mas as fontes mostram "
                           f"\"{d.get('as_fontes_mostram', '')[:120]}\".")
-    return ("PONTOS DE URGÊNCIA (ordenados por código: prazo e valor):\n" + "\n".join(linhas)) if linhas else ""
+    if any(e.get("origem", "").startswith("Contratos") for e in eventos or []):
+        linhas.append(f"- Limite da base: {LIMITE_SIGA}")
+    return ("PONTOS DE URGÊNCIA (ordenados por código: impacto × urgência, com a data-limite para agir):\n"
+            + "\n".join(linhas)) if linhas else ""
 
 
 SECOES_DIAGNOSTICO = ["Missão e competências", "Como o órgão se organiza hoje", "Pessoas", "Orçamento e execução",
