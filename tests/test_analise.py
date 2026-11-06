@@ -255,3 +255,100 @@ def test_custo_com_desconto_do_lote(funcoes):
          "cache_leitura": 0, "cache_escrita": 0, "saida": 1_000_000, "buscas": 100}
     assert round(funcoes.custo_estimado([u])[0], 2) == 25.00
     assert round(funcoes.custo_estimado([dict(u, lote_api=True)])[0], 2) == 13.00
+
+
+# --- DOSSIÊ ENVIADO PELA EQUIPE ---------------------------------------------------------------------
+
+DOSSIE_PERPLEXITY = """# Dossiê – Secretaria de Exemplo
+
+### Fato
+- **Afirmação:** A LOA 2026 da Secretaria é de R$ 412.000.000,00.
+- **Tema:** Orçamento e execução
+- **Fonte:** LOA 2026
+- **Data da fonte:** 01/2026
+- **Link:** [LOA 2026](https://transparencia.exemplo.gov.br/loa-sex)
+- **Trecho literal:** "LOA 2026 da Secretaria de Exemplo:
+  R$ 412.000.000,00"
+- **Tipo:** documento oficial
+
+### Fato
+- Afirmação: Quatro concorrências estão adiadas, somando R$ 120,5 milhões.
+- Tema: Contratos e convênios
+- Fonte: Painel de compras
+- Data: 10/2026
+- Link: https://transparencia.exemplo.gov.br/licitacoes
+- Trecho literal: Quatro concorrências estão adiadas sine die, somando R$ 120.500.000,00
+- Tipo: dado oficial
+
+### Fato
+- Afirmação: O TCE-RJ apontou atraso na prestação de contas de convênios.
+- Tema: Controle (TCE, MP) e judicialização
+- Fonte: TCE-RJ
+- Link: https://tce.exemplo.gov.br/decisao-123
+- Trecho literal: frase que não está na página
+- Tipo: decisão de controle
+
+### Fato
+- Afirmação: O governo eleito promete reduzir o número de secretarias.
+- Tema: Compromissos do governo eleito
+- Fonte: Jornal Exemplo
+- Link: https://jornal.exemplo/materia
+- Trecho literal: Governo eleito promete reduzir o número de secretarias
+- Tipo: declaração política
+
+### Fato
+- Afirmação: A Secretaria tem 1.200 servidores efetivos.
+- Tema: Pessoal
+- Fonte: sem link
+- Tipo: dado oficial
+
+## Procurado e não encontrado
+- Número de terceirizados nos contratos de custeio
+- Organograma atualizado
+"""
+
+
+def test_dossie_enviado_e_lido_e_conferido(llm):
+    from transicao import pesquisa
+    d = pesquisa.dossie_enviado(DOSSIE_PERPLEXITY, "Secretaria de Exemplo", "04/11/2026")
+    por_bloco = {i["bloco"]: i for i in d["itens"]}
+    assert len(d["itens"]) == 5 and set(por_bloco) >= {"orcamento_execucao", "contratos_convenios",
+                                                        "controle_judicializacao", "compromissos_governo", "pessoal"}
+    assert por_bloco["orcamento_execucao"]["checagem"] == "conferido"          # trecho em duas linhas, link em Markdown
+    assert por_bloco["contratos_convenios"]["checagem"] == "conferido"
+    assert por_bloco["controle_judicializacao"]["checagem"] == "trecho_nao_encontrado"
+    assert por_bloco["pessoal"]["checagem"] == "sem_trecho"
+    assert por_bloco["compromissos_governo"]["camada"] == "estado"
+    assert por_bloco["compromissos_governo"]["tipo_fonte"] == "declaracao_politica"
+    assert por_bloco["controle_judicializacao"]["tipo_fonte"] == "decisao_controle_judicial"
+    assert [n["procurado"] for n in d["nao_encontrado"]] == ["Número de terceirizados nos contratos de custeio",
+                                                             "Organograma atualizado"]
+    assert {i["id"][0] for i in d["itens"]} == {"E", "O"}
+
+
+def test_dossies_casam_com_os_orgaos_pelo_nome(llm):
+    from transicao import entrada
+    orgaos = [{"nome": n} for n in ("Secretaria de Estado das Cidades - SECID", "SETUR - Turismo", "SEFAZ")]
+    dossies = entrada.dossies_do_envio([("dossies.zip", _zip({
+        "Dossiê - SECID.md": b"x", "Dossie Secretaria de Turismo.pdf": b"y", "Dossiê SEEDUC.docx": b"z",
+        "~$lixo.docx": b"", "notas.xlsx": b""}))])
+    sobrando = entrada.casar_dossies(orgaos, dossies)
+    assert [o.get("dossie_arquivo") for o in orgaos] == ["Dossiê - SECID.md", "Dossie Secretaria de Turismo.pdf", None]
+    assert [d["arquivo"] for d in sobrando] == ["Dossiê SEEDUC.docx"]
+    assert orgaos[0]["ler_dossie"]() == "x"
+
+
+def test_com_dossie_enviado_o_app_nao_pesquisa(llm, tmp_path):
+    from transicao import analise
+    orgaos = [{"nome": "Secretaria de Exemplo", "texto": RELATORIO, "ler_dossie": lambda: DOSSIE_PERPLEXITY}]
+    linhas = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=lambda *_: None)
+    assert linhas[0]["situacao"] == "concluído" and linhas[0]["dossie"] == "enviado"
+    assert not any("Monte a camada" in json.dumps(c["mensagens"], ensure_ascii=False) for c in llm.chamadas)
+    assert _resumo(tmp_path)[0]["dossie"] == "enviado"
+
+
+def test_dossie_fora_do_formato_avisa(llm, tmp_path):
+    from transicao import analise
+    orgaos = [{"nome": "Secretaria de Exemplo", "texto": RELATORIO, "ler_dossie": lambda: "Texto corrido sem fatos."}]
+    linhas = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=lambda *_: None)
+    assert linhas[0]["situacao"] == "erro" and "formato" in linhas[0]["observacao"]

@@ -95,8 +95,9 @@ def _memorando(modelo_debate, mensagens):
     return texto.strip(), motivo == "length"
 
 
-def analisar_orgao(nome, texto, cfg, estado=None, progresso=None):
-    """Analisa um órgão. texto: o relatório ou resumo do órgão (pode ser vazio). Devolve um dicionário com o
+def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
+    """Analisa um órgão. texto: o relatório ou resumo do órgão (pode ser vazio). dossie: o dossiê enviado pela equipe
+    (pesquisa.dossie_enviado); sem ele, o app pesquisa as fontes públicas. Devolve um dicionário com o
     documento (Word), os eventos do calendário, o registro de auditoria e os números do resumo do lote.
     Levanta ErroAnalise quando não há base para analisar (dossiê insuficiente, insumos ou debate inválidos)."""
     progresso = progresso or (lambda _t: None)
@@ -104,11 +105,15 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None):
     auxiliar, modelo_debate = cfg["modelo_auxiliar"], cfg["modelo"]
     relatorio, avisos = entrada.limpar_relatorio(texto) if (texto or "").strip() else ("", [])
 
-    progresso("Pesquisando o dossiê em fontes públicas...")
-    dossie = pesquisa.montar_dossie(cfg["modelo_pesquisa"], nome, cfg["data_corte"], cfg.get("foco", ""), estado=estado)
+    if dossie is None:
+        progresso("Pesquisando o dossiê em fontes públicas...")
+        dossie = pesquisa.montar_dossie(cfg["modelo_pesquisa"], nome, cfg["data_corte"], cfg.get("foco", ""),
+                                        estado=estado)
     resumo_dos = pesquisa.resumo_dossie(dossie)
     if resumo_dos["itens"] < MIN_ITENS_DOSSIE:
-        raise ErroAnalise(f"dossiê insuficiente ({resumo_dos['itens']} itens)")
+        raise ErroAnalise(f"dossiê insuficiente ({resumo_dos['itens']} itens"
+                          + (", confira se o arquivo segue o formato Afirmação / Fonte / Link / Trecho literal)"
+                             if dossie.get("origem") == "arquivo" else ")"))
 
     progresso("Preparando os insumos do debate...")
     campos, uso_insumos, _ = debate.preparar_insumos(auxiliar, dossie, cfg.get("foco", ""))
@@ -191,14 +196,15 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None):
     return {"documento": documentos.gerar_docx(texto_doc, meta), "documento_md": texto_doc, "eventos": eventos,
             "descartados": [dict(d, orgao=nome) for d in calendario.get("descartados") or []],
             "registro": registro, "custo": custo, "confianca": confianca["nivel"],
-            "itens_dossie": resumo_dos["itens"], "conferidos": resumo_dos["conferidos"],
+            "itens_dossie": resumo_dos["itens"],
+            "dossie": "enviado" if dossie.get("origem") == "arquivo" else "pesquisado", "conferidos": resumo_dos["conferidos"],
             "trade_offs": len(tm.get("trade_offs") or []),
             "observacao": "; ".join([a.replace("⚠️ ", "") for a in avisos if "cortado" in a] + problemas)[:300]}
 
 
 # --- VÁRIOS ÓRGÃOS ------------------------------------------------------------------------
 
-COLUNAS_RESUMO = ["orgao", "situacao", "itens_dossie", "conferidos", "trade_offs", "datas_calendario", "confianca",
+COLUNAS_RESUMO = ["orgao", "situacao", "dossie", "itens_dossie", "conferidos", "trade_offs", "datas_calendario", "confianca",
                   "custo_usd", "minutos", "observacao"]
 
 
@@ -244,11 +250,13 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
 
     try:
         modelo.usar_completion(chamada)
-        log("Pesquisando o contexto do Estado (uma vez para todos os órgãos)...")
-        modelo.novo_uso_do_fio()
-        estado = pesquisa.pesquisar_estado(cfg["modelo_pesquisa"], cfg["data_corte"], cfg.get("foco", ""))
-        custo_estado, _ = modelo.custo_estimado(estado.get("uso") or [])
-        log(f"Estado: {len(estado.get('itens') or [])} itens.")
+        estado, custo_estado = None, 0.0
+        if any(not o.get("ler_dossie") for o in orgaos):      # só pesquisa o Estado se algum órgão for pesquisado
+            log("Pesquisando o contexto do Estado (uma vez para os órgãos sem dossiê enviado)...")
+            modelo.novo_uso_do_fio()
+            estado = pesquisa.pesquisar_estado(cfg["modelo_pesquisa"], cfg["data_corte"], cfg.get("foco", ""))
+            custo_estado, _ = modelo.custo_estimado(estado.get("uso") or [])
+            log(f"Estado: {len(estado.get('itens') or [])} itens.")
 
         linhas, eventos, descartados, trava = {}, {}, {}, threading.Lock()
 
@@ -268,12 +276,16 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                         json.dumps(manifesto, ensure_ascii=False, indent=2), encoding="utf-8")
                     if not texto.strip():
                         raise ErroAnalise("nenhum arquivo do órgão pôde ser lido")
-                r = analisar_orgao(nome, texto, cfg, estado=estado,
+                dossie = None
+                if orgao.get("ler_dossie"):
+                    log(f"[{k}] Conferindo os links do dossiê enviado...")
+                    dossie = pesquisa.dossie_enviado(orgao["ler_dossie"](), nome, cfg["data_corte"])
+                r = analisar_orgao(nome, texto, cfg, estado=estado, dossie=dossie,
                                    progresso=lambda t: log(f"[{k}] {t}"))
                 (saida / "documentos" / f"{pasta}.docx").write_bytes(r["documento"])
                 (saida / "auditoria" / f"{pasta}.json").write_text(
                     json.dumps(r["registro"], ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-                linha.update(situacao="concluído", itens_dossie=r["itens_dossie"], conferidos=r["conferidos"],
+                linha.update(situacao="concluído", dossie=r["dossie"], itens_dossie=r["itens_dossie"], conferidos=r["conferidos"],
                              trade_offs=r["trade_offs"], datas_calendario=len(r["eventos"]), confianca=r["confianca"],
                              custo_usd=round(r["custo"], 3), observacao=r["observacao"])
                 with trava:

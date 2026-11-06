@@ -428,3 +428,84 @@ def resumo_dossie(dossie):
 def dossie_para_json(dossie):
     campos = ("orgao", "data_corte", "foco", "modelo", "origem", "gerado_em", "itens", "nao_encontrado", "diagnostico")
     return json.dumps({k: dossie.get(k) for k in campos}, ensure_ascii=False, indent=2)
+
+
+# --- DOSSIÊ ENVIADO (montado fora do app, por exemplo no Perplexity) ------------------------------
+
+RE_CAMPO = re.compile(r"^\s*(?:[-*•]\s*)?\**\s*(afirma[çc][ãa]o|tema|fonte|data(?: da fonte)?|link|url|"
+                      r"trecho(?: literal)?|tipo(?: de fonte)?)\s*\**\s*:\s*\**\s*(.*)$", re.I)
+RE_NAO_ENCONTRADO = re.compile(r"^\s*#*\s*\**\s*procurad[oa]s?\b.*n[ãa]o encontrad", re.I)
+TEMAS = [  # palavras do tema → bloco do dossiê
+    (r"fiscal|d[ée]ficit|receita|royalt", "situacao_fiscal"), (r"d[íi]vida|propag|recupera[çc][ãa]o fiscal", "regime_divida"),
+    (r"previd", "previdencia"), (r"alerj|loa\b|ldo\b|calend[áa]rio legal", "calendario_legal"),
+    (r"pol[íi]tic", "cenario_politico"), (r"compromisso|promessa|governo eleito", "compromissos_governo"),
+    (r"miss[ãa]o|estrutura|compet[êe]ncia|mandato", "mandato_estrutura"),
+    (r"or[çc]amento|execu[çc][ãa]o|empenh|dota[çc]", "orcamento_execucao"), (r"pessoal|servidor|cargo", "pessoal"),
+    (r"contrato|conv[êe]nio|licita", "contratos_convenios"), (r"entrega|indicador|resultado", "entregas_indicadores"),
+    (r"controle|tce|mp\b|mprj|judic|cge", "controle_judicializacao"),
+    (r"risco|continuidade|prazo|vencimento", "riscos_continuidade"),
+]
+TIPOS = [(r"decis|controle|judicial", "decisao_controle_judicial"), (r"dado", "dado_oficial"),
+         (r"documento|oficial|di[áa]rio|lei|decreto", "documento_oficial"), (r"estudo|pesquisa|acad", "estudo"),
+         (r"imprensa|jornal|not[íi]cia|mat[ée]ria", "imprensa"), (r"declara|pol[íi]tic|promessa", "declaracao_politica")]
+
+
+def _classificar(texto, regras, padrao):
+    texto = _norm(texto)
+    return next((valor for padrao_re, valor in regras if re.search(padrao_re, texto)), padrao)
+
+
+def ler_dossie_enviado(texto):
+    """Lê os fatos de um dossiê em texto (blocos com Afirmação, Tema, Fonte, Data, Link, Trecho literal e Tipo).
+    Devolve (itens brutos, procurados e não encontrados). Cada novo "Afirmação:" abre um fato."""
+    fatos, nao, atual, campo, na_lista = [], [], None, None, False
+    for linha in (texto or "").splitlines():
+        if RE_NAO_ENCONTRADO.search(linha):
+            na_lista, atual, campo = True, None, None
+            continue
+        m = RE_CAMPO.match(linha)
+        if na_lista and not m:
+            item = re.sub(r"^\s*[-*•\d.)]+\s*", "", linha).strip(" *")
+            if item and not item.startswith("#"):
+                nao.append(item)
+            continue
+        if m:
+            na_lista = False
+            nome = _norm(m.group(1)).split()[0]
+            nome = {"url": "link", "afirmacao": "afirmacao"}.get(nome, nome)
+            valor = m.group(2).strip().strip("*").strip()
+            if nome == "afirmacao":
+                atual = {}
+                fatos.append(atual)
+            if atual is not None:
+                atual[nome] = valor
+                campo = nome
+        elif atual is not None and campo in ("afirmacao", "trecho") and linha.strip() and not linha.lstrip().startswith("#"):
+            atual[campo] += " " + linha.strip()          # texto que continuou na linha de baixo
+        elif not linha.strip() or linha.lstrip().startswith("#"):
+            campo = None
+    itens = []
+    for f in fatos:
+        bloco = (_classificar(f.get("tema", ""), TEMAS, "") or _classificar(f.get("afirmacao", ""), TEMAS, "outro_orgao"))
+        tipo = _classificar(f.get("tipo", ""), TIPOS, "hipotese")
+        url = re.search(r"https?://[^\s)\]>\"']+", f.get("link", ""))
+        itens.append({"bloco": bloco, "camada": "estado" if bloco in BLOCOS_ESTADO else "orgao",
+                      "afirmacao": f.get("afirmacao", ""), "fonte": f.get("fonte", ""), "data_fonte": f.get("data", ""),
+                      "url": url.group(0).rstrip(".,;") if url else "",
+                      "trecho": f.get("trecho", "").strip().strip('"“”'),
+                      "tipo_fonte": tipo,
+                      "confianca": "alta" if tipo in ("documento_oficial", "dado_oficial", "decisao_controle_judicial")
+                      else "media" if tipo in ("estudo", "imprensa") else "baixa"})
+    return itens, nao
+
+
+def dossie_enviado(texto, orgao, data_corte):
+    """O dossiê a partir de um arquivo enviado pela equipe, no lugar da pesquisa do app. O código abre cada link e
+    procura o trecho literal, como faz com a pesquisa; itens sem link ou sem trecho ficam como não conferidos."""
+    brutos, nao = ler_dossie_enviado(texto)
+    itens = [x for x in (normalizar_item(b) for b in brutos) if x]
+    itens = numerar_itens(conferir_itens(_unicos_ordenados(itens)))
+    return {"orgao": orgao, "data_corte": data_corte, "foco": "", "modelo": "dossiê enviado pela equipe",
+            "origem": "arquivo", "gerado_em": datetime.now().isoformat(timespec="seconds"), "itens": itens,
+            "nao_encontrado": [{"camada": "orgao", "bloco": "", "procurado": n} for n in nao], "uso": [],
+            "diagnostico": [], "reaproveitado": False, "estado_compartilhado": False}

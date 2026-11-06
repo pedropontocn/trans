@@ -1,5 +1,5 @@
 """Configuração: modelos, preços e limites."""
-VERSAO = "4.0"
+VERSAO = "4.1"
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
 
 MODELOS = [

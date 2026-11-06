@@ -19,9 +19,13 @@ Um `.zip` com:
 
 1. Suba os arquivos: o `.zip` com os resumos (um Word ou PDF por órgão, o nome do órgão no nome do arquivo) ou o
    `.zip` da pasta com uma subpasta de documentos brutos por órgão.
-2. Confira a tabela de órgãos (dá para corrigir nomes e desmarcar).
-3. Clique em **Analisar**. A análise roda em segundo plano; pode fechar a página.
-4. Baixe o `.zip`.
+2. Opcional: suba os **dossiês das secretarias** montados fora do app (por exemplo, no Perplexity), um arquivo por
+   secretaria com o nome ou a sigla no nome do arquivo. Para quem tiver dossiê, o app não pesquisa a web: usa o
+   dossiê e confere cada link e trecho. Cada fato vem num bloco com `Afirmação`, `Tema`, `Fonte`, `Data da fonte`,
+   `Link`, `Trecho literal` e `Tipo`; no fim, uma seção "Procurado e não encontrado".
+3. Confira a tabela de órgãos (dá para corrigir nomes e desmarcar; a coluna Dossiê mostra qual arquivo casou).
+4. Clique em **Analisar**. A análise roda em segundo plano; pode fechar a página.
+5. Baixe o `.zip`.
 
 Na barra lateral: modelos, rodadas do debate, modo econômico (Batch API, metade do preço, mais lento), data de corte,
 foco e cabeçalho do documento.
@@ -40,7 +44,7 @@ A chave fica num arquivo `.env` (fora do Git) ou nos Secrets do Streamlit Cloud:
 
 ## Como funciona cada órgão
 
-1. **Dossiê.** O modelo de pesquisa busca na web, em grupos paralelos, o contexto do Estado (pesquisado uma vez para
+1. **Dossiê.** Se a equipe enviou o dossiê do órgão, ele é usado no lugar da pesquisa. Senão, o modelo de pesquisa busca na web, em grupos paralelos, o contexto do Estado (pesquisado uma vez para
    todos) e o do órgão. O código abre cada link e procura o trecho citado; o tipo de fonte e a conferência limitam o
    nível de evidência de cada item. Sem itens suficientes, o órgão não é analisado.
 2. **Insumos.** Problema central, papéis do debate, grupos sem voz e lacunas, montados só a partir do dossiê.

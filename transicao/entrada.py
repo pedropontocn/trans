@@ -453,3 +453,70 @@ def orgaos_do_envio(arquivos, cada_pasta=False):
 
     return [{"nome": nome, "arquivos": [r["arquivo"] for r in itens], "ler": lambda itens=itens: ler(itens)}
             for nome, itens in grupos.items()]
+
+
+# --- DOSSIÊS ENVIADOS ----------------------------------------------------------------------------
+
+EXTENSOES_DOSSIE = (".docx", ".pdf", ".md", ".txt")
+PALAVRAS_GENERICAS = {"secretaria", "estado", "de", "do", "da", "dos", "das", "e", "rj", "rio", "janeiro", "dossie",
+                      "perplexity", "orgao", "sobre", "para", "transicao", "governo", "final", "v1", "v2"}
+
+
+def _palavras(nome):
+    return {p for p in re.findall(r"[a-z0-9]+", _norm(nome)) if p not in PALAVRAS_GENERICAS and len(p) > 1}
+
+
+def _parecidos(a, b):
+    """Nota de 0 a 1 de quanto dois nomes de órgão se referem ao mesmo órgão (sigla igual vale 1)."""
+    sa, sb = sigla(a).lower(), sigla(b).lower()
+    pa, pb = _palavras(a), _palavras(b)
+    if sa and (sa == sb or sa in pb) or sb and sb in pa:
+        return 1.0
+    if not pa or not pb:
+        return 0.0
+    if pa <= pb or pb <= pa:
+        return 0.9
+    return len(pa & pb) / len(pa | pb)
+
+
+def dossies_do_envio(arquivos):
+    """Os dossiês enviados: Word, PDF, Markdown ou texto, soltos ou dentro de .zip. O nome do órgão vem do arquivo."""
+    itens = []
+
+    def incluir(nome, conteudo):
+        if Path(nome).name.startswith(("~$", "._")) or Path(nome).suffix.lower() not in EXTENSOES_DOSSIE:
+            return
+        base = re.sub(r"(?i)\bdossi[eê]\b\s*[-–:]*\s*(d[aeo]s?\s+)?", " ", Path(nome).stem)
+        itens.append({"arquivo": Path(nome).name, "orgao": nome_do_orgao_pelo_arquivo(base.strip() + ".x"),
+                      "conteudo": conteudo})
+
+    for nome, conteudo in arquivos:
+        if nome.lower().endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
+                for info in z.infolist():
+                    if not info.is_dir() and "__MACOSX" not in info.filename:
+                        incluir(info.filename.replace("\\", "/"), z.read(info))
+        else:
+            incluir(nome, conteudo)
+    return itens
+
+
+def _texto_dossie(d):
+    if d["arquivo"].lower().endswith((".md", ".txt")):
+        return d["conteudo"].decode("utf-8", errors="replace")
+    return converter_arquivo(d["arquivo"], d["conteudo"]) or ""
+
+
+def casar_dossies(orgaos, dossies):
+    """Liga cada órgão ao seu dossiê pelo nome (sigla ou palavras do nome). Devolve os dossiês que não acharam órgão.
+    O órgão ligado ganha "dossie_arquivo" e "ler_dossie" (devolve o texto)."""
+    livres = list(dossies)
+    for o in orgaos:
+        o.pop("ler_dossie", None)
+        o.pop("dossie_arquivo", None)
+        notas = sorted(((_parecidos(o["nome"], d["orgao"]), i) for i, d in enumerate(livres)), reverse=True)
+        if notas and notas[0][0] >= 0.5:
+            d = livres.pop(notas[0][1])
+            o["dossie_arquivo"] = d["arquivo"]
+            o["ler_dossie"] = lambda d=d: _texto_dossie(d)
+    return livres
