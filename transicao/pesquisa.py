@@ -171,23 +171,64 @@ def _html_para_texto(html):
     return re.sub(r"\s+", " ", html_lib.unescape(html))
 
 
-def baixar_pagina(url):
-    """Baixa a página e devolve o texto, ou None se não conseguir. PDF passa pelo MarkItDown."""
+def _resolver(host):
+    """IPs do nome (os testes trocam esta função para não depender de DNS)."""
+    import socket
+    return {i[4][0] for i in socket.getaddrinfo(host, None)}
+
+
+def _endereco_publico(url):
+    """O link aponta para a internet pública? Recusa outros protocolos, nomes locais, IPs de rede interna e nomes que
+    resolvem para eles (ex.: um domínio que aponta para 169.254.169.254)."""
     import ipaddress
     import urllib.parse
-    import urllib.request
-    # Os links vêm da pesquisa: o painel não abre endereços locais ou de rede interna do servidor.
-    host = (urllib.parse.urlsplit(url).hostname or "").lower()
-    if not host or host == "localhost" or host.endswith((".local", ".internal")):
-        return None
+    partes = urllib.parse.urlsplit(url)
+    if partes.scheme not in ("http", "https"):
+        return False
+    host = (partes.hostname or "").lower().rstrip(".")
+    if not host or host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        return False
     try:
-        if not ipaddress.ip_address(host).is_global:
-            return None
+        return ipaddress.ip_address(host).is_global
     except ValueError:
         pass                                      # é um nome, não um IP
     try:
+        ips = _resolver(host)
+    except (OSError, UnicodeError):
+        return False
+    try:
+        return bool(ips) and all(ipaddress.ip_address(ip.split("%")[0]).is_global for ip in ips)
+    except ValueError:
+        return False
+
+
+def _abridor():
+    import urllib.error
+    import urllib.request
+
+    class RedirecionamentoSeguro(urllib.request.HTTPRedirectHandler):
+        """Segue o redirecionamento só se o novo endereço também for público."""
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            if not _endereco_publico(newurl):
+                raise urllib.error.URLError("redirecionamento para endereço não público")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+    return urllib.request.build_opener(RedirecionamentoSeguro)
+
+
+def _abrir(pedido, timeout):
+    return _abridor().open(pedido, timeout=timeout)
+
+
+def baixar_pagina(url):
+    """Baixa a página e devolve o texto, ou None se não conseguir. PDF passa pelo MarkItDown."""
+    import urllib.request
+    # Os links vêm da pesquisa: o painel não abre endereços locais ou de rede interna do servidor, nem segue
+    # redirecionamentos para eles.
+    if not _endereco_publico(url):
+        return None
+    try:
         pedido = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (PainelTransicao/2.0; conferencia de fontes)"})
-        with urllib.request.urlopen(pedido, timeout=TEMPO_PAGINA) as resp:
+        with _abrir(pedido, TEMPO_PAGINA) as resp:
             tipo = (resp.headers.get("Content-Type") or "").lower()
             dados = resp.read(LIMITE_PAGINA)
     except Exception:

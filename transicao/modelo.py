@@ -218,14 +218,16 @@ def chave_guardada(*partes):
 
 
 def resposta_guardada(chave):
-    return _guardados().get(chave)
+    with _TRAVA_GUARDADOS:
+        return _guardados().get(chave)
 
 
 def guardar_resposta(chave, valor):
-    guardados = _guardados()
-    guardados[chave] = valor
-    while len(guardados) > LIMITE_GUARDADOS:
-        guardados.pop(next(iter(guardados)), None)
+    with _TRAVA_GUARDADOS:              # vários órgãos gravam ao mesmo tempo
+        guardados = _guardados()
+        guardados[chave] = valor
+        while len(guardados) > LIMITE_GUARDADOS:
+            guardados.pop(next(iter(guardados)), None)
 
 
 def _usa_cache(modelo):

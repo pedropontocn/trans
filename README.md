@@ -50,6 +50,9 @@ streamlit run app.py
 
 A chave fica num arquivo `.env` (fora do Git) ou nos Secrets do Streamlit Cloud: `ANTHROPIC_API_KEY=...`
 
+**Defina também uma senha de acesso**, no mesmo lugar: `APP_SENHA=...`. A análise em andamento e o `.zip` ficam na
+memória do app e valem para todas as abas; sem senha, quem tiver o link vê o andamento e baixa os documentos.
+
 ## Como funciona cada secretaria
 
 1. **Dossiê.** O pacote de dossiês da equipe (ou, sem ele, a pesquisa do app). Links abertos e números conferidos por

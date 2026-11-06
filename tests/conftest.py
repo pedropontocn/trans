@@ -297,7 +297,11 @@ def llm(monkeypatch):
     monkeypatch.setitem(sys.modules, "markitdown", markitdown)
     if str(RAIZ) not in sys.path:
         sys.path.insert(0, str(RAIZ))
-    from transicao import analise, entrada, modelo
+    from transicao import analise, entrada, modelo, pesquisa
+    # páginas pelo urlopen falso acima e nomes resolvidos sem DNS (os testes não acessam a rede)
+    falso.dns = {}
+    monkeypatch.setattr(pesquisa, "_abrir", lambda pedido, timeout=None: urllib.request.urlopen(pedido, timeout=timeout))
+    monkeypatch.setattr(pesquisa, "_resolver", lambda host: falso.dns.get(host, {"200.144.0.10"}))
     modelo._GUARDADOS.clear()            # respostas guardadas de um teste não vazam para o próximo
     entrada.converter_arquivo.cache_clear()
     modelo.usar_completion(None)
