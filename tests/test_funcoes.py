@@ -1,5 +1,7 @@
 """Testes das funções do app, sem a interface."""
-from conftest import MEMORANDO, FONTE_AUTO, FONTE_FALSA, FONTE_OK, RELATORIO, SEM_FONTE, dossie_exemplo, tension_map, trade_off
+import re
+
+from conftest import RELATORIO, dossie_exemplo
 
 
 def test_limpeza_tira_orientacoes_e_dados_pessoais(funcoes):
@@ -16,46 +18,6 @@ def test_extrair_json_ignora_lixo_e_respeita_marcadores(funcoes):
     assert funcoes.extrair_json('texto {"a": 1} depois {quebrado') == {"a": 1}
     assert funcoes.extrair_json('[INÍCIO DO JSON]{"b": 2}[FIM DO JSON] {"c": 3}') == {"b": 2}
     assert funcoes.extrair_json("sem json nenhum") is None
-
-
-def test_mapear_campos_aceita_nomes_alternativos_e_aninhamento(funcoes):
-    variante = {"Problema Central": "x", "Personas": ["p"], "Lacunas de Dados": ["l"], "Grupos sem voz": ["g"]}
-    assert set(funcoes.mapear_campos(variante)) == {"problema", "personas", "lacunas", "sem_voz"}
-    aninhado = {"dados": {"problema": "x", "personas": ["p"], "lacunas": ["l"]}}
-    assert set(funcoes.mapear_campos(aninhado)) == {"problema", "personas", "lacunas"}
-    # fatos não são mais extraídos: vêm do dossiê
-    assert "fatos" not in funcoes.mapear_campos({"fatos": ["f"], "problema": "x"})
-
-
-
-def test_evidencias_conferidas_no_dossie_e_na_autodeclaracao(funcoes):
-    dossie = dossie_exemplo(funcoes)
-    item_inexistente = {"tipo": "dossie", "referencia": "O77", "trecho": "qualquer coisa escrita aqui mesmo"}
-    pdf_nao_conferido = {"tipo": "dossie", "referencia": "O5", "trecho": "contrato de manutenção do sistema de folha"}
-    tm = tension_map([trade_off("T1", "ok", 1, FONTE_OK), trade_off("T2", "falsa", 1, FONTE_FALSA),
-                      trade_off("T3", "sem fonte", 2, SEM_FONTE), trade_off("T4", "autodeclaração", 1, FONTE_AUTO),
-                      trade_off("T5", "item inexistente", 1, item_inexistente),
-                      trade_off("T6", "não conferido", 1, pdf_nao_conferido)])
-    tm, ev = funcoes.verificar_evidencias(tm, funcoes.texto_dossie(dossie), dossie, RELATORIO)
-    t = {x["id"]: x for x in tm["trade_offs"]}
-    assert [r["onde"] for r in ev["rebaixadas"]] == ["T2 · Polo A", "T3 · Polo A", "T5 · Polo A"]
-    assert t["T1"]["polo_a"]["evidencia"] == 1                         # dado oficial conferido sustenta nível 1
-    assert t["T2"]["polo_a"]["evidencia"] == 5 and t["T2"]["polo_a"]["evidencia_declarada"] == 1
-    assert t["T2"]["nivel_evidencia"] == 4      # o trade-off não pode ser mais forte que seu polo mais bem apoiado
-    # o que vem só do órgão vale no máximo nível 4
-    assert t["T4"]["polo_a"]["evidencia"] == 4 and "autodeclaração" in t["T4"]["polo_a"]["verificacao"]
-    assert [r["referencia"] for r in ev["autodeclaracoes"]] == ["3.2"]
-    # item oficial cujo link não abriu: no máximo nível 3 até alguém conferir
-    assert t["T6"]["polo_a"]["evidencia"] == 3 and "O5" in t["T6"]["polo_a"]["verificacao"]
-    assert "não existe no dossiê" in ev["rebaixadas"][2]["motivo"]
-
-
-def test_normas_vao_para_revisao_juridica(funcoes):
-    norma = {"tipo": "norma", "referencia": "Lei 14.133/2021, art. 71", "trecho": ""}
-    dossie = dossie_exemplo(funcoes)
-    _, ev = funcoes.verificar_evidencias(tension_map([trade_off("T1", "x", 2, norma)]), RELATORIO, dossie, RELATORIO)
-    assert ev["normas"][0]["referencia"] == "Lei 14.133/2021, art. 71"
-    assert not ev["rebaixadas"]
 
 
 def test_numeros_do_memorando(funcoes):
@@ -75,45 +37,6 @@ def test_numero_br(funcoes):
     assert funcoes._numero_br("236.441.332,55") == (236441332.55, 2)
     assert funcoes._numero_br("236,4") == (236.4, 1)
     assert funcoes._numero_br("1.302") == (1302.0, 0)
-
-
-def test_estabilidade_separa_estaveis_e_sinais_fracos(funcoes):
-    r1 = tension_map([trade_off("T1", "a"), trade_off("T2", "b")])
-    r2 = tension_map([trade_off("T1", "a'"), trade_off("T2", "c")])
-    r3 = tension_map([trade_off("T1", "b'"), trade_off("T2", "a''")])
-    cons = tension_map([trade_off("C1", "A", origens=["R1-T1", "R2-T1", "R3-T2"]),
-                        trade_off("C2", "B", origens=["R1-T2", "R3-T1"]),
-                        trade_off("C3", "C", origens=["R2-T2", "R9-T5"])])   # R9-T5 não existe
-    tm = funcoes.aplicar_estabilidade(cons, [(1, r1), (2, r2), (3, r3)], 3)
-    assert [(t["id"], t["estabilidade"]) for t in tm["trade_offs"]] == [("C1", "3/3"), ("C2", "2/3")]
-    assert [(f["id"], f["estabilidade"]) for f in tm["sinais_fracos"]] == [("C3", "1/3")]
-
-
-def test_estabilidade_sem_origens_nao_perde_a_analise(funcoes):
-    r1 = tension_map([trade_off("T1", "a")])
-    cons = tension_map([trade_off("C1", "A"), trade_off("C2", "B")])          # sem "origens"
-    tm = funcoes.aplicar_estabilidade(cons, [(1, r1), (2, r1)], 2)
-    assert [t["id"] for t in tm["trade_offs"]] == ["C1", "C2"]
-    assert tm["estabilidade"] is None
-
-
-def test_confianca_calculada(funcoes):
-    vazio = {"conferidas": [1, 2, 3], "calculos": [], "rebaixadas": [], "normas": [], "autodeclaracoes": []}
-    estavel = {"rodadas": 3, "estaveis": 3, "minimo_para_estavel": 2}
-    bom = {"itens": 10, "conferidos": 9, "oficiais": 8}
-    assert funcoes.confianca_calculada(bom, estavel, vazio)["nivel"] == "alta"
-    assert funcoes.confianca_calculada(dict(bom, conferidos=3), estavel, vazio)["nivel"] == "baixa"   # dossiê mal conferido
-    assert funcoes.confianca_calculada(None, estavel, vazio)["nivel"] == "baixa"                       # sem dossiê
-    assert funcoes.confianca_calculada(bom, None, vazio)["nivel"] == "média"                           # estabilidade não medida
-    so_orgao = dict(vazio, conferidas=[1], autodeclaracoes=[1, 2, 3])
-    assert funcoes.confianca_calculada(bom, estavel, so_orgao)["nivel"] == "média"
-
-
-def test_validacao_aponta_campos_faltantes(funcoes):
-    incompleto = tension_map([trade_off("T1", "a")], confidence_assessment=True)
-    erros = funcoes.validar(incompleto, funcoes.SCHEMA_TENSION_MAP)
-    assert any("confidence_assessment" in e for e in erros)
-    assert funcoes.validar(tension_map([trade_off("T1", "a")]), funcoes.SCHEMA_TENSION_MAP) == []
 
 
 def test_custo_considera_cache(funcoes):
@@ -140,24 +63,6 @@ def test_word_gerado_abre_e_tem_matriz(funcoes):
     assert "**" not in "\n".join(p.text for p in documento.paragraphs)
 
 
-def test_secao_de_verificacao_do_word_inclui_neutralidade(funcoes):
-    ev = {"conferidas": [], "calculos": [], "rebaixadas": [], "normas": []}
-    neutralidade = {"modelo": "anthropic/claude-sonnet-5-5", "avaliacao_geral": "levemente_enviesado",
-                    "desequilibrados": [{"id": "T2", "equilibrio": "pende_para_b"}],
-                    "recomendacoes_implicitas": [{"trecho": "x", "por_que": "y"}]}
-    md = funcoes.markdown_verificacao(ev, [], "abc", "anthropic/claude-opus-5-5", neutralidade=neutralidade)
-    assert "Revisão de neutralidade" in md and "T2 (pende para B)" in md and "1 trecho(s)" in md
-
-
-RELATORIO_NOVO = (RELATORIO
-                  .replace("Dotação atualizada: \\[A complementar\\].", "Dotação atualizada: R$ 430.000.000,00.")
-                  .replace("R$ 120.500.000,00", "R$ 98.000.000,00"))
-
-
-
-
-
-
 def test_custo_da_escrita_de_cache_de_uma_hora(funcoes):
     base = {"modelo": "anthropic/claude-opus-5-5", "entrada": 1_000_000, "entrada_sem_cache": 0, "cache_leitura": 0,
             "cache_escrita": 1_000_000, "saida": 0}
@@ -179,35 +84,6 @@ def test_material_de_referencia_marca_o_relatorio_como_autodeclaracao(funcoes):
     texto = funcoes.texto_dossie(dossie)
     assert "[E1] (situacao_fiscal)" in texto and "nível máximo 1" in texto
     assert "PROCURADO E NÃO ENCONTRADO" in texto and "terceirizados" in texto
-
-
-def test_concordancia_exige_todos_os_pares(funcoes, llm):
-    tm1 = tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])
-    tm2 = tension_map([trade_off("T1", "Licitações adiadas"), trade_off("T2", "Obras")])
-    assert funcoes.rodadas_concordam("anthropic/claude-sonnet-5-5", tm1, tm2, uso_lista=[])
-    llm.pareamento = {"pares": [{"anterior": "T1", "atual": "T1"}, {"anterior": "T2", "atual": "T9"}]}
-    assert not funcoes.rodadas_concordam("anthropic/claude-sonnet-5-5", tm1, tm2, uso_lista=[])
-    llm.pareamento = {"pares": [{"anterior": "T1", "atual": "T1"}, {"anterior": "T1", "atual": "T2"}]}
-    assert not funcoes.rodadas_concordam("anthropic/claude-sonnet-5-5", tm1, tm2, uso_lista=[])
-    # número diferente de trade-offs: nem chama o modelo
-    n = len(llm.chamadas)
-    assert not funcoes.rodadas_concordam("anthropic/claude-sonnet-5-5", tm1, tension_map([trade_off("T1", "x")]), uso_lista=[])
-    assert len(llm.chamadas) == n
-
-
-# --- FUNDAMENTAÇÃO (DOSSIÊ) ---------------------------------------------------------
-
-def test_itens_normalizados_e_numerados(funcoes):
-    bruto = {"bloco": "Situação fiscal", "afirmacao": "x", "url": "javascript:alert(1)", "tipo_fonte": "opiniao",
-             "confianca": "Alta"}
-    i = funcoes.normalizar_item(bruto, "estado")
-    assert i["url"] == "" and i["tipo_fonte"] == "hipotese" and i["confianca"] == "alta"
-    assert i["bloco"] == "situacao_fiscal"
-    assert funcoes.normalizar_item({"bloco": "pessoal"}, "orgao") is None            # sem afirmação
-    assert funcoes.normalizar_item({"bloco": "nada", "afirmacao": "y"}, "orgao")["bloco"] == "outro_orgao"
-    itens = [funcoes.normalizar_item({"afirmacao": a, "id": ident}, c)
-             for a, ident, c in [("a", "E1", "estado"), ("b", "E1", "estado"), ("c", "", "orgao"), ("d", "E9", "orgao")]]
-    assert [x["id"] for x in funcoes.numerar_itens(itens)] == ["E1", "E2", "O1", "O2"]
 
 
 def test_nivel_maximo_por_tipo_de_fonte(funcoes):
@@ -298,14 +174,6 @@ def test_pesquisa_sem_json_nenhum_devolve_dossie_vazio_com_diagnostico(funcoes, 
     assert all("Fiz as buscas" in x["resposta"] and x["continuacao"] for x in d["diagnostico"])
 
 
-def test_insumos_saem_do_dossie_e_sem_baseline(funcoes, llm):
-    campos, uso, _ = funcoes.preparar_insumos("anthropic/claude-sonnet-5-5", dossie_exemplo(funcoes), "foco x")
-    assert "<dossie>" in llm.mensagem_insumos and "FOCO INDICADO PELA EQUIPE: foco x" in llm.mensagem_insumos
-    assert "Cinco obras" not in llm.mensagem_insumos                              # o relatório do órgão não entra
-    assert [p["id"] for p in campos["personas"]] == ["planejamento", "controle", "gradual"]
-    assert campos["sem_voz"] == ["Trabalhadores terceirizados dos contratos de custeio"]
-
-
 def test_confronto_descarta_o_que_nao_confere(funcoes, llm):
     texto_rel, _ = funcoes.limpar_relatorio(RELATORIO)
     c = funcoes.confrontar("anthropic/claude-sonnet-5-5", dossie_exemplo(funcoes), texto_rel)
@@ -314,16 +182,6 @@ def test_confronto_descarta_o_que_nao_confere(funcoes, llm):
     assert "<relatorio>" in llm.mensagem_confronto and "<dossie>" in llm.mensagem_confronto
     assert "sem atribuir intenção" in funcoes.texto_confronto(c)
     assert funcoes.confrontar("m", dossie_exemplo(funcoes), "")["divergencias"] == []
-
-
-def test_quadro_sobre_o_documento(funcoes):
-    quadro = funcoes.sobre_o_documento({"itens": 9, "conferidos": 6}, "04/11/2026", {"nivel": "média"})
-    memo = funcoes.inserir_sobre_documento("# Memorando Executivo\n## Em síntese\n- x", quadro)
-    linhas = memo.splitlines()
-    assert linhas[0] == "# Memorando Executivo" and linhas[2] == "## Sobre este documento"
-    assert "Apoio à decisão gerado com IA" in memo and "Não recomenda decisões" in memo and "média" in memo
-    assert "sem revisão da equipe" in memo
-    assert funcoes.inserir_sobre_documento("sem título", quadro).startswith("## Sobre este documento")
 
 
 def test_dossie_com_estado_compartilhado(funcoes, llm):
@@ -350,18 +208,6 @@ def test_memorando_sem_orgao_nem_unidade_no_cabecalho(funcoes):
     assert "MEMORANDO EXECUTIVO" in "\n".join(p.text for p in docx.Document(io.BytesIO(dados)).paragraphs)
 
 
-def test_conteudo_da_autodeclaracao_para_o_memorando(funcoes):
-    rel = ("# ARQUIVO: relatorio.docx\n\n## 3. Contratos vigentes\n|Contrato|Obra|Valor|\n|-|-|-|\n"
-           "|012/2025|Ponte do Rio|R$ 1.000.000,00|\n|013/2025|Escola|R$ 2.500.000,00|\n\n## 4. Pessoal\nTexto.")
-    texto = funcoes.conteudo_autodeclaracao(rel)
-    assert "relatorio.docx" in texto and "3. Contratos vigentes" in texto and "3 linha(s) com contratos" in texto
-    assert "não enviou" in funcoes.conteudo_autodeclaracao("")
-
-
-def test_memorando_recebe_o_que_o_orgao_enviou(funcoes):
-    assert "Informado x confirmado" in funcoes.PROMPT_ETAPA_2 and "Declarado x confirmado" in funcoes.METODOLOGIA
-
-
 def test_resumo_de_100_paginas_entra_inteiro(funcoes):
     """Um resumo de ~100 páginas (300 mil caracteres) entra inteiro; só o que passa de 400 mil é cortado, com aviso."""
     pagina = "## Contratos\n" + ("Contrato 012/2025, obra da Ponte do Rio, valor de R$ 1.000.000,00. " * 40) + "\n"
@@ -371,30 +217,6 @@ def test_resumo_de_100_paginas_entra_inteiro(funcoes):
     assert not any("cortado" in a for a in avisos)
     grande, avisos = funcoes.limpar_relatorio(resumo * 2)
     assert len(grande) == funcoes.LIMITE_RELATORIO and any("passou do limite" in a for a in avisos)
-
-
-def test_anexo_do_debate_montado_por_codigo(funcoes):
-    tm = tension_map([trade_off("T1", "Licitações", estabilidade="2/2"), trade_off("T2", "Atas")])
-    tm["trade_offs"][0]["polo_a"]["defendido_por"] = ["p1"]
-    anexo = funcoes.anexo_debate(tm, "- [p1] Fazenda: equilíbrio fiscal\n- [p2] Prefeituras: obras")
-    assert anexo.startswith("## Anexo 2 – O debate em detalhe")
-    assert "### Licitações" in anexo and "Defendida por: Fazenda." in anexo
-    assert "Natureza do desacordo" in anexo and "apareceu em 2/2 rodadas" in anexo
-    assert "nível" in anexo and "Nível" not in anexo.split("Informação:")[0]
-
-
-def test_memorando_novo_sem_jargao_no_prompt_e_titulo_no_word(funcoes):
-    import io
-    import docx
-    p = funcoes.PROMPT_ETAPA_2
-    assert "ALTO GESTOR" in p and "## Decisões a tomar" in p and "NÃO use estes termos" in p
-    memo = ("# Carteira de obras da SECID depende de dados ainda não confirmados\n\n## O essencial\n- ponto\n\n"
-            "## Decisões a tomar\n### Prorrogar já?\n- **Opção 1 – Prorrogar:** x.\n\n## Anexo 1 – O debate em detalhe\ntexto")
-    doc = docx.Document(io.BytesIO(funcoes.gerar_docx(memo, {"orgao": "Equipe de Transição", "assunto": ""})))
-    textos = [par.text for par in doc.paragraphs]
-    assert "Carteira de obras da SECID depende de dados ainda não confirmados" in textos     # título vem do memorando
-    assert "O ESSENCIAL" in "\n".join(c.text for t in doc.tables for c in t._cells)          # quadro de destaque
-    assert any('w:br w:type="page"' in par._p.xml for par in doc.paragraphs)                 # anexo em página nova
 
 
 def test_fontes_no_anexo_com_links_e_selos(funcoes):
@@ -449,35 +271,147 @@ def test_calendario_em_excel(funcoes):
     ws = wb["Calendário"]
     assert ws["A2"].value.date() == date(2026, 11, 11) and ws["D3"].value == "SECID"     # ordenado por data
     assert ws["M2"].hyperlink.target == "https://alerj.exemplo/emendas" and ws.auto_filter.ref
-    assert ws["A3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Calendário", "Como ler", "Descartados"}
+    assert ws["A3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Prioridades", "Calendário", "Como ler", "Descartados"}
 
 
 def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
     rel, _ = funcoes.limpar_relatorio(RELATORIO)
     d = dossie_exemplo(funcoes)
-    assert d["itens"][[i["id"] for i in d["itens"]].index("O1")]["afirmacao"].startswith("A LOA 2026")
     diag = funcoes.extrair_diagnostico("anthropic/claude-sonnet-5-5", d, rel, "Secretaria de Exemplo")
-    assert [s["titulo"] for s in diag["secoes"]] == ["Orçamento e execução"] and diag["descartados"] == 2
-    rotulos = [i["rotulo"] for i in diag["secoes"][0]["itens"]]
+    assert [s["titulo"] for s in diag["secoes"]] == funcoes.SECOES_DIAGNOSTICO   # sempre os mesmos blocos
+    com_itens = {s["titulo"]: s for s in diag["secoes"] if s["itens"]}
+    assert list(com_itens) == ["Missão e estrutura", "Orçamento e execução"] and diag["descartados"] == 2
+    rotulos = [i["rotulo"] for i in com_itens["Orçamento e execução"]["itens"]]
     assert rotulos[1] == "informado pelo órgão" and rotulos[0].startswith(("confirmado", "fonte pública"))
+    ids = [i["id"] for s in diag["secoes"] for i in s["itens"]]
+    assert ids == [f"F{k}" for k in range(1, len(ids) + 1)]                     # numerados para os riscos citarem
     md = funcoes.markdown_diagnostico(diag)
-    assert md.startswith("## Diagnóstico do órgão") and "### Orçamento e execução" in md
-    assert "### O que não se sabe" in md and "40 subsecretarias" not in md
+    assert md.startswith("## Capítulo 1 – Diagnóstico") and "### Orçamento e execução" in md
+    assert "_Não se sabe:_ Organograma atualizado" in md and "40 subsecretarias" not in md
+    assert "A secretaria tem pendências de controle." in md
 
 
-def test_documento_unico_do_orgao(funcoes, llm):
+def test_regua_de_risco_igual_para_todos(funcoes):
+    from datetime import date, timedelta
+    corte = date(2026, 11, 6)
+    def ev(dias, valor, objeto, termos=None, tipo="Contrato"):
+        return {"data": corte + timedelta(days=dias), "dias": dias, "valor": valor, "evento": "Fim do contrato",
+                "objeto": objeto, "tipo": tipo, "valor_texto": "", "origem": "Contratos do Estado (SIGA/PNCP)",
+                "termos": termos if termos is not None else ""}
+    eventos = funcoes.avaliar_riscos([
+        ev(40, 300e6, "PAVIMENTAÇÃO DE VIAS"),                                     # obra grande
+        ev(40, 2e6, "FORNECIMENTO DE ALIMENTAÇÃO PARA PRESOS"),                    # essencial pequeno
+        ev(40, 2e6, "ALIMENTAÇÃO HOSPITALAR", "Termo Aditivo Termo 1 (2026-10-20)"),  # essencial com aditivo
+        ev(200, 1e6, "MATERIAL DE ESCRITÓRIO"),
+    ], "06/11/2026")
+    obra, presos, hospital, escritorio = eventos
+    assert presos["essencial"] and presos["impacto"] == "Alto" and presos["categoria"].startswith("Continuidade")
+    assert obra["categoria"] == "Obra" and obra["impacto"] == "Alto"
+    assert presos["agir_ate"] == corte + timedelta(days=10) and presos["sem_tempo_licitar"]
+    assert presos["prioridade"] == "Máxima" and hospital["prioridade_nota"] < presos["prioridade_nota"]
+    assert "aditivo publicado em 20/10/2026" in hospital["situacao_pncp"]
+    assert escritorio["prioridade"] == "Baixa" and not escritorio["sem_tempo_licitar"]
+    md = funcoes.markdown_vencimentos(eventos)
+    assert md.index("ALIMENTAÇÃO PARA PRESOS") < md.index("ALIMENTAÇÃO HOSPITALAR") and "serviço essencial" in md
+    assert "contratos de gestão com OS" in md
+    import io
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(funcoes.calendario_xlsx([dict(e, orgao="SEX", criticidade="x", so_mes=False,
+                                consequencia="", decisao="", fonte="", trecho="") for e in eventos])))
+    assert wb.sheetnames[0] == "Prioridades" and wb["Prioridades"]["A2"].value == "Máxima"
+
+
+
+def test_quadro_sobre_o_documento(funcoes):
+    q = funcoes.sobre_o_documento("04/11/2026", {"nivel": "média"})
+    assert q.startswith("## Sobre este documento") and "Não recomenda decisões" in q and "média" in q
+    assert "sem revisão da equipe" in q
+
+
+def _resultado_exemplo():
+    from datetime import date
+    risco = lambda k, titulo, nota, prio: {
+        "id": f"R{k}", "titulo": titulo, "causa": "c", "consequencia": "d", "em_jogo": "R$ 1 mi", "prazo": "",
+        "em_curso": "aditivo publicado" if k == 1 else "", "decisao": "Renovar ou não?", "quem_decide": "SECID",
+        "categoria": "Continuidade de serviço", "impacto": "Alto", "chance": "Alta", "fatos": ["F1"],
+        "fatos_invalidos": [], "firmeza": "dado do SIGA/PNCP", "agir_ate": date(2026, 12, 1), "nota": nota,
+        "prioridade": prio}
+    return {"situacao": ["Linha 1.", "Linha 2."],
+            "riscos": [risco(k, f"Risco {k}", 12 - k, "Máxima" if k < 3 else "Média") for k in range(1, 8)],
+            "decisoes": [{"id": "Q1", "pergunta": "Renovar agora?", "opcoes": [{"nome": "Renovar", "o_que_e": "x"},
+                          {"nome": "Esperar", "o_que_e": "y"}], "o_que_falta_saber": "saldo", "riscos": ["R1"],
+                          "visoes": [{"papel": "Controle e jurídico (TCE-RJ, PGE, MPRJ)", "teme": "aditivo irregular",
+                                      "valoriza": "legalidade"}]}],
+            "pedir": [{"o_que": "Lista de contratos", "serve_a": "R1"}]}
+
+
+def test_documento_curto_montado_por_codigo(funcoes, llm):
     import io
     import docx
     rel, _ = funcoes.limpar_relatorio(RELATORIO)
     d = dossie_exemplo(funcoes)
     diag = funcoes.extrair_diagnostico("m", d, rel, "Secretaria de Exemplo")
-    eventos = funcoes.extrair_calendario("m", d, rel, "Secretaria de Exemplo", "04/11/2026")["eventos"]
-    assert eventos
-    texto = funcoes.documento_orgao(MEMORANDO, diag, eventos, d, None, "## Anexo 2 – O debate em detalhe\nx",
-                                    "## Anexo 3 – Como este documento foi feito\ny")
-    ordem = [texto.index(t) for t in ["# Memorando", "## Diagnóstico do órgão", "### Próximos vencimentos",
-                                      "## Anexo 1", "## Anexo 2", "## Anexo 3"]]
+    resultado = _resultado_exemplo()
+    texto = funcoes.documento_secretaria(resultado, diag, [("Contratos que vencem em até 180 dias", "3")], [], d, None,
+                                         funcoes.resumo_dossie(d), "## Anexo 3 – Como este documento foi feito\nx",
+                                         funcoes.sobre_o_documento("04/11/2026", {"nivel": "média"}))
+    ordem = [texto.index(t) for t in ["## Sobre este documento", "## O essencial", "## Os riscos mais urgentes",
+                                      "## Capítulo 1 – Diagnóstico", "### Ficha", "### Missão e estrutura",
+                                      "## Capítulo 2", "### R1. Risco 1", "### Outros riscos a acompanhar",
+                                      "### Decisões em aberto", "### Pedir à secretaria", "## Anexo 1", "## Anexo 3"]]
     assert ordem == sorted(ordem)
-    dados = funcoes.gerar_docx(texto, {"orgao": "Equipe", "data": "6 de novembro de 2026"})
-    textos = [p.text for p in docx.Document(io.BytesIO(dados)).paragraphs]
-    assert "Diagnóstico do órgão" in textos and "Anexo 1 – Fontes consultadas" in textos
+    assert len(re.findall(r"^### R\d", texto, re.M)) == 5 and "| R6. Risco 6 |" in texto            # 5 em detalhe, o resto na tabela
+    assert "- **Em curso:** aditivo publicado" in texto and "_Não se sabe:_ Organograma atualizado" in texto
+    assert "_Controle e jurídico (TCE-RJ, PGE, MPRJ):_ teme aditivo irregular; valoriza legalidade" in texto
+    for bloco in funcoes.SECOES_DIAGNOSTICO:
+        assert f"### {bloco}" in texto                                          # ficha padrão: todos os blocos
+    doc = docx.Document(io.BytesIO(funcoes.gerar_docx(texto, {"orgao": "Equipe", "assunto": "Secretaria de Exemplo"})))
+    quebras = sum('w:br w:type="page"' in p._p.xml for p in doc.paragraphs)
+    assert quebras >= 4                                                           # capítulos e anexos em página nova
+
+
+def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):
+    from datetime import date, timedelta
+    rel, _ = funcoes.limpar_relatorio(RELATORIO)
+    d = dossie_exemplo(funcoes)
+    diag = funcoes.extrair_diagnostico("m", d, rel, "Secretaria de Exemplo")
+    ev = {"data": date(2026, 11, 20), "dias": 16, "valor": 2e6, "evento": "Fim do contrato 1", "objeto": "ALIMENTAÇÃO DE PRESOS",
+          "tipo": "Contrato", "origem": "Contratos do Estado (SIGA/PNCP)", "termos": "", "valor_texto": "R$ 2 mi"}
+    funcoes.avaliar_riscos([ev], "04/11/2026")
+    venc = funcoes.vencimentos_numerados([ev])
+    bruto = {"situacao": ["s"], "riscos": [
+        {"id": "R1", "titulo": "Obra", "categoria": "Obras e projetos", "impacto": "Médio", "chance": "Média",
+         "prazo": "31/03/2027", "fatos": ["F1"], "causa": "a", "consequencia": "b", "decisao": "?"},
+        {"id": "R2", "titulo": "Alimentação de presos", "categoria": "Continuidade de serviço", "impacto": "Alto",
+         "fatos": ["V1"], "causa": "a", "consequencia": "b", "decisao": "?"},
+        {"id": "R3", "titulo": "Sem base", "categoria": "Inventada", "impacto": "Alto", "prazo": "antes da posse",
+         "fatos": ["X9"], "causa": "a", "consequencia": "b", "decisao": "?"}],
+        "decisoes": [{"pergunta": "?", "opcoes": [{"nome": "A"}], "riscos": ["R2"]},
+                     {"pergunta": "Renovar?", "opcoes": [{"nome": "A"}, {"nome": "B"}], "riscos": ["R2", "R9"]}],
+        "pedir": [{"o_que": "contratos", "serve_a": "R2 e R3"}]}
+    r = funcoes.conferir_e_ordenar(bruto, diag, venc, d, "04/11/2026")
+    titulos = [x["titulo"] for x in r["riscos"]]
+    assert titulos[0] == "Alimentação de presos" and r["riscos"][0]["id"] == "R1"     # renumerados pela prioridade
+    assert r["riscos"][0]["firmeza"] == "dado do SIGA/PNCP" and r["riscos"][0]["prioridade"] == "Máxima"
+    sem_base = next(x for x in r["riscos"] if x["titulo"] == "Sem base")
+    assert sem_base["firmeza"] == "sem comprovação" and sem_base["nota"] <= 5 and sem_base["categoria"] == "Continuidade de serviço"
+    assert sem_base["agir_ate"] == date(2027, 1, 1)
+    assert len(r["decisoes"]) == 1 and r["decisoes"][0]["riscos"] == ["R1"]         # decisão com uma opção só sai
+    assert r["pedir"][0]["serve_a"].startswith("R1 e R")
+    c = funcoes.confianca(funcoes.resumo_dossie(d), r["riscos"])
+    assert c["nivel"] in ("baixa", "média") and any("riscos apoiados" in m for m in c["motivos"])
+    assert funcoes.confianca(None, [])["nivel"] == "baixa"
+    _ = timedelta
+
+
+def test_material_dos_riscos_tem_ids_e_limite_da_base(funcoes, llm):
+    from datetime import date
+    rel, _ = funcoes.limpar_relatorio(RELATORIO)
+    d = dossie_exemplo(funcoes)
+    diag = funcoes.extrair_diagnostico("m", d, rel, "Secretaria de Exemplo")
+    ev = {"data": date(2026, 12, 20), "dias": 46, "valor": 9e6, "evento": "Fim do contrato 7", "objeto": "LIMPEZA",
+          "tipo": "Contrato", "origem": "Contratos do Estado (SIGA/PNCP)", "termos": "", "valor_texto": "R$ 9 mi"}
+    funcoes.avaliar_riscos([ev], "04/11/2026")
+    texto = funcoes.material("SEX", diag, funcoes.vencimentos_numerados([ev]), "DIVERGÊNCIAS: x", "04/11/2026")
+    assert "[F1]" in texto and "[V1] vence 20/12/2026" in texto and "agir até 20/11/2026" in texto
+    assert "contratos de gestão com OS" in texto and "DIVERGÊNCIAS: x" in texto

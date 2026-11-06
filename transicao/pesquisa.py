@@ -415,7 +415,7 @@ def texto_dossie(dossie):
 
 
 def material_referencia(dossie, relatorio):
-    """O começo comum das mensagens do debate: dossiê e, se houver, a autodeclaração do órgão."""
+    """O começo comum das mensagens com o material em cache: dossiê e, se houver, o relatório da secretaria."""
     blocos = [f"<dossie>\n{texto_dossie(dossie)}\n</dossie>"]
     if relatorio:
         blocos.append(f"<relatorio>\nAUTODECLARAÇÃO DO ÓRGÃO (relatório de transição enviado pela pasta)\n\n{relatorio}\n</relatorio>")
@@ -484,12 +484,12 @@ def itens_citados(texto):
             secao = linha.strip("# ").strip()
             continue
         m = re.match(r"^\s*(?:(?:[-*•]|\d+[.)])\s+)?(.*\S)\s*$", linha)
-        if not m or "fontes" in _norm(secao) or not secao:
-            continue
+        if not m or not secao or re.search(r"fontes|pergunta|ingest|limita", _norm(secao)):
+            continue                                   # perguntas, fontes e notas de método não são fatos
         corpo = m.group(1)
         links = RE_LINK_MD.findall(corpo)
         afirmacao = re.sub(r"\s+", " ", RE_LINK_MD.sub("", corpo).replace("**", "")).strip(" ;")
-        if not afirmacao:
+        if not afirmacao or afirmacao.endswith("?") or re.match(r"(fontes|dossie completo|referencia)\s*:", _norm(afirmacao)):
             continue
         if "lacuna" in _norm(secao) or "nao encontrad" in _norm(secao):
             lacunas.append(afirmacao)

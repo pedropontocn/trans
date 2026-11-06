@@ -8,7 +8,6 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
-from .debate import ler_personas
 from .modelo import _norm
 from .pesquisa import BLOCOS, BLOCOS_ESTADO, BLOCOS_ORGAO, TIPOS_FONTE, TIPOS_OFICIAIS, itens_incluidos, resumo_dossie
 
@@ -316,7 +315,7 @@ def gerar_docx(memorando_md, meta):
     i = 0
     while i < len(blocos):
         b = blocos[i]
-        if b[0] == "h" and b[1] == 2 and _norm(b[2]).startswith(("anexo", "diagnostico")) and i > 0:
+        if b[0] == "h" and b[1] == 2 and _norm(b[2]).startswith(("anexo", "capitulo")) and i > 0:
             doc.add_page_break()
         if b[0] == "h" and b[1] <= 2 and ("sintese" in _norm(b[2]) or "essencial" in _norm(b[2])):
             j = i + 1
@@ -403,7 +402,13 @@ def markdown_dossie(dossie, confronto=None):
             if not grupo:
                 continue
             linhas.append(f"### {_titulo_bloco(bloco)}")
+            contratos = [i for i in grupo if i.get("conferido_pela_equipe") and i["fonte"].startswith("Base de contratos")]
+            if contratos:                    # contrato a contrato já está no Anexo 2 e no Excel: aqui, só a contagem
+                linhas.append(f"- {len(contratos)} contrato(s) da base do Estado (SIGA/PNCP), detalhados nos "
+                              "vencimentos prioritários e no calendário em Excel · ✔ conferido pela equipe")
             for i in grupo:
+                if i in contratos:
+                    continue
                 selo = "✔ conferido pela equipe" if i.get("conferido_pela_equipe") else SELO_CHECAGEM.get(i["checagem"], "")
                 fonte = (i["fonte"] or "fonte") + (f", {i['data_fonte']}" if i["data_fonte"] else "")
                 fonte = f"[{fonte}]({i['url']})" if i["url"] else fonte
@@ -430,118 +435,6 @@ def markdown_dossie(dossie, confronto=None):
     return "\n".join(linhas)
 
 
-ROTULO_EVIDENCIA = {1: "confirmado em fonte oficial", 2: "cálculo, norma ou estudo", 3: "só na imprensa ou fonte não conferida",
-                    4: "só informado pelo órgão", 5: "sem comprovação"}
-
-
-def _rotulo_nivel(nivel):
-    try:
-        n = int(nivel)
-    except (TypeError, ValueError):
-        return "não informado"
-    return f"{ROTULO_EVIDENCIA.get(n, 'não informado')} (nível {n})"
-
-
-def anexo_debate(tm, personas_txt=""):
-    """Anexo técnico do memorando, montado por código a partir do Tension Map: todo o detalhe do debate (posições,
-    quem defende, evidência, tipo de divergência, mecanismo, o que mudaria) sem gastar tokens nem depender do modelo."""
-    nomes = {p["id"]: p["nome"] for p in ler_personas(personas_txt)} if personas_txt else {}
-    nome = lambda pid: nomes.get(pid, pid)
-    linhas = ["## Anexo 2 – O debate em detalhe",
-              "Os dilemas abaixo saíram de um debate entre papéis institucionais simulados (não são opiniões de pessoas "
-              "ou órgãos reais). O memorando traz os três principais; aqui estão todos, com o detalhe técnico."]
-    estab = tm.get("estabilidade") or {}
-    for t in tm.get("trade_offs") or []:
-        if not isinstance(t, dict):
-            continue
-        linhas.append(f"### {t.get('titulo', '')}")
-        if t.get("descricao"):
-            linhas.append(str(t["descricao"]))
-        for rotulo, chave in (("Opção A", "polo_a"), ("Opção B", "polo_b")):
-            polo = t.get(chave) or {}
-            quem = ", ".join(nome(x) for x in (polo.get("defendido_por") or []))
-            linhas.append(f"- **{rotulo}:** {polo.get('posicao', '')}" + (f" Defendida por: {quem}." if quem else "")
-                          + (f" Argumento: {polo.get('argumento')}" if polo.get("argumento") else "")
-                          + f" Informação: {_rotulo_nivel(polo.get('evidencia'))}.")
-        detalhes = [("Quem ganha", t.get("quem_ganha")), ("Quem perde", t.get("quem_perde")),
-                    ("Por que as duas opções não cabem juntas", t.get("mecanismo_causal")),
-                    ("Natureza do desacordo", ", ".join(t.get("tipos_divergencia") or [])),
-                    ("O que mudaria a balança", t.get("o_que_mudaria")),
-                    ("Estabilidade", "não medida" if t.get("estabilidade") == "não medida" else
-                     f"apareceu em {t['estabilidade']} rodadas independentes" if t.get("estabilidade") else "")]
-        linhas += [f"- **{r}:** {v}" for r, v in detalhes if v]
-    if tm.get("convergencias"):
-        linhas.append("### Pontos em que todos concordaram")
-        linhas += [f"- {c.get('tema', '')}" for c in tm["convergencias"] if isinstance(c, dict)]
-    fracos = tm.get("sinais_fracos") or []
-    if fracos:
-        linhas.append("### Dilemas que apareceram em poucas rodadas (sinais fracos)")
-        linhas += [f"- {f.get('titulo', '')} ({f.get('estabilidade', '')})" for f in fracos if isinstance(f, dict)]
-    if tm.get("questoes_juridicas"):
-        linhas.append("### Dúvidas jurídicas com resposta na norma")
-        linhas += [f"- {q.get('questao', '')} ({q.get('norma', '')})" for q in tm["questoes_juridicas"] if isinstance(q, dict)]
-    if estab.get("rodadas"):
-        linhas.append(f"_Debate repetido em {estab['rodadas']} rodadas independentes; {estab.get('estaveis', 0)} "
-                      "dilema(s) apareceram na maioria delas._")
-    return "\n".join(linhas)
-
-
-def markdown_verificacao(ev, numeros, registro_id, modelo, confianca=None, tm=None, neutralidade=None,
-                         dossie=None, confronto=None, titulo="## Anexo 3 – Como este documento foi feito"):
-    """Seção que vai no fim do Word, para o leitor saber o que foi conferido."""
-    nao_enc = [n for n in numeros if n["situacao"] == "não encontrado"]
-    calc = [n for n in numeros if n["situacao"] == "cálculo declarado"]
-    linhas = [titulo,
-              f"Documento elaborado com apoio de IA ({modelo}); registro {registro_id}. "
-              "Os itens abaixo foram conferidos por código contra o dossiê de fontes e o relatório do órgão."]
-    if dossie:
-        linhas.append(f"- **Dossiê:** {dossie['itens']} itens ({dossie['estado']} sobre o Estado, {dossie['orgao']} sobre o "
-                      f"órgão); {dossie['conferidos']} conferidos na fonte, {dossie['oficiais']} de fonte oficial; "
-                      f"{dossie['nao_encontrado']} assunto(s) procurado(s) sem fonte confiável.")
-    if confianca:
-        linhas.append(f"- **Confiança calculada: {confianca['nivel']}.** " + "; ".join(confianca["motivos"]) + ".")
-    if confronto and confronto.get("divergencias"):
-        linhas.append(f"- **Autodeclaração × dossiê:** {len(confronto['divergencias'])} divergência(s) conferida(s) "
-                      f"({sum(d['situacao'] == 'contradiz' for d in confronto['divergencias'])} contradição(ões), "
-                      f"{sum(d['situacao'] == 'nao_mencionado' for d in confronto['divergencias'])} assunto(s) não mencionado(s)).")
-    estab = (tm or {}).get("estabilidade")
-    if estab:
-        linhas.append(f"- **Estabilidade:** {estab['rodadas']} rodadas independentes; {estab['estaveis']} trade-off(s) "
-                      f"apareceram em pelo menos {estab['minimo_para_estavel']} delas."
-                      + (f" Estavam previstas {estab['previstas']}, mas as rodadas 1 e 2 chegaram aos mesmos trade-offs "
-                         "e as demais não foram necessárias." if estab.get("previstas", 0) > estab["rodadas"] else ""))
-        fracos = (tm or {}).get("sinais_fracos") or []
-        if fracos:
-            linhas.append("- **Sinais fracos (fora do memorando):** "
-                          + "; ".join(f"{f.get('titulo', '')} ({f.get('estabilidade', '')})" for f in fracos[:8]) + ".")
-    linhas.append(f"- **Fontes conferidas:** {len(ev['conferidas'])} item(ns) do dossiê, {len(ev['calculos'])} cálculo(s) "
-                  f"e {len(ev.get('autodeclaracoes', []))} trecho(s) da autodeclaração do órgão.")
-    if ev.get("limitadas"):
-        linhas.append("- **Nível de evidência limitado pela fonte:** " + "; ".join(r["onde"] for r in ev["limitadas"][:10]) + ".")
-    if ev["rebaixadas"]:
-        linhas.append("- **Rebaixadas para nível 5 (fonte não encontrada):** "
-                      + "; ".join(r["onde"] for r in ev["rebaixadas"][:10]) + ".")
-    if ev["normas"]:
-        refs = sorted({r["referencia"] for r in ev["normas"] if r["referencia"]})
-        linhas.append("- **Citações legais a confirmar com a assessoria jurídica:** " + "; ".join(refs[:10]) + ".")
-    if neutralidade and not neutralidade.get("erro"):
-        partes = [f"avaliação geral: {neutralidade['avaliacao_geral'].replace('_', ' ')}"]
-        if neutralidade["desequilibrados"]:
-            partes.append("polos desequilibrados em " + ", ".join(
-                f"{t.get('id')} ({'pende para A' if t['equilibrio'] == 'pende_para_a' else 'pende para B'})"
-                for t in neutralidade["desequilibrados"]))
-        if neutralidade["recomendacoes_implicitas"]:
-            partes.append(f"{len(neutralidade['recomendacoes_implicitas'])} trecho(s) com recomendação implícita")
-        linhas.append(f"- **Revisão de neutralidade ({neutralidade['modelo']}):** " + "; ".join(partes) + ".")
-    conferidos = sum(1 for n in numeros if n["situacao"] == "conferido")
-    linhas.append(f"- **Números do memorando conferidos no dossiê ou no relatório:** {conferidos} de {len(numeros)}.")
-    if calc:
-        linhas.append("- **Cálculos declarados (não constam das fontes como tal):** " + "; ".join(n["valor"] for n in calc[:10]) + ".")
-    if nao_enc:
-        linhas.append("- **Números não encontrados no dossiê nem no relatório, a conferir:** " + "; ".join(n["valor"] for n in nao_enc[:10]) + ".")
-    return "\n".join(linhas)
-
-
 def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimentos críticos", data_corte=""):
     """Planilha do calendário: uma linha por evento, ordenada por data, com filtro, criticidade colorida e as
     instruções de leitura numa aba própria. Serve para um órgão ou para o consolidado do lote."""
@@ -553,14 +446,26 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
     ws.title = "Calendário"
     colunas = [("Data", 12), ("Dias até a data", 9), ("Criticidade", 20), ("Órgão", 30), ("Tipo", 16), ("Evento", 45),
                ("Objeto", 35), ("Valor (R$)", 16), ("Valor como informado", 18), ("O que acontece se nada for feito", 45),
-               ("Decisão necessária", 40), ("Origem da informação", 20), ("Fonte", 40), ("Trecho conferido", 60)]
+               ("Decisão necessária", 40), ("Origem da informação", 20), ("Fonte", 40), ("Trecho conferido", 60),
+               ("Prioridade", 11), ("Nota (impacto × urgência)", 10), ("Impacto", 9), ("Categoria", 24),
+               ("Serviço essencial", 10), ("Agir até", 12), ("Sem tempo para nova licitação", 12),
+               ("Situação no PNCP", 40)]
     ws.append([c for c, _ in colunas])
+    cores_prioridade = {"Máxima": "C00000", "Alta": "F4B183", "Média": "FFE699", "Baixa": "E2EFDA"}
     cores = {"Vencido": "C00000", "Crítico (até 30 dias)": "F4B183", "Atenção (31 a 90 dias)": "FFE699",
              "Acompanhar": "E2EFDA"}
     for e in sorted(eventos, key=lambda x: (x["data"], -(x["valor"] or 0))):
         ws.append([e["data"], e["dias"], e["criticidade"], e["orgao"], e["tipo"], e["evento"], e["objeto"], e["valor"],
-                   e["valor_texto"], e["consequencia"], e["decisao"], e["origem"], e["fonte"], e["trecho"]])
+                   e["valor_texto"], e["consequencia"], e["decisao"], e["origem"], e["fonte"], e["trecho"],
+                   e.get("prioridade", ""), e.get("prioridade_nota"), e.get("impacto", ""), e.get("categoria", ""),
+                   "sim" if e.get("essencial") else "não", e.get("agir_ate"),
+                   "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", "")])
         linha = ws.max_row
+        ws.cell(linha, 20).number_format = "dd/mm/yyyy"
+        if e.get("prioridade") in cores_prioridade:
+            ws.cell(linha, 15).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
+            if e["prioridade"] == "Máxima":
+                ws.cell(linha, 15).font = Font(color="FFFFFF", bold=True)
         ws.cell(linha, 1).number_format = "mm/yyyy" if e["so_mes"] else "dd/mm/yyyy"
         ws.cell(linha, 8).number_format = '#,##0.00'
         if e["criticidade"] in cores:
@@ -580,6 +485,28 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
             c.alignment = Alignment(wrap_text=True, vertical="top")
     ws.freeze_panes = "B2"
     ws.auto_filter.ref = ws.dimensions
+    prioridades = wb.create_sheet("Prioridades", 0)        # a primeira aba: o que tratar primeiro, em todos os órgãos
+    cab = ["Prioridade", "Agir até", "Vence em", "Órgão", "Categoria", "Serviço essencial", "Evento", "Valor (R$)",
+           "Sem tempo para nova licitação", "Situação no PNCP", "Fonte"]
+    prioridades.append(cab)
+    from .produtos import ordem_de_prioridade
+    for e in sorted([e for e in eventos if e["dias"] >= -30], key=ordem_de_prioridade)[:200]:
+        prioridades.append([e.get("prioridade", ""), e.get("agir_ate"), e["data"], e["orgao"], e.get("categoria", ""),
+                            "sim" if e.get("essencial") else "não", e["evento"], e["valor"],
+                            "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", ""), e["fonte"]])
+        linha = prioridades.max_row
+        for col in (2, 3):
+            prioridades.cell(linha, col).number_format = "dd/mm/yyyy"
+        prioridades.cell(linha, 8).number_format = '#,##0.00'
+        if e.get("prioridade") in cores_prioridade:
+            prioridades.cell(linha, 1).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
+    for j, largura in enumerate([11, 12, 12, 30, 24, 10, 50, 16, 12, 40, 40], 1):
+        prioridades.column_dimensions[get_column_letter(j)].width = largura
+        prioridades.cell(1, j).font = Font(bold=True, color="FFFFFF")
+        prioridades.cell(1, j).fill = PatternFill("solid", fgColor="1B2A41")
+        prioridades.cell(1, j).alignment = Alignment(wrap_text=True, vertical="center")
+    prioridades.freeze_panes = "A2"
+    prioridades.auto_filter.ref = prioridades.dimensions
     leia = wb.create_sheet("Como ler")
     for texto in [titulo, f"Data de corte: {data_corte}" if data_corte else "",
                   "Cada linha é um evento com data escrita nos documentos: vencimento de contrato ou convênio, prazo "
@@ -591,6 +518,16 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
                   "pública\" quer dizer que veio de documento ou notícia com link.",
                   "Criticidade (pela distância até a data de corte): Vencido; Crítico, até 30 dias; Atenção, de 31 a "
                   "90 dias; Acompanhar, mais de 90 dias.",
+                  "Prioridade (régua igual para todos os órgãos, calculada por código): impacto × urgência. Impacto "
+                  "Alto para serviço essencial (saúde, medicamentos, alimentação, custódia, vigilância, sistemas críticos "
+                  "etc.) a partir de R$ 1 mi, decisão de controle ou outro contrato a partir de R$ 50 mi; Médio para "
+                  "serviço essencial menor, outro contrato a partir de R$ 5 mi ou valor desconhecido; Baixo abaixo disso. Urgência pela data-limite para agir: já passou, até 30, até 90 ou mais de 90 dias. "
+                  "Aditivo publicado no PNCP nos últimos 120 dias reduz a urgência em um nível. Máxima: nota 9 ou mais; "
+                  "Alta: 6 a 8; Média: 3 a 5; Baixa: 1 ou 2.",
+                  "Agir até: para contratos, 30 dias antes do fim (tempo de assinar uma prorrogação). Sem tempo para "
+                  "nova licitação: o contrato vence em menos de 120 dias.",
+                  "A aba Prioridades mostra os 200 eventos de maior prioridade de todos os órgãos. Limite: "
+                  "contratos de gestão com OS, convênios e concessões não estão na base de contratos (SIGA).",
                   "Datas só com mês e ano aparecem como mm/aaaa.",
                   "Limite: só entram datas que estão escritas nos documentos. Se um relatório não traz a vigência dos "
                   "contratos, eles não aparecem aqui. Gerado com apoio de IA; confira antes de usar."]:
@@ -613,60 +550,188 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
 
 # --- O DOCUMENTO ÚNICO DE CADA ÓRGÃO ------------------------------------------------------
 
-def sobre_o_documento(resumo, data_corte, confianca):
+def sobre_o_documento(data_corte, confianca):
     """Nota curta de proveniência que abre o documento. Escrita por código, para não depender do modelo."""
     return ("## Sobre este documento\n"
-            "Apoio à decisão gerado com IA a partir de pesquisa em fontes públicas"
-            f" (data de corte: {data_corte or 'não informada'}) e do que o órgão informou. Não recomenda decisões. "
-            f"Confiança da análise: {confianca['nivel']}. Gerado em processamento automático, sem revisão da equipe. "
-            "Diagnóstico, fontes, debate e verificação vêm depois das decisões.")
+            f"Apoio à decisão gerado com IA a partir do dossiê de fontes públicas e dados do SIGA/PNCP (data de corte: "
+            f"{data_corte or 'não informada'}) e do que a secretaria informou. Não recomenda decisões. Confiança da "
+            f"análise: {confianca['nivel']}. Gerado em processamento automático, sem revisão da equipe.")
 
 
-def inserir_sobre_documento(memorando, quadro):
-    """Põe o quadro logo depois do título do memorando (ou no começo, se não houver título)."""
-    linhas = memorando.splitlines()
-    if linhas and linhas[0].lstrip().startswith("# "):
-        return "\n".join([linhas[0], "", quadro, ""] + linhas[1:]).strip()
-    return (quadro + "\n\n" + memorando).strip()
+def _origem(i):
+    return f"[{i['rotulo']}]({i['url']})" if i.get("url") else i["rotulo"]
 
 
-def markdown_diagnostico(diag):
-    """O diagnóstico do órgão: cada afirmação já conferida na origem, com o rótulo entre parênteses."""
-    if not (diag or {}).get("secoes"):
-        return ""
-    linhas = ["## Diagnóstico do órgão",
-              "Como o órgão está e se organiza hoje. Cada afirmação foi conferida por código na fonte citada; a origem "
-              "vem entre parênteses."]
-    for sec in diag["secoes"]:
+def markdown_diagnostico(diag, ficha=None, resumo_dossie=None):
+    """Capítulo 1: a ficha de números (código) e os seis blocos, com cada afirmação conferida na origem."""
+    linhas = ["## Capítulo 1 – Diagnóstico",
+              "Como a secretaria está hoje, nos mesmos blocos usados para todas as secretarias. Cada afirmação foi "
+              "conferida por código na origem, indicada entre parênteses."]
+    numeros = list(ficha or [])
+    if resumo_dossie and resumo_dossie.get("itens"):
+        numeros.append(("Fatos do dossiê (conferidos na fonte ou do SIGA/PNCP)",
+                        f"{resumo_dossie['itens']} ({resumo_dossie['conferidos']})"))
+    if numeros:
+        linhas += ["### Ficha", "| Indicador | Valor |", "|---|---|"] + [f"| {a} | {b} |" for a, b in numeros]
+    for sec in (diag or {}).get("secoes") or []:
         linhas.append(f"### {sec['titulo']}")
-        for i in sec["itens"]:
-            origem = f"[{i['rotulo']}]({i['url']})" if i.get("url") else i["rotulo"]
-            linhas.append(f"- {i['texto']} _({origem})_")
-    if diag.get("lacunas"):
-        linhas.append("### O que não se sabe")
-        linhas += [f"- {x}" for x in diag["lacunas"]]
-    if diag.get("descartados"):
+        if sec.get("leitura"):
+            linhas.append(sec["leitura"])
+        linhas += [f"- {i['texto']} _({_origem(i)})_" for i in sec["itens"]]
+        if not sec["itens"] and not sec.get("nao_se_sabe"):
+            linhas.append("_Sem informação conferida neste bloco._")
+        if sec.get("nao_se_sabe"):
+            linhas.append("_Não se sabe:_ " + "; ".join(sec["nao_se_sabe"]))
+    if (diag or {}).get("descartados"):
         linhas.append(f"_{diag['descartados']} afirmação(ões) sem origem conferida foram retiradas._")
     return "\n".join(linhas)
 
 
+def _agir(r):
+    return f"agir até {r['agir_ate']:%d/%m/%Y}" if r.get("agir_ate") else "sem data"
+
+
+def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
+    """Capítulo 2: riscos por prioridade (os primeiros em detalhe), decisões em aberto com o olhar de cada agente,
+    o que pedir à secretaria e o que o documento não cobre."""
+    riscos, decisoes = resultado.get("riscos") or [], resultado.get("decisoes") or []
+    linhas = ["## Capítulo 2 – Riscos e decisões urgentes",
+              "Riscos na ordem de prioridade (impacto × urgência), calculada por código com a mesma régua para todas as "
+              "secretarias. \"Base\" diz quão firme é a informação que sustenta o risco."]
+    for r in riscos[:limite_detalhe]:
+        linhas.append(f"### {r['id']}. {r['titulo']} – {_agir(r)}")
+        linhas.append(f"- **Risco:** {r['causa']} → {r['consequencia']}")
+        if r.get("em_jogo"):
+            linhas.append(f"- **Em jogo:** {r['em_jogo']}")
+        if r.get("em_curso"):
+            linhas.append(f"- **Em curso:** {r['em_curso']}")
+        linhas.append(f"- **Decisão a tomar:** {r['decisao']}" + (f" **Quem decide:** {r['quem_decide']}"
+                                                                  if r.get("quem_decide") else ""))
+        linhas.append(f"- **Prioridade:** {r['prioridade']} ({r['categoria']}; impacto {r['impacto'].lower()}, "
+                      f"chance {r['chance'].lower()}). **Base:** {r['firmeza']}")
+    if len(riscos) > limite_detalhe:
+        linhas += ["### Outros riscos a acompanhar", "| Risco | Categoria | Prioridade | Prazo | Base |", "|---|---|---|---|---|"]
+        linhas += [f"| {r['id']}. {r['titulo']} | {r['categoria']} | {r['prioridade']} | {_agir(r)} | {r['firmeza']} |"
+                   for r in riscos[limite_detalhe:]]
+    if decisoes:
+        linhas += ["### Decisões em aberto",
+                   "Decisões que não se resolvem só cumprindo um prazo. As opções têm o mesmo peso; abaixo de cada "
+                   "decisão, o que cada olhar de gestão teme e valoriza, segundo agentes independentes."]
+        for q in decisoes:
+            linhas.append(f"**{q['id']}. {q['pergunta']}**" + (f" _(ligada a {', '.join(q['riscos'])})_" if q["riscos"] else ""))
+            linhas += [f"- **Opção {k} – {o['nome']}:** {o.get('o_que_e', '')}" for k, o in enumerate(q["opcoes"], 1)]
+            for v in q.get("visoes") or []:
+                partes = [x for x in [f"teme {v['teme']}" if v.get("teme") else "",
+                                      f"valoriza {v['valoriza']}" if v.get("valoriza") else ""] if x]
+                if partes:
+                    linhas.append(f"- _{v['papel']}:_ " + "; ".join(partes))
+            if q.get("o_que_falta_saber"):
+                linhas.append(f"- **O que falta saber:** {q['o_que_falta_saber']}")
+    if resultado.get("pedir"):
+        linhas.append("### Pedir à secretaria")
+        linhas += [f"{k}. {p['o_que']}" + (f" _(serve a {p['serve_a']})_" if p.get("serve_a") else "")
+                   for k, p in enumerate(resultado["pedir"], 1)]
+    linhas.append("### O que este documento não cobre")
+    from .produtos import LIMITE_SIGA
+    linhas.append(("Os contratos vêm da base do Estado (SIGA), que " + LIMITE_SIGA.split("(SIGA) ", 1)[-1] + " "
+                   if cobre_siga else "")
+                  + "Os blocos do diagnóstico listam, em \"Não se sabe\", o que nem as fontes nem a secretaria trazem.")
+    return "\n".join(linhas)
+
+
+def em_uma_pagina(resultado):
+    """A abertura: situação, os três riscos mais urgentes e as decisões em aberto, em uma página."""
+    linhas = ["## O essencial"] + [f"- {x}" for x in resultado.get("situacao") or []]
+    riscos = resultado.get("riscos") or []
+    if riscos:
+        linhas.append("## Os riscos mais urgentes")
+        linhas += [f"{k}. **{r['titulo']}** – {_agir(r)} · prioridade {r['prioridade'].lower()} · {r['firmeza']}"
+                   for k, r in enumerate(riscos[:3], 1)]
+    if resultado.get("decisoes"):
+        linhas.append("## Decisões em aberto")
+        linhas += [f"- {q['pergunta']}" for q in resultado["decisoes"]]
+    linhas.append("_Detalhes no Capítulo 2; a base de cada afirmação, no Capítulo 1 e no Anexo 1._")
+    return "\n".join(linhas)
+
+
+def markdown_metodo(registro_id, modelos, resumo_dossie, confianca, numeros, neutralidade, revisoes, resultado):
+    """Anexo 3: como o documento foi feito e o que foi conferido por código."""
+    nao_enc = [n for n in numeros if n["situacao"] == "não encontrado"]
+    calc = [n for n in numeros if n["situacao"] == "cálculo declarado"]
+    linhas = ["## Anexo 3 – Como este documento foi feito",
+              f"Registro {registro_id}. Modelos: {modelos.get('auxiliar')} (diagnóstico, calendário e confronto), "
+              f"{modelos.get('debate')} (riscos, agentes e consolidação).",
+              "1. O diagnóstico parte do dossiê de fontes públicas e dados do SIGA/PNCP; o relatório da secretaria entra "
+              "como informação dela. Cada afirmação foi conferida por código: item do dossiê existente ou trecho literal "
+              "encontrado no relatório.",
+              "2. Uma análise identificou riscos e decisões a partir do diagnóstico e dos vencimentos prioritários.",
+              "3. Cinco agentes independentes, cada um com um olhar (" + ", ".join(p[1] for p in _papeis()) + "), "
+              "revisaram a análise sem ver uns aos outros: riscos que faltaram, riscos exagerados e o que temem e "
+              "valorizam em cada opção.",
+              "4. Uma consolidação juntou as revisões. O código conferiu os fatos citados por cada risco, deu a firmeza "
+              "da informação e calculou a prioridade com a mesma régua dos vencimentos.",
+              f"- **Confiança calculada:** {confianca['nivel']}. " + "; ".join(confianca["motivos"]) + "."]
+    if resumo_dossie:
+        linhas.append(f"- **Dossiê:** {resumo_dossie['itens']} fatos; {resumo_dossie['conferidos']} conferidos na fonte "
+                      f"ou do SIGA/PNCP; {resumo_dossie['nao_encontrado']} assunto(s) procurado(s) sem fonte.")
+    opinaram = [r["papel"] for r in revisoes or [] if not r.get("erro")]
+    falharam = [r["papel"] for r in revisoes or [] if r.get("erro")]
+    linhas.append(f"- **Agentes que revisaram:** {len(opinaram)} de {len(revisoes or [])}"
+                  + (f" (sem resposta: {', '.join(falharam)})" if falharam else "") + ".")
+    invalidos = sorted({f for r in resultado.get("riscos") or [] for f in r.get("fatos_invalidos") or []})
+    if invalidos:
+        linhas.append(f"- **Referências citadas que não existem no material (ignoradas):** {', '.join(invalidos)}.")
+    linhas.append(f"- **Números do documento conferidos no material:** {len(numeros) - len(nao_enc) - len(calc)} de "
+                  f"{len(numeros)}" + (f"; cálculos declarados: {', '.join(n['valor'] for n in calc)}" if calc else "")
+                  + (f"; não encontrados, a conferir: {', '.join(n['valor'] for n in nao_enc)}" if nao_enc else "") + ".")
+    if neutralidade and not neutralidade.get("erro"):
+        linhas.append(f"- **Revisão de neutralidade ({neutralidade['modelo']}):** "
+                      f"{neutralidade['avaliacao_geral'].replace('_', ' ')}"
+                      + (". Trechos que soam como recomendação: " + "; ".join(f"\"{r['trecho']}\""
+                         for r in neutralidade["recomendacoes_implicitas"]) if neutralidade["recomendacoes_implicitas"]
+                         else "") + ".")
+    return "\n".join(linhas)
+
+
+def _papeis():
+    from .riscos import PAPEIS
+    return PAPEIS
+
+
+def documento_secretaria(resultado, diag, ficha, eventos, dossie, confronto, resumo_dossie, metodo_md, sobre_md):
+    """O documento de cada secretaria, em Markdown: abertura em uma página, diagnóstico, riscos e decisões, anexos."""
+    venc = markdown_vencimentos(eventos, limite=20)
+    venc = ("## Anexo 2 – Vencimentos prioritários\n" + venc.split("\n", 1)[1]) if venc else ""
+    cobre_siga = any(e.get("origem", "").startswith("Contratos") for e in eventos or [])
+    partes = [sobre_md, em_uma_pagina(resultado), markdown_diagnostico(diag, ficha, resumo_dossie),
+              markdown_riscos(resultado, cobre_siga=cobre_siga), markdown_fontes(dossie, confronto), venc, metodo_md]
+    return "\n\n".join(p for p in partes if p)
+
+
 def markdown_vencimentos(eventos, limite=12, dias_passados=30):
-    """Os próximos vencimentos do órgão, em tabela curta. O calendário completo de todos os órgãos vai no Excel."""
-    proximos = [e for e in eventos or [] if e["dias"] >= -dias_passados]
-    if len(proximos) > limite:                 # muitos vencimentos: os de maior valor nos próximos 90 dias
-        janela = [e for e in proximos if e["dias"] <= 90] or proximos
-        proximos = sorted(janela, key=lambda x: -(x.get("valor") or 0))[:limite]
-    proximos.sort(key=lambda x: x["data"])
+    """Os vencimentos de maior prioridade do órgão, em tabela curta. O calendário completo vai no Excel."""
+    from .produtos import LIMITE_SIGA, ordem_de_prioridade
+    candidatos = [e for e in eventos or [] if e["dias"] >= -dias_passados]
+    proximos = sorted(candidatos, key=ordem_de_prioridade)[:limite]
     if not proximos:
         return ""
-    linhas = ["### Próximos vencimentos",
-              "| Data | Evento | Valor | Situação | Origem |", "|---|---|---|---|---|"]
+    linhas = ["### Vencimentos prioritários",
+              "Ordem por prioridade (impacto × urgência). \"Agir até\" desconta "
+              "o tempo de assinar uma prorrogação (30 dias); nova licitação costuma levar uns 120 dias.",
+              "| Prioridade | Agir até | Vence em | Evento | Valor | Situação |", "|---|---|---|---|---|---|"]
     for e in proximos:
         data = e["data"].strftime("%m/%Y" if e.get("so_mes") else "%d/%m/%Y")
-        evento = e["evento"] + (f" ({e['objeto']})" if e.get("objeto") else "")
-        linhas.append(f"| {data} | {evento} | {e.get('valor_texto') or '–'} | {e['criticidade']} | {e['origem']} |")
+        agir = e["agir_ate"].strftime("%d/%m/%Y") if e.get("agir_ate") else data
+        evento = (e["evento"] + (f" ({e['objeto'][:80]})" if e.get("objeto") else "")
+                  + (" – serviço essencial" if e.get("essencial") else ""))
+        situacao = "; ".join(x for x in [e.get("criticidade", ""), "sem tempo para nova licitação"
+                                         if e.get("sem_tempo_licitar") else "", e.get("situacao_pncp", "")] if x)
+        linhas.append(f"| {e.get('prioridade', '–')} | {agir} | {data} | {evento} | {e.get('valor_texto') or '–'} | "
+                      f"{situacao} |")
     if len(eventos) > len(proximos):
-        linhas.append(f"_Calendário completo, com {len(eventos)} data(s) conferida(s), no Excel consolidado._")
+        linhas.append(f"_Calendário completo, com {len(eventos)} data(s), no Excel consolidado._")
+    if any(e.get("origem", "").startswith("Contratos") for e in eventos):
+        linhas.append(f"_Limite: {LIMITE_SIGA}_")
     return "\n".join(linhas)
 
 
@@ -676,14 +741,3 @@ def markdown_fontes(dossie, confronto=None):
     corpo = [l for l in md.splitlines() if not l.startswith("# ")]
     corpo = [("#" + l) if l.startswith("## ") or l.startswith("### ") else l for l in corpo]
     return "## Anexo 1 – Fontes consultadas\n" + "\n".join(corpo)
-
-
-def documento_orgao(memorando, diag, eventos, dossie, confronto, anexo_debate_md, verificacao_md):
-    """O documento único de cada órgão, em Markdown: decisões (memorando), diagnóstico com os próximos vencimentos e,
-    nos anexos, fontes, debate e verificação."""
-    diag_md = markdown_diagnostico(diag)
-    venc_md = markdown_vencimentos(eventos)
-    if venc_md and not diag_md:
-        diag_md = "## Diagnóstico do órgão"
-    partes = [memorando, diag_md, venc_md, markdown_fontes(dossie, confronto), anexo_debate_md, verificacao_md]
-    return "\n\n".join(p for p in partes if p)

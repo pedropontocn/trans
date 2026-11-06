@@ -1,5 +1,5 @@
 """Configuração: modelos, preços e limites."""
-VERSAO = "4.1"
+VERSAO = "5.0"
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
 
 MODELOS = [
@@ -18,7 +18,6 @@ LIMITE_CARACTERES = 150_000      # documentos brutos de uma pasta (Drive ou .zip
 LIMITE_RELATORIO = 400_000
 
 
-TIPOS_DIVERGENCIA = ["factual", "causal", "normativa", "distributiva", "temporal", "epistêmica"]
 
 
 # US$ por milhão de tokens (entrada, saída). Fonte: platform.claude.com/docs/en/about-claude/pricing (nov/2026).

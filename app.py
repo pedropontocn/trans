@@ -21,10 +21,10 @@ from transicao.config import MODELOS
 
 load_dotenv()
 
-# custo por órgão, em US$, com Haiku na pesquisa, Sonnet no auxiliar e Opus no debate (medido em testes reais);
-# com dossiê enviado, sem a pesquisa (cerca de 40% do custo)
-CUSTO_POR_ORGAO = {True: (1.0, 1.6), False: (2.0, 3.2)}
-FRACAO_SEM_PESQUISA = 0.6
+# custo por secretaria com dossiê enviado, em US$ (Sonnet no auxiliar, Opus nos riscos e agentes): estimativa a partir
+# das chamadas do modelo novo; quando o app pesquisa o dossiê, soma cerca de 50%
+CUSTO_POR_ORGAO = {True: (0.7, 1.2), False: (1.3, 2.2)}
+PESO_COM_PESQUISA = 1.5
 
 
 @st.cache_resource(show_spinner=False)
@@ -75,21 +75,18 @@ def linhas(trabalho):
 
 st.set_page_config(page_title="Análise da Transição", page_icon="🏛️", layout="wide")
 st.title("🏛️ Análise da Transição")
-st.caption("Para cada órgão, um documento Word com as decisões a tomar, o diagnóstico, os próximos vencimentos e, "
-           "nos anexos, as fontes, o debate e a verificação; e um calendário consolidado em Excel. "
-           "Expõe escolhas para quem decide: não recomenda.")
+st.caption("Para cada secretaria, um documento curto: em uma página, diagnóstico, riscos e decisões urgentes, com "
+           "anexos de fontes e vencimentos. Para o conjunto, o painel estadual de urgências e o calendário em Excel. "
+           "Expõe riscos e escolhas para quem decide: não recomenda.")
 
 with st.sidebar:
     st.header("Modelos")
     modelo_pesquisa = st.selectbox("Pesquisa em fontes públicas", MODELOS, index=MODELOS.index("anthropic/claude-haiku-5-5"),
                                    help="Busca na web e monta o dossiê. A Anthropic cobra US$ 10 por mil buscas, além dos tokens.")
     modelo_auxiliar = st.selectbox("Auxiliar", MODELOS, index=MODELOS.index("anthropic/claude-sonnet-5-5"),
-                                   help="Insumos, confronto com o relatório, calendário, diagnóstico, consolidação e revisão "
-                                        "de neutralidade.")
-    modelo_debate = st.selectbox("Debate e memorando", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"))
-    n_rodadas = st.slider("Rodadas do debate", 1, 5, 3,
-                          help="Cada rodada refaz o debate do zero; só ganham destaque os dilemas que se repetem.")
-    parar_cedo = n_rodadas >= 3 and st.checkbox("Parar na 2ª rodada se as duas concordarem", value=True)
+                                   help="Diagnóstico, calendário, confronto com o relatório e revisão de neutralidade.")
+    modelo_debate = st.selectbox("Riscos e agentes", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"),
+                                 help="Escreve a análise de riscos, faz os cinco agentes revisores e a consolidação.")
     economico = st.checkbox("Modo econômico (Batch API)", value=True,
                             help="Metade do preço dos tokens. Cada etapa espera a fila da Anthropic: o total leva de "
                                  "uma a algumas horas, com todos os órgãos em paralelo.")
@@ -113,20 +110,21 @@ def andamento():
     feitas = linhas(t)
     minutos = ((t["fim"] or datetime.now()) - t["inicio"]).total_seconds() / 60
     if t["situacao"] == "rodando":
-        st.info(f"⏳ Analisando {t['total']} órgão(s)" + (" no modo econômico" if t["economico"] else "")
+        st.info(f"⏳ Analisando {t['total']} secretaria(s)" + (" no modo econômico" if t["economico"] else "")
                 + f": {len(feitas)} pronto(s), {minutos:.0f} min até agora. Pode fechar a página: a análise continua. "
                   "Não reinicie o app nem faça merge no GitHub até terminar.")
         st.progress(len(feitas) / max(t["total"], 1))
     elif t["situacao"] == "concluído":
         ok = sum(l.get("situacao") == "concluído" for l in feitas)
         custo = sum(float(l.get("custo_usd") or 0) for l in feitas)
-        st.success(f"✅ Pronto em {minutos:.0f} min: {ok} de {t['total']} órgão(s). "
-                   f"Custo estimado: US$ {custo:.2f}".replace(".", ",") + " (mais a pesquisa do Estado; ver LEIA-ME).")
+        st.success(f"✅ Pronto em {minutos:.0f} min: {ok} de {t['total']} secretaria(s). "
+                   f"Custo estimado: US$ {custo:.2f}".replace(".", ",") + " (mais a pesquisa do Estado e o painel; ver LEIA-ME).")
     else:
         st.error(f"A análise parou: {t['erro']}")
     if feitas:
         st.dataframe([{"Órgão": l["orgao"], "Situação": l["situacao"], "Itens do dossiê": l["itens_dossie"],
-                       "Dilemas": l["trade_offs"], "Datas": l["datas_calendario"], "Confiança": l["confianca"],
+                       "Riscos (máx./alta)": f"{l['riscos']} ({l['riscos_maxima_alta']})" if l["riscos"] else "",
+                       "Datas": l["datas_calendario"], "Confiança": l["confianca"],
                        "US$": l["custo_usd"], "Observação": l["observacao"]} for l in feitas],
                      hide_index=True, width="stretch")
     with st.expander("Registro do andamento"):
@@ -194,13 +192,13 @@ if not trabalho or trabalho["situacao"] != "rodando":
                 escolhidos = [dict(o, nome=str(r["orgao"]).strip() or o["nome"])
                               for o, r in zip(orgaos, registros) if r.get("analisar")]
                 faixa = CUSTO_POR_ORGAO[economico]
-                peso = sum(FRACAO_SEM_PESQUISA if o.get("ler_dossie") else 1 for o in escolhidos)
+                peso = sum(1 if o.get("ler_dossie") else PESO_COM_PESQUISA for o in escolhidos)
                 st.caption(f"Estimativa: US$ {faixa[0] * peso:.0f} a {faixa[1] * peso:.0f} para "
-                           f"{len(escolhidos)} órgão(s). O valor real sai no resumo. Não envie documentos sigilosos.")
-                if st.button(f"▶️ Analisar {len(escolhidos)} órgão(s)", type="primary", width="stretch",
+                           f"{len(escolhidos)} secretaria(s), mais o painel estadual. O valor real sai no resumo. Não envie documentos sigilosos.")
+                if st.button(f"▶️ Analisar {len(escolhidos)} secretaria(s)", type="primary", width="stretch",
                              disabled=not escolhidos):
                     cfg = {"modelo_pesquisa": modelo_pesquisa, "modelo_auxiliar": modelo_auxiliar, "modelo": modelo_debate,
-                           "n_rodadas": n_rodadas, "parar_cedo": parar_cedo, "data_corte": data_corte.strftime("%d/%m/%Y"),
+                           "data_corte": data_corte.strftime("%d/%m/%Y"),
                            "foco": foco.strip(), "orgao_emissor": orgao_emissor, "unidade": unidade, "para": para}
                     try:
                         iniciar(escolhidos, cfg, economico)
