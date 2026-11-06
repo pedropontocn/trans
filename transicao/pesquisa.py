@@ -484,12 +484,12 @@ def itens_citados(texto):
             secao = linha.strip("# ").strip()
             continue
         m = re.match(r"^\s*(?:(?:[-*•]|\d+[.)])\s+)?(.*\S)\s*$", linha)
-        if not m or "fontes" in _norm(secao) or not secao:
-            continue
+        if not m or not secao or re.search(r"fontes|pergunta|ingest|limita", _norm(secao)):
+            continue                                   # perguntas, fontes e notas de método não são fatos
         corpo = m.group(1)
         links = RE_LINK_MD.findall(corpo)
         afirmacao = re.sub(r"\s+", " ", RE_LINK_MD.sub("", corpo).replace("**", "")).strip(" ;")
-        if not afirmacao:
+        if not afirmacao or afirmacao.endswith("?") or re.match(r"(fontes|dossie completo|referencia)\s*:", _norm(afirmacao)):
             continue
         if "lacuna" in _norm(secao) or "nao encontrad" in _norm(secao):
             lacunas.append(afirmacao)

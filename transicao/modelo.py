@@ -185,6 +185,18 @@ def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa="", uso_
     return (msg.content or ""), argumentos, getattr(escolha, "finish_reason", None)
 
 
+def chamar_json(modelo, mensagens, max_tokens, etapa="", uso_lista=None, teto=32000):
+    """Chama o modelo e devolve o JSON da resposta. Se a resposta foi cortada pelo limite de tokens antes de fechar o
+    JSON (relatórios grandes geram listas longas), repete uma vez com o dobro do limite."""
+    texto, _, motivo = chamar_modelo(modelo, mensagens, max_tokens, etapa=etapa, uso_lista=uso_lista)
+    dados = extrair_json(texto)
+    if dados is None and motivo == "length" and max_tokens < teto:
+        texto, _, motivo = chamar_modelo(modelo, mensagens, min(teto, max_tokens * 2),
+                                         etapa=f"{etapa} (de novo, com mais espaço)", uso_lista=uso_lista)
+        dados = extrair_json(texto)
+    return dados
+
+
 def como_texto(valor):
     """Converte o que o extrator devolve em texto legível para as caixas de edição."""
     if isinstance(valor, list):

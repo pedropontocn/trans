@@ -2,7 +2,7 @@
 import re
 from datetime import date
 
-from .modelo import _norm, chamar_modelo, extrair_json, mensagens_com_cache
+from .modelo import _norm, chamar_json, mensagens_com_cache
 from .pesquisa import TIPOS_OFICIAIS, itens_incluidos, material_referencia
 from .modelo import _comparavel, _shingles, trecho_confere
 from .verificacao import _numero_br
@@ -18,14 +18,14 @@ e prazos de fim de mandato que afetem o órgão.
 
 Regras:
 - Só datas escritas no texto. NÃO calcule datas (ex.: "12 meses a partir de"), não deduza, não estime.
-- "trecho": cópia LITERAL, de até 40 palavras, do texto onde a data aparece. O sistema confere: sem o trecho exato, o
+- "trecho": cópia LITERAL, de até 30 palavras, do texto onde a data aparece. O sistema confere: sem o trecho exato, o
   evento é descartado.
 - "origem": "relatorio" se veio do relatório do órgão; "dossie" se veio de um item do dossiê (e informe o id em "item").
 - "data": a data como aparece, normalizada para dd/mm/aaaa (ou mm/aaaa, se o texto só traz mês e ano).
 - "objeto": o contrato, convênio, obra ou norma (com número, se houver). "valor": como aparece no texto, ou vazio.
 - "consequencia": o que acontece se nada for feito até a data, em 1 frase, só se o texto disser ou for óbvio pela
   natureza do evento (ex.: contrato vencido para de cobrir o serviço). "decisao": que decisão a data cobra, em 1 frase.
-- Até 60 eventos, priorizando os de maior valor e os mais próximos da data de corte.
+- Até 40 eventos, priorizando os de maior valor e os mais próximos da data de corte. Seja breve em cada campo.
 
 Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
 {"eventos": [{"data": "31/12/2026", "tipo": "contrato|convenio|prazo_legal|orcamento|controle|obra|outro",
@@ -101,15 +101,15 @@ def extrair_calendario(modelo, dossie, relatorio, orgao, data_corte=None):
     base_dia = (_ler_data(data_corte) or (date.today(), False))[0] if data_corte else date.today()
     if not (relatorio or itens_incluidos(dossie)):
         return {"eventos": [], "descartados": [], "uso": []}
-    texto, _, _ = chamar_modelo(
+    dados = chamar_json(
         modelo, mensagens_com_cache(modelo, PROMPT_CALENDARIO, material_referencia(dossie, relatorio),
                                     f"Monte o calendário do órgão {orgao}. Data de corte: {base_dia:%d/%m/%Y}."),
-        8000, etapa="calendário de vencimentos", uso_lista=uso)
+        12000, etapa="calendário de vencimentos", uso_lista=uso)
     comp_rel = _comparavel(relatorio or "")
     sh_rel = _shingles(comp_rel.split())
     por_id = {i["id"]: i for i in itens_incluidos(dossie)}
     vistos = set()
-    for e in ((extrair_json(texto) or {}).get("eventos") or [])[:80]:
+    for e in ((dados or {}).get("eventos") or [])[:80]:
         if not isinstance(e, dict):
             continue
         lida = _ler_data(e.get("data"))
@@ -208,7 +208,7 @@ Regras:
 - Cada item cita a origem: "dossie" com o id do item (ex.: "O3"), ou "relatorio" com um trecho LITERAL de até 30
   palavras do relatório. O sistema confere: item sem origem conferida é descartado.
 - Não invente números, nomes de unidades ou datas. Se um tema não tem informação, não o preencha: liste-o em "lacunas".
-- No máximo 8 itens por seção.
+- No máximo 6 itens por seção, cada um em uma frase curta.
 
 Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
 {"secoes": [{"titulo": "Missão e competências", "itens": [{"texto": "...", "origem": "dossie|relatorio",
@@ -238,14 +238,13 @@ def extrair_diagnostico(modelo, dossie, relatorio, orgao):
     uso = []
     if not (relatorio or itens_incluidos(dossie)):
         return {"secoes": [], "lacunas": [], "descartados": 0, "uso": []}
-    texto, _, _ = chamar_modelo(
+    dados = chamar_json(
         modelo, mensagens_com_cache(modelo, PROMPT_DIAGNOSTICO_ORGAO, material_referencia(dossie, relatorio),
                                     f"Escreva o diagnóstico do órgão {orgao}."),
-        8000, etapa="diagnóstico do órgão", uso_lista=uso)
+        12000, etapa="diagnóstico do órgão", uso_lista=uso) or {}
     comp_rel = _comparavel(relatorio or "")
     sh_rel = _shingles(comp_rel.split())
     por_id = {i["id"]: i for i in itens_incluidos(dossie)}
-    dados = extrair_json(texto) or {}
     secoes, descartados = [], 0
     for sec in dados.get("secoes") or []:
         if not isinstance(sec, dict):

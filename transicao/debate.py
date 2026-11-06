@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
 from .config import MARCA_JSON_FIM, MARCA_JSON_INI, TIPOS_DIVERGENCIA
-from .modelo import (_em_paralelo, _norm, chamar_modelo, extrair_json, mensagens_com_cache,
+from .modelo import (_em_paralelo, _norm, chamar_json, chamar_modelo, extrair_json, mensagens_com_cache,
                      uso_do_fio)
 from .pesquisa import itens_incluidos, material_referencia, texto_dossie
 from .modelo import FERRAMENTAS_COMPARTILHADAS, _comparavel, _shingles, trecho_confere
@@ -194,6 +194,7 @@ Para cada item do dossiê relevante para o órgão:
 Não registre itens em que relatório e dossiê concordam. Não atribua intenção de esconder: descreva só a diferença.
 O sistema confere os trechos e descarta o que não encontrar.
 
+Registre no máximo 12 divergências, as que mais pesam para a transição; "trecho_relatorio" com até 30 palavras.
 Responda SOMENTE com JSON: {"divergencias": [{"item": "O3", "situacao": "contradiz|nao_mencionado",
 "o_orgao_declara": "...", "trecho_relatorio": "...", "as_fontes_mostram": "..."}]}"""
 
@@ -382,14 +383,14 @@ def confrontar(modelo, dossie, relatorio):
         return {"divergencias": [], "descartadas": 0, "uso": []}
     uso = []
     # mesmo começo de mensagem do calendário (sistema comum + dossiê + relatório): o segundo lê do cache
-    texto, _, _ = chamar_modelo(
+    dados = chamar_json(
         modelo, mensagens_com_cache(modelo, PROMPT_CONFRONTO, material_referencia(dossie, relatorio),
                                     "Faça o confronto pedido nas instruções."),
-        4000, etapa="confronto autodeclaração × dossiê", uso_lista=uso)
+        8000, etapa="confronto autodeclaração × dossiê", uso_lista=uso)
     comp = _comparavel(relatorio)
     sh = _shingles(comp.split())
     validas, descartadas = [], 0
-    for d in ((extrair_json(texto) or {}).get("divergencias") or []):
+    for d in ((dados or {}).get("divergencias") or []):
         if not isinstance(d, dict) or str(d.get("item", "")).strip() not in ids:
             descartadas += 1
             continue
@@ -503,7 +504,7 @@ def rodar_rodadas(modelo, mensagens, n, modelo_checagem=None):
     para ali: as demais não mudariam quais trade-offs são estáveis. Se divergirem, roda as restantes em paralelo.
     Devolve (resultados, previstas)."""
     def uma(i, uso):
-        texto, args, motivo = chamar_modelo(modelo, mensagens, 12000, ferramenta=FERRAMENTA_TENSION_MAP,
+        texto, args, motivo = chamar_modelo(modelo, mensagens, 16000, ferramenta=FERRAMENTA_TENSION_MAP,
                                             etapa=f"tension map · rodada {i}", uso_lista=uso)
         return args or extrair_json(texto), texto, motivo
 

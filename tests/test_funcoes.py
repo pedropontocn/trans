@@ -481,3 +481,21 @@ def test_documento_unico_do_orgao(funcoes, llm):
     dados = funcoes.gerar_docx(texto, {"orgao": "Equipe", "data": "6 de novembro de 2026"})
     textos = [p.text for p in docx.Document(io.BytesIO(dados)).paragraphs]
     assert "Diagnóstico do órgão" in textos and "Anexo 1 – Fontes consultadas" in textos
+
+def test_resposta_cortada_e_repetida_com_mais_espaco(funcoes, llm):
+    from types import SimpleNamespace as NS
+    pedidos = []
+
+    def completion(model, messages, max_tokens, **kw):
+        pedidos.append(max_tokens)
+        cortada = len(pedidos) == 1
+        texto = '[INÍCIO DO JSON]{"eventos": [{"data": "01/12/2026"' if cortada else \
+            '[INÍCIO DO JSON]{"eventos": []}[FIM DO JSON]'
+        return NS(choices=[NS(message=NS(content=texto, tool_calls=None), finish_reason="length" if cortada else "stop")],
+                  usage=NS(prompt_tokens=10, completion_tokens=10))
+    funcoes.usar_completion(completion)
+    try:
+        assert funcoes.chamar_json("anthropic/claude-sonnet-5-5", [{"role": "user", "content": "x"}], 8000) == {"eventos": []}
+    finally:
+        funcoes.usar_completion(None)
+    assert pedidos == [8000, 16000]
