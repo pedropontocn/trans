@@ -65,10 +65,12 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
                        {"eventos": [], "descartados": [], "uso": []}),
                _seguro(lambda: produtos.extrair_diagnostico(auxiliar, dossie, relatorio, nome),
                        {"secoes": [], "descartados": 0, "uso": []}),
-               _seguro(lambda: checklist.responder(auxiliar, dossie, relatorio, nome), {"respostas": {}, "uso": []})]
+               _seguro(lambda: checklist.responder(auxiliar, dossie, relatorio, nome), {"respostas": {}, "uso": []}),
+               _seguro(lambda: produtos.extrair_contratos_criticos(auxiliar, dossie, relatorio, nome),
+                       {"contratos": [], "descartados": 0, "uso": []})]
     feitos = modelo._em_paralelo(tarefas) if JUNTAS else [t() for t in tarefas]
-    confronto, calendario, diagnostico, respostas_checklist = feitos
-    for parte, rotulo in zip(feitos, ("confronto", "calendário", "diagnóstico", "checklist")):
+    confronto, calendario, diagnostico, respostas_checklist, criticos = feitos
+    for parte, rotulo in zip(feitos, ("confronto", "calendário", "diagnóstico", "checklist", "contratos críticos")):
         uso.extend(parte.pop("uso", None) or [])
         if parte.get("erro"):
             problemas.append(f"{rotulo}: {parte['erro']}")
@@ -99,8 +101,11 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     confianca = riscos.confianca(resumo_dos, resultado["riscos"], cobertura)
 
     ficha = produtos.ficha_contratos(eventos)
-    corpo = "\n\n".join([documentos.em_uma_pagina(resultado, cobertura), documentos.markdown_diagnostico(diagnostico, ficha),
-                          checklist.markdown(cobertura), documentos.markdown_riscos(resultado)])
+    # contratos críticos: os da planilha do SIGA/PNCP (código) primeiro, depois os apontados no material e conferidos
+    contratos_criticos = produtos.contratos_da_planilha(eventos) + (criticos.get("contratos") or [])
+    corpo = "\n\n".join([documentos.em_uma_pagina(resultado, cobertura, diagnostico.get("indicadores")),
+                          documentos.markdown_capitulos(diagnostico, contratos_criticos, ficha),
+                          documentos.markdown_riscos(resultado)])
     base = "\n".join([pesquisa.texto_dossie(dossie), relatorio, material])
     numeros = verificacao.verificar_numeros(corpo, base)
     progresso("Revisando a neutralidade...")
@@ -109,16 +114,16 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     uso_total = list(dossie.get("uso") or []) + uso
     custo, parcial = modelo.custo_estimado(uso_total)
     versao_prompt = hashlib.md5((pesquisa.PROMPT_PESQUISA + conf.PROMPT_CONFRONTO + produtos.PROMPT_CALENDARIO
-                                 + produtos.PROMPT_DIAGNOSTICO_ORGAO + checklist.PROMPT_CHECKLIST + riscos.PROMPT_ANALISE
+                                 + produtos.PROMPT_DIAGNOSTICO_ORGAO + produtos.PROMPT_CONTRATOS
+                                 + checklist.PROMPT_CHECKLIST + riscos.PROMPT_ANALISE
                                  + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO).encode()).hexdigest()[:8]
     registro_id = f"{versao_prompt}-{hashlib.md5((material + relatorio).encode()).hexdigest()[:8]}"
     modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal,
                "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes))}
     texto_doc = documentos.documento_secretaria(
-        resultado, diagnostico, ficha, eventos, dossie, confronto, resumo_dos, checklist.markdown(cobertura),
-        documentos.markdown_metodo(registro_id, modelos, resumo_dos, confianca, numeros, neutralidade, revisoes,
-                                   resultado),
-        documentos.sobre_o_documento(cfg["data_corte"], confianca), cobertura=cobertura)
+        resultado, diagnostico, ficha, eventos, dossie, confronto, checklist.markdown(cobertura),
+        documentos.nota_final(registro_id, modelos, confianca, cfg["data_corte"], neutralidade, revisoes),
+        cobertura=cobertura, contratos_criticos=contratos_criticos)
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
             "assunto": nome, "tipo": "Diagnóstico, riscos e decisões urgentes da transição",
             "data": documentos._data_extenso(date.today()),
@@ -130,7 +135,10 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
         "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "confronto": confronto, "diagnostico": diagnostico,
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
-        "riscos": para_json(resultado), "checklist": cobertura, "documento_md": texto_doc,
+        "riscos": para_json(resultado), "checklist": cobertura, "contratos_criticos": contratos_criticos,
+        "metodo_md": documentos.markdown_metodo(registro_id, modelos, resumo_dos, confianca, numeros, neutralidade,
+                                               revisoes, resultado),
+        "documento_md": texto_doc,
         "verificacao": {"numeros": numeros, "problemas": problemas, "neutralidade": neutralidade,
                         "confianca": confianca},
         "uso_tokens": uso_total, "custo_estimado_usd": round(custo, 4), "custo_parcial": parcial,
