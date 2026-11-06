@@ -68,15 +68,6 @@ GRUPOS = [["situacao_fiscal", "regime_divida", "previdencia"], ["calendario_lega
 NAO_ENCONTRADO = {"estado": [{"bloco": "previdencia", "procurado": "Aporte do Tesouro ao RioPrevidência em 2026"}],
                   "orgao": [{"bloco": "pessoal", "procurado": "Número de terceirizados nos contratos de custeio"}]}
 
-# Fontes citadas nos Tension Maps dos testes: item do dossiê que existe, trecho inventado e sem fonte
-FONTE_OK = {"tipo": "dossie", "referencia": "O3", "trecho": TRECHO_LICITACOES}
-FONTE_FALSA = {"tipo": "dossie", "referencia": "O3",
-               "trecho": "a Secretaria tem R$ 500 milhões livres em caixa para 2027"}
-FONTE_AUTO = {"tipo": "autodeclaracao", "referencia": "3.2",
-              "trecho": "Cinco obras estão com execução suspensa aguardando decisão da Casa Civil"}
-SEM_FONTE = {"tipo": "nenhuma", "referencia": "", "trecho": ""}
-
-
 def dossie_exemplo(funcoes):
     """O dossiê como o app o monta, com os links já conferidos pelas páginas falsas."""
     itens = [funcoes.normalizar_item(b, "estado") for b in ITENS_ESTADO]
@@ -113,50 +104,17 @@ O prazo das atas é de cerca de 85 dias; um valor inventado: R$ 999,9 mi.
 """
 
 
-def polo(evidencia, fonte):
-    return {"posicao": "p", "defendido_por": ["P1"], "argumento": "a", "evidencia": evidencia, "fonte": fonte}
-
-
-def trade_off(id_, titulo, evidencia=1, fonte=FONTE_OK, **extra):
-    t = {"id": id_, "titulo": titulo, "descricao": "d", "mecanismo_causal": "m",
-         "polo_a": polo(evidencia, fonte), "polo_b": polo(4, SEM_FONTE), "tipos_divergencia": ["temporal"],
-         "nivel_evidencia": evidencia, "quem_ganha": "g", "quem_perde": "p", "o_que_mudaria": "o"}
-    t.update(extra)
-    return t
-
-
-def tension_map(trade_offs, **sem):
-    tm = {"tension_map_id": "tm", "scenario": "cenário",
-          "baseline_reference": {"cenario": "nada muda",
-                                 "consequencias": [{"efeito": "e", "evidencia": 1, "fonte": FONTE_OK}],
-                                 "custo_de_esperar": "crescente"},
-          "convergencias": [], "trade_offs": trade_offs, "unresolved_questions": [],
-          "confidence_assessment": {"nivel_geral": "baixa", "justificativa": "j", "principais_limitacoes": []}}
-    for chave in sem:
-        tm.pop(chave, None)
-    return tm
-
-
 class LLMFalso:
     """Faz o papel do modelo. Cada teste ajusta as respostas que quer."""
 
     def __init__(self):
         self.chamadas = []
         self.trava = threading.Lock()
-        self.insumos = {"problema": "Carteira de licitações travada na transição (O1, E1).",
-                        "personas": [{"id": "baseline", "nome": "Status quo", "criterio": "nada muda"},
-                                     {"id": "planejamento", "nome": "Pasta de Planejamento", "criterio": "resultado fiscal"},
-                                     {"id": "controle", "nome": "Controle externo", "criterio": "legalidade"},
-                                     {"id": "gradual", "nome": "Defensor da mudança gradual", "criterio": "continuidade"}],
-                        "sem_voz": ["Trabalhadores terceirizados dos contratos de custeio"],
-                        "lacunas": ["Aporte do Tesouro ao RioPrevidência"]}
-        self.resposta_insumos_texto = None           # se definido, os insumos vêm em texto, sem ferramenta
         self.paginas = dict(PAGINAS)                 # o que a "web" devolve quando o código abre um link
         self.falhar_pesquisa = False
         self.grupos_sem_json = set()                 # primeiro bloco dos grupos cuja resposta para sem o JSON
         self.grupos_com_erro = set()                 # primeiro bloco dos grupos cuja chamada dá erro
         self.continuacao_sem_json = False            # a continuação também para sem o JSON
-        self.dossie_arquivo = None                   # bytes de um dossiê .json para o upload opcional
         self.sem_relatorio = False
         self.diagnostico_orgao = {"secoes": [
             {"titulo": "Orçamento e execução", "itens": [
@@ -165,20 +123,11 @@ class LLMFalso:
                  "item": "", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
                 {"texto": "A Secretaria tem 40 subsecretarias.", "origem": "relatorio", "item": "",
                  "trecho": "a Secretaria tem 40 subsecretarias"}]},
-            {"titulo": "Missão e competências", "itens": [
-                {"texto": "Item que não existe.", "origem": "dossie", "item": "O999", "trecho": ""}]}],
-            "lacunas": ["Organograma atualizado e quadro de cargos"]}
-        self.opcoes_org = {"opcoes": [
-            {"nome": "Manter a estrutura atual", "o_que_muda": "Nada muda.", "ganhos": ["continuidade"],
-             "perdas_e_custos": ["riscos seguem"], "riscos_juridicos": "Nenhum ato novo.", "impacto_nas_pessoas": "Nenhum.",
-             "pre_requisitos": [], "fundamentos": [{"texto": "LOA de R$ 412 mi.", "origem": "dossie", "item": "O1"}]},
-            {"nome": "Criar uma unidade de gestão de contratos", "o_que_muda": "Concentra a fiscalização.",
-             "ganhos": ["controle"], "perdas_e_custos": ["custo de transição"],
-             "riscos_juridicos": "Exige decreto de estrutura; a confirmar com a PGE.", "impacto_nas_pessoas": "Remanejamento.",
-             "pre_requisitos": ["lista de contratos conferida"],
-             "fundamentos": [{"texto": "inventado", "origem": "relatorio", "trecho": "frase que não está no relatório"}]}],
-            "comparacao": [{"criterio": "Continuidade dos serviços", "avaliacoes": ["igual", "pior"]},
-                           {"criterio": "Risco jurídico", "avaliacoes": ["igual", "pior", "melhor"]}]}
+            {"titulo": "Missão e estrutura", "itens": [
+                {"texto": "Item que não existe.", "origem": "dossie", "item": "O999", "trecho": ""},
+                {"texto": "O TCE-RJ apontou atraso na prestação de contas de convênios.", "origem": "dossie",
+                 "item": "O4", "trecho": ""}],
+             "leitura": "A secretaria tem pendências de controle.", "nao_se_sabe": ["Organograma atualizado"]}]}
         self.calendario = {"eventos": [
             {"data": "23/10/2026", "tipo": "orcamento", "evento": "Corte do empenho informado", "objeto": "LOA 2026",
              "valor": "R$ 398.750.000,00", "consequencia": "", "decisao": "Conferir o empenhado",
@@ -197,24 +146,34 @@ class LLMFalso:
             {"item": "O99", "situacao": "contradiz", "trecho_relatorio": "x", "as_fontes_mostram": "item que não existe"},
             {"item": "O1", "situacao": "contradiz", "trecho_relatorio": "a Secretaria não tem orçamento", "as_fontes_mostram": "y"},
             {"item": "O3", "situacao": "nao_mencionado", "trecho_relatorio": "", "as_fontes_mostram": "licitações mencionadas"}]}
-        self.rodadas = [tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])]
-        self.consolidacao = None
-        self.memorando = MEMORANDO
-        self.memorando_cortado_uma_vez = False
-        self.recusar_ferramentas = None              # exceção para simular modelos/versões sem ferramenta
+        self.analise_riscos = {
+            "situacao": ["A secretaria tem R$ 412 milhões de LOA.", "Há licitações adiadas."],
+            "riscos": [
+                {"id": "R1", "titulo": "Licitações adiadas", "categoria": "Obras e projetos", "causa": "concorrências adiadas",
+                 "consequencia": "obras não começam", "em_jogo": "R$ 120,5 mi", "prazo": "antes da posse",
+                 "impacto": "Alto", "chance": "Alta", "em_curso": "", "decisao": "Retomar ou cancelar?",
+                 "quem_decide": "Secretaria", "fatos": ["F1", "O3"]},
+                {"id": "R2", "titulo": "Risco inventado", "categoria": "Fiscal e orçamentário", "causa": "x",
+                 "consequencia": "y", "impacto": "Alto", "chance": "Baixa", "prazo": "", "decisao": "?", "fatos": ["F99"]}],
+            "decisoes": [{"id": "Q1", "pergunta": "Retomar as licitações agora ou esperar?", "opcoes": [
+                {"nome": "Retomar", "o_que_e": "publicar de novo"}, {"nome": "Esperar", "o_que_e": "deixar à nova gestão"}],
+                "o_que_falta_saber": "preços atualizados", "riscos": ["R1"]}],
+            "pedir": [{"o_que": "Lista de contratos", "serve_a": "R1"}]}
+        self.revisao_agente = {"faltando": [], "exagerados": [{"risco": "R2", "motivo": "sem base"}],
+                               "decisoes": [{"decisao": "Q1", "opcao": 1, "teme": "custo", "valoriza": "rapidez"}]}
+        self.agentes_que_falham = set()
+        self.consolidacao_riscos = None            # None: a consolidação devolve a análise com as visões
+        self.temas = {"temas": [{"titulo": "Contratos vencendo", "descricao": "Vários contratos vencem.",
+                                 "riscos": ["SEX:R1", "SEY:R1"]}, {"titulo": "Tema de uma só", "descricao": "x",
+                                                                    "riscos": ["SEX:R1"]}]}
         self.neutralidade = {"avaliacao_geral": "levemente_enviesado",
+                             "decisoes_desequilibradas": [],
                              "trade_offs": [{"id": "T1", "equilibrio": "pende_para_a", "motivo": "o polo A tem o dobro do espaço"}],
                              "recomendacoes_implicitas": [
-                                 {"trecho": "Definir o destino das licitações adiadas", "por_que": "soa como ordem"},
+                                 {"trecho": "Retomar as licitações agora ou esperar", "por_que": "soa como ordem"},
                                  {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
         self.falhar_neutralidade = False
         self.texto_relatorio = RELATORIO           # o que o MarkItDown falso devolve
-        self.registro_anterior = None              # bytes de um registro .json para o segundo upload
-        self.pareamento = None                     # resposta do pareamento de trade-offs (None = pareia por id igual)
-        self.personas_mudas = set()                # ids de personas que respondem sem JSON na Fase 1
-        self.falhar_avaliador = False
-        self.sintese = None                        # Tension Map da síntese do modo independente
-        self._n_tm = 0
 
     def _resp(self, conteudo="", nome=None, args=None, motivo="stop", entrada=10000, saida=2000, buscas=None):
         chamadas = [NS(function=NS(name=nome, arguments=json.dumps(args)))] if nome else None
@@ -233,8 +192,6 @@ class LLMFalso:
         nome = nomes[0] if nomes else None
         with self.trava:
             self.chamadas.append({"modelo": model, "ferramenta": nome, "ferramentas": nomes, "mensagens": messages, "kw": kw})
-        if nome and self.recusar_ferramentas:
-            raise self.recusar_ferramentas
 
         if "Monte a camada" in texto(messages[0]["content"]):
             pedido = texto(messages[0]["content"])
@@ -251,87 +208,39 @@ class LLMFalso:
             nao = [n for n in NAO_ENCONTRADO[camada] if n["bloco"] in grupo]
             return self._resp("Pesquisei. [INÍCIO DO JSON]" + json.dumps({"itens": itens, "nao_encontrado": nao})
                               + "[FIM DO JSON]", entrada=30000, saida=3000, buscas=0 if continuacao else 4)
-        if "Você prepara os insumos" in sistema:
-            self.mensagem_insumos = ultimo
-            if self.resposta_insumos_texto is not None or nome is None:
-                return self._resp(self.resposta_insumos_texto or json.dumps(self.insumos))
-            return self._resp(nome=nome, args=self.insumos, motivo="tool_calls")
         if "Você confronta o que um órgão declarou" in contexto:
             self.mensagem_confronto = ultimo
             return self._resp(json.dumps(self.confronto))
-        if "Você escreve o DIAGNÓSTICO de um órgão" in contexto:
+        if "Você escreve o DIAGNÓSTICO" in contexto:
             self.mensagem_diagnostico_orgao = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.diagnostico_orgao) + "[FIM DO JSON]")
-        if "Você prepara OPÇÕES DE ORGANIZAÇÃO" in contexto:
-            self.mensagem_opcoes = ultimo
-            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.opcoes_org) + "[FIM DO JSON]")
         if "Você monta o calendário de vencimentos críticos" in contexto:
             self.mensagem_calendario = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.calendario) + "[FIM DO JSON]")
-        if "Você participa de uma deliberação multiagente" in contexto:
-            mais_curta = ultimo.startswith("Sua resposta passou do limite")
-            if mais_curta:                      # o pedido de resposta mais curta vem depois da conversa original
-                ultimo = texto(messages[1]["content"])
-            pid = re.search(r"VOCÊ É: \[([^\]]+)\]", ultimo).group(1)
-            if "FASE 1 — PROPOSIÇÃO" in ultimo:
-                if pid in self.personas_mudas:
-                    return self._resp("não sei responder")
-                if pid in getattr(self, "personas_prolixas", set()) and not mais_curta:
-                    return self._resp('[INÍCIO DO JSON]{"plano": "um plano enorme que não acaba', motivo="length",
-                                      saida=6000)
-                obj = {"plano": f"Plano de {pid}", "premissas": [f"premissa de {pid}"],
-                       "argumentos": [{"afirmacao": "a", "evidencia": 1, "fonte": FONTE_OK}]}
-            elif "FASE 2 — CRÍTICA" in ultimo:
-                outros = list(json.loads(ultimo.split("PROPOSTAS DAS OUTRAS PERSONAS:\n")[1].split("\n\nFASE 2")[0]))
-                obj = {"criticas": [{"alvo": o, "critica": f"{pid} critica {o}", "tipo_divergencia": "causal",
-                                     "evidencia": 3, "fonte": SEM_FONTE} for o in outros[:2]]
-                                   + [{"alvo": "inexistente", "critica": "x", "evidencia": 5}]}
-            else:
-                obj = {"decisao": "REVISAR" if pid.endswith("1") else "DEFENDER", "plano_final": f"Plano final de {pid}",
-                       "premissas_abandonadas": [], "justificativa": "j"}
-            return self._resp("[INÍCIO DO JSON]" + json.dumps(obj) + "[FIM DO JSON]", entrada=15000, saida=600)
-        if "avaliador independente de políticas públicas" in sistema:
-            # True: todo avaliador falha; "gemini": só os Gemini falham (fora do ar), e o Claude serve de reserva
-            if self.falhar_avaliador is True or (self.falhar_avaliador == "gemini" and model.startswith("gemini/")):
-                raise RuntimeError("GEMINI_API_KEY inválida" if self.falhar_avaliador is True else
-                                   'litellm.ServiceUnavailableError: GeminiException - {"code": 503, "status": "UNAVAILABLE"}')
-            planos = json.loads(ultimo.split("PLANOS:\n")[1])
-            self.planos_vistos_pelo_avaliador = ultimo
-            return self._resp(json.dumps({"avaliacoes": [{"plano": r, "notas": {"viabilidade_juridica": 3, "viabilidade_fiscal": 2,
-                                                                                "impacto_para_a_populacao": 4, "ancoragem_em_evidencias": 3},
-                                                          "comentario": f"fraco em {r}"} for r in planos]}))
-        if "As Fases 1 a 3 JÁ ACONTECERAM" in contexto:
-            self.historico_sintese = ultimo
-            alvo = self.sintese or tension_map([trade_off("T1", "Licitações"), trade_off("T2", "Atas")])
-            return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(json.dumps(alvo))
-        if "Pareie os que tratam do mesmo dilema" in sistema:
-            if self.pareamento is None:
-                anteriores = json.loads(ultimo.split("ANTERIOR:\n")[1].split("\n\nATUAL:")[0])
-                atuais = {t["id"] for t in json.loads(ultimo.split("ATUAL:\n")[1])}
-                pares = {"pares": [{"anterior": t["id"], "atual": t["id"]} for t in anteriores if t["id"] in atuais]}
-            else:
-                pares = self.pareamento
-            return self._resp(nome=nome, args=pares, motivo="tool_calls") if nome else self._resp(json.dumps(pares))
+        if "Você é analista de riscos" in sistema:
+            self.material_riscos = ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.analise_riscos) + "[FIM DO JSON]")
+        if "Você revisa a análise de riscos" in sistema:
+            papel = re.search(r"VOCÊ É: ([^.]+)\.", sistema).group(1)
+            with self.trava:
+                self.agentes_vistos = getattr(self, "agentes_vistos", []) + [papel]
+            if papel in self.agentes_que_falham:
+                raise RuntimeError("agente fora do ar")
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.revisao_agente) + "[FIM DO JSON]")
+        if "Você consolida a análise de riscos" in sistema:
+            self.pedido_consolidacao = ultimo
+            final = self.consolidacao_riscos or dict(self.analise_riscos, decisoes=[dict(
+                q, visoes=[{"papel": "Fazenda e orçamento", "teme": "custo", "valoriza": "rapidez"}])
+                for q in self.analise_riscos["decisoes"]])
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(final) + "[FIM DO JSON]")
+        if "TEMAS TRANSVERSAIS" in sistema:
+            self.pedido_temas = ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.temas) + "[FIM DO JSON]")
         if "revisor de neutralidade" in sistema:
             if self.falhar_neutralidade:
                 raise RuntimeError("serviço indisponível")
             return self._resp(nome=nome, args=self.neutralidade, motivo="tool_calls") if nome else self._resp(json.dumps(self.neutralidade))
-        if "Consolide-os" in sistema:
-            alvo = self.consolidacao or self.rodadas[0]
-            return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(json.dumps(alvo))
-        if "Execute o protocolo" in ultimo or "não segue o formato" in ultimo:
-            with self.trava:
-                i = self._n_tm
-                self._n_tm += 1
-            alvo = self.rodadas[i % len(self.rodadas)]
-            return self._resp(nome=nome, args=alvo, motivo="tool_calls") if nome else self._resp(
-                "[INÍCIO DO JSON]" + json.dumps(alvo) + "[FIM DO JSON]")
-        # memorando
-        if self.memorando_cortado_uma_vez:
-            if ultimo.startswith("Continue"):
-                return self._resp(self.memorando[len(self.memorando) // 2:])
-            return self._resp(self.memorando[:len(self.memorando) // 2], motivo="length")
-        return self._resp(self.memorando)
+        return self._resp("ok")
 
 
 class ArquivoFalso:
@@ -388,15 +297,16 @@ def llm(monkeypatch):
     monkeypatch.setitem(sys.modules, "markitdown", markitdown)
     if str(RAIZ) not in sys.path:
         sys.path.insert(0, str(RAIZ))
-    from transicao import debate, entrada, modelo
+    from transicao import analise, entrada, modelo
     modelo._GUARDADOS.clear()            # respostas guardadas de um teste não vazam para o próximo
     entrada.converter_arquivo.cache_clear()
     modelo.usar_completion(None)
-    debate.RODADAS_JUNTAS = False
+    analise.JUNTAS = False
     return falso
 
 
-MODULOS = ["config", "modelo", "entrada", "pesquisa", "verificacao", "debate", "produtos", "documentos", "analise"]
+MODULOS = ["config", "modelo", "entrada", "pesquisa", "verificacao", "confronto", "produtos", "riscos", "documentos",
+           "painel", "analise"]
 
 
 @pytest.fixture

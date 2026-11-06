@@ -4,6 +4,5 @@ mcp
 markitdown[all]
 python-docx
 python-dotenv
-jsonschema
 anthropic
 openpyxl

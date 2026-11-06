@@ -415,7 +415,7 @@ def texto_dossie(dossie):
 
 
 def material_referencia(dossie, relatorio):
-    """O começo comum das mensagens do debate: dossiê e, se houver, a autodeclaração do órgão."""
+    """O começo comum das mensagens com o material em cache: dossiê e, se houver, o relatório da secretaria."""
     blocos = [f"<dossie>\n{texto_dossie(dossie)}\n</dossie>"]
     if relatorio:
         blocos.append(f"<relatorio>\nAUTODECLARAÇÃO DO ÓRGÃO (relatório de transição enviado pela pasta)\n\n{relatorio}\n</relatorio>")

@@ -2,6 +2,5 @@
 streamlit>=1.60
 python-docx
 python-dotenv
-jsonschema
 pytest
 openpyxl

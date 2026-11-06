@@ -3,7 +3,7 @@ dos tokens. Em troca, cada resposta demora mais: a API processa os pedidos em fi
 
 Como funciona: os órgãos rodam em paralelo, cada um no seu fio de execução. Cada chamada ao modelo entra numa fila e
 espera (transicao.modelo.usar_completion troca a chamada do fio pela da fila). Quando a fila fica alguns segundos sem pedidos novos, ela é enviada como um lote
-(batch). Assim, cada etapa de todos os órgãos (pesquisa, insumos, rodadas, memorando...) vai junta no mesmo lote.
+(batch). Assim, cada etapa de todos os órgãos (pesquisa, diagnóstico, agentes...) vai junta no mesmo lote.
 A resposta volta no formato do LiteLLM, então o resto do código não precisa saber que está em modo econômico.
 
 Modelos que não são da Anthropic (Gemini) continuam pela chamada normal.

@@ -1,8 +1,10 @@
 # Análise da Transição
 
-Aplicação em Streamlit que apoia a equipe de transição do governo do Estado do Rio de Janeiro. Para cada órgão, ela
-pesquisa fontes públicas, confronta o que o órgão informou, simula um debate entre papéis institucionais e escreve
-um documento para quem decide. **Não decide e não recomenda**: expõe as escolhas, com as fontes conferidas por código.
+Aplicação em Streamlit que apoia a equipe de transição do governo do Estado do Rio de Janeiro. Para cada secretaria,
+ela monta um diagnóstico a partir do dossiê de fontes públicas e dos documentos enviados, identifica riscos e decisões
+urgentes, submete a análise a cinco agentes independentes com olhares de gestão diferentes e entrega um documento
+curto. No fim, um painel estadual consolida as urgências. **Não decide e não recomenda**: expõe riscos e escolhas, com
+as fontes conferidas por código.
 
 ## O que sai
 
@@ -10,10 +12,11 @@ Um `.zip` com:
 
 | Arquivo | O que é |
 |---|---|
-| `documentos/<órgão>.docx` | **Um Word por órgão**: as decisões a tomar (memorando executivo), o diagnóstico do órgão com os próximos vencimentos e, nos anexos, as fontes consultadas, o debate em detalhe e como o documento foi feito |
-| `calendario_consolidado.xlsx` | As datas críticas de todos os órgãos numa planilha, só com datas conferidas na fonte |
-| `resumo.csv` | Situação, números e custo de cada órgão |
-| `auditoria/` | O registro completo de cada análise e os arquivos lidos, para conferência técnica |
+| `painel_estadual.docx` | As urgências de todas as secretarias na mesma régua: ranking, temas que se repetem, mapa de calor por categoria e cronograma de quando agir |
+| `documentos/<secretaria>.docx` | **Um documento curto por secretaria**: em uma página; Capítulo 1, diagnóstico (ficha padrão de seis blocos); Capítulo 2, riscos e decisões urgentes; anexos com fontes, vencimentos e método |
+| `calendario_consolidado.xlsx` | Os vencimentos de todas as secretarias; a aba Prioridades vem primeiro |
+| `resumo.csv` | Situação, números e custo de cada secretaria |
+| `auditoria/` | O registro completo de cada análise (inclusive a revisão de cada agente), para conferência técnica |
 
 ## Como usar
 
@@ -32,7 +35,7 @@ Um `.zip` com:
 4. Clique em **Analisar**. A análise roda em segundo plano; pode fechar a página.
 5. Baixe o `.zip`.
 
-Na barra lateral: modelos, rodadas do debate, modo econômico (Batch API, metade do preço, mais lento), data de corte,
+Na barra lateral: modelos, modo econômico (Batch API, metade do preço, mais lento), data de corte,
 foco e cabeçalho do documento.
 
 **Não reinicie o app nem faça merge no GitHub com uma análise em andamento**: o Streamlit reinicia e a análise se perde.
@@ -47,19 +50,24 @@ streamlit run app.py
 
 A chave fica num arquivo `.env` (fora do Git) ou nos Secrets do Streamlit Cloud: `ANTHROPIC_API_KEY=...`
 
-## Como funciona cada órgão
+## Como funciona cada secretaria
 
-1. **Dossiê.** Se a equipe enviou o dossiê do órgão, ele é usado no lugar da pesquisa. Senão, o modelo de pesquisa busca na web, em grupos paralelos, o contexto do Estado (pesquisado uma vez para
-   todos) e o do órgão. O código abre cada link e procura o trecho citado; o tipo de fonte e a conferência limitam o
-   nível de evidência de cada item. Sem itens suficientes, o órgão não é analisado.
-2. **Insumos.** Problema central, papéis do debate, grupos sem voz e lacunas, montados só a partir do dossiê.
-3. **Confronto, calendário e diagnóstico.** O relatório do órgão entra como autodeclaração: é comparado com o dossiê,
-   e o código descarta o que não confere. Datas e afirmações do diagnóstico só ficam se o trecho citado estiver na fonte.
-4. **Debate.** Até 5 rodadas independentes (padrão 3, parando na 2ª se as duas concordarem). Só ganham destaque os
-   dilemas que se repetem; uma consolidação junta as rodadas.
-5. **Verificação por código.** Fontes, níveis de evidência, números do memorando e confiança da análise são
-   conferidos ou calculados pelo código; um segundo modelo revisa a neutralidade.
-6. **Documento.** Memorando em linguagem direta, diagnóstico, vencimentos e anexos num só Word.
+1. **Dossiê.** O pacote de dossiês da equipe (ou, sem ele, a pesquisa do app). Links abertos e números conferidos por
+   código; contratos do SIGA/PNCP entram como dado oficial.
+2. **Diagnóstico.** Seis blocos fixos (missão e estrutura; orçamento e execução; pessoas; contratos e fornecedores;
+   entregas e programas; controle, passivos e judicialização), com uma ficha de números calculada por código. Cada
+   afirmação cita o dossiê ou um trecho literal do relatório da secretaria; o que não confere é retirado.
+3. **Vencimentos.** Régua de risco por código: serviço essencial, impacto, data-limite para agir, tempo para nova
+   licitação, aditivo recente no PNCP e prioridade (impacto × urgência).
+4. **Análise de riscos.** Uma análise lê o diagnóstico e os vencimentos e propõe riscos (causa → consequência),
+   decisões em aberto e o que pedir à secretaria.
+5. **Cinco agentes independentes** revisam a análise sem ver uns aos outros: Fazenda e orçamento; controle e jurídico;
+   área-fim e usuário do serviço; operação e servidores; nova gestão (prioridades e articulação). Apontam riscos que
+   faltaram, riscos exagerados e o que temem e valorizam em cada opção.
+6. **Consolidação e conferência.** Uma consolidação junta as revisões; o código confere os fatos citados por cada
+   risco, dá a firmeza da informação e calcula a prioridade. Um segundo modelo revisa a neutralidade.
+7. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
+   riscos de todas as secretarias; o modelo só aponta os temas que se repetem.
 
 ## Código
 
@@ -70,9 +78,11 @@ transicao/
   modelo.py            chamada aos modelos, cache, validação, custo
   entrada.py           leitura dos arquivos enviados (resumos ou pastas)
   pesquisa.py          dossiê e conferência dos links
-  debate.py            prompts, insumos, confronto, rodadas e neutralidade
-  produtos.py          calendário e diagnóstico
-  verificacao.py       evidências, números e confiança
+  confronto.py         confronto entre o que a secretaria informou e as fontes
+  riscos.py            análise de riscos, cinco agentes, consolidação, prioridade e neutralidade
+  painel.py            painel estadual
+  produtos.py          calendário, régua de risco dos vencimentos e diagnóstico
+  verificacao.py       conferência dos números do documento
   documentos.py        Word e Excel
   lote_api.py          modo econômico (Batch API)
   analise.py           o fluxo de um órgão e de vários
