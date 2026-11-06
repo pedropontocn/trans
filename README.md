@@ -1,14 +1,33 @@
-# Painel do Mapa de Tensões da Transição
+# Análise da Transição
 
-Aplicação em Streamlit que apoia a transição de governo do Estado do Rio de Janeiro. Para cada órgão, um conselho de
-papéis institucionais simulado por modelos de linguagem expõe trade-offs, conflitos e riscos. O painel **não decide
-e não recomenda**: entrega um mapa de tensões (Tension Map), um memorando executivo com matriz de risco e uma
-verificação automática do que foi citado.
+Aplicação em Streamlit que apoia a equipe de transição do governo do Estado do Rio de Janeiro. Para cada órgão, ela
+pesquisa fontes públicas, confronta o que o órgão informou, simula um debate entre papéis institucionais e escreve
+um documento para quem decide. **Não decide e não recomenda**: expõe as escolhas, com as fontes conferidas por código.
 
-A partir da versão 2.0, o painel faz uma coisa só: o mapa de tensões. A base factual é um **dossiê de fontes
-independentes** sobre o Estado e o órgão. O relatório que o órgão envia entra como **autodeclaração**: é confrontado
-com o dossiê e não preenche nenhum campo do debate. O diagnóstico de lacunas e a minuta de ofício saíram do painel
-(veja "Código retirado", abaixo).
+## O que sai
+
+Um `.zip` com:
+
+| Arquivo | O que é |
+|---|---|
+| `documentos/<órgão>.docx` | **Um Word por órgão**: as decisões a tomar (memorando executivo), o diagnóstico do órgão com os próximos vencimentos e, nos anexos, as fontes consultadas, o debate em detalhe e como o documento foi feito |
+| `calendario_consolidado.xlsx` | As datas críticas de todos os órgãos numa planilha, só com datas conferidas na fonte |
+| `resumo.csv` | Situação, números e custo de cada órgão |
+| `auditoria/` | O registro completo de cada análise e os arquivos lidos, para conferência técnica |
+
+## Como usar
+
+1. Suba os arquivos: o `.zip` com os resumos (um Word ou PDF por órgão, o nome do órgão no nome do arquivo) ou o
+   `.zip` da pasta com uma subpasta de documentos brutos por órgão.
+2. Confira a tabela de órgãos (dá para corrigir nomes e desmarcar).
+3. Clique em **Analisar**. A análise roda em segundo plano; pode fechar a página.
+4. Baixe o `.zip`.
+
+Na barra lateral: modelos, rodadas do debate, modo econômico (Batch API, metade do preço, mais lento), data de corte,
+foco e cabeçalho do documento.
+
+**Não reinicie o app nem faça merge no GitHub com uma análise em andamento**: o Streamlit reinicia e a análise se perde.
+**Não envie documentos sigilosos** (licitações em curso, processos sob sigilo): o texto vai para a API da Anthropic.
 
 ## Como rodar
 
@@ -17,285 +36,38 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-As chaves das APIs ficam num arquivo `.env` na raiz do projeto, que **não** vai para o GitHub (está no `.gitignore`).
-No Streamlit Cloud, ficam nos Secrets:
+A chave fica num arquivo `.env` (fora do Git) ou nos Secrets do Streamlit Cloud: `ANTHROPIC_API_KEY=...`
+
+## Como funciona cada órgão
+
+1. **Dossiê.** O modelo de pesquisa busca na web, em grupos paralelos, o contexto do Estado (pesquisado uma vez para
+   todos) e o do órgão. O código abre cada link e procura o trecho citado; o tipo de fonte e a conferência limitam o
+   nível de evidência de cada item. Sem itens suficientes, o órgão não é analisado.
+2. **Insumos.** Problema central, papéis do debate, grupos sem voz e lacunas, montados só a partir do dossiê.
+3. **Confronto, calendário e diagnóstico.** O relatório do órgão entra como autodeclaração: é comparado com o dossiê,
+   e o código descarta o que não confere. Datas e afirmações do diagnóstico só ficam se o trecho citado estiver na fonte.
+4. **Debate.** Até 5 rodadas independentes (padrão 3, parando na 2ª se as duas concordarem). Só ganham destaque os
+   dilemas que se repetem; uma consolidação junta as rodadas.
+5. **Verificação por código.** Fontes, níveis de evidência, números do memorando e confiança da análise são
+   conferidos ou calculados pelo código; um segundo modelo revisa a neutralidade.
+6. **Documento.** Memorando em linguagem direta, diagnóstico, vencimentos e anexos num só Word.
+
+## Código
 
 ```
-ANTHROPIC_API_KEY=...
-GEMINI_API_KEY=...
+app.py                 a tela (só interface)
+transicao/
+  config.py            modelos, preços e limites
+  modelo.py            chamada aos modelos, cache, validação, custo
+  entrada.py           leitura dos arquivos enviados (resumos ou pastas)
+  pesquisa.py          dossiê e conferência dos links
+  debate.py            prompts, insumos, confronto, rodadas e neutralidade
+  produtos.py          calendário e diagnóstico
+  verificacao.py       evidências, números e confiança
+  documentos.py        Word e Excel
+  lote_api.py          modo econômico (Batch API)
+  analise.py           o fluxo de um órgão e de vários
+tests/                 testes com um modelo falso: não chamam nenhuma API
 ```
 
-## Como funciona uma análise
-
-1. **Pesquisa (dossiê).** Você informa o órgão, um foco opcional e a data de corte. O modelo da pesquisa busca na web,
-   em duas camadas em paralelo:
-   - **Estado:** situação fiscal, regime da dívida (Propag), previdência, calendário legal (LOA, emendas, LRF),
-     cenário político e compromissos do governo eleito;
-   - **Órgão:** mandato e estrutura, orçamento e execução, pessoal, contratos e convênios, entregas e indicadores,
-     controle e judicialização, riscos de continuidade.
-
-   Cada item traz afirmação, fonte, data, link, trecho literal, tipo de fonte (documento oficial, dado oficial,
-   decisão de controle ou judicial, estudo, imprensa, declaração política, hipótese) e confiança. Promessa de governo
-   é sempre declaração política, nunca fato. O dossiê também registra o que foi **procurado e não encontrado**.
-2. **Conferência por código.** O painel abre cada link e procura o trecho citado: conferido, trecho não encontrado,
-   página inacessível ou sem trecho. O tipo de fonte e a conferência definem o **nível máximo** de evidência que o
-   item sustenta (fonte oficial conferida: nível 1; estudo conferido: 2; imprensa, declaração ou item não conferido:
-   3; hipótese: 4).
-3. **Revisão do dossiê.** O dossiê aparece numa tabela editável: dá para corrigir, excluir, acrescentar linhas e
-   marcar "Conferido pela equipe" quando alguém confirmar a fonte (por exemplo, um PDF que o código não abriu). Dá
-   também para baixar o dossiê em JSON e carregar um dossiê pronto, montado fora do painel; os links são conferidos
-   de novo.
-4. **Insumos.** O modelo auxiliar monta, **só a partir do dossiê**, o problema central, as personas (papéis, nunca
-   nomes de pessoas, incluindo quem pode vetar, quem paga, quem sofre os efeitos e quem defende o status quo ou a
-   mudança gradual), os grupos afetados sem voz no debate e as lacunas. Tudo é editável.
-5. **Relatório do órgão (opcional).** Antes do debate, o modelo auxiliar confronta o relatório com o dossiê. O código
-   descarta o que não confere. Ficam dois tipos de divergência: o órgão declara algo diferente das fontes, ou não
-   menciona um assunto que as fontes trazem. O painel não atribui intenção.
-6. **Debate (Fases 1 a 4).** O modelo do debate roda o protocolo em 1 a 5 rodadas independentes (padrão: 3) ou no
-   modo de personas independentes. O dossiê e a autodeclaração vão no começo da mensagem, em cache. Com mais de uma
-   rodada, só entram no memorando os trade-offs que aparecem na maioria das rodadas; os demais ficam como sinais fracos.
-7. **Memorando (Fase 5).** Abre com o quadro "Sobre este documento", escrito por código: material gerado com IA a
-   partir de papéis simulados, tamanho e conferência do dossiê, data de corte e confiança calculada. Depois: síntese,
-   os três principais trade-offs (com o critério de escolha), perguntas que o decisor precisa responder e quem tem
-   competência hoje, o que o órgão declarou e o que as fontes mostram, dados que faltam, custo de não decidir, custo
-   de decidir errado e matriz de risco. Sai em Word com cabeçalho institucional.
-8. **Verificação, feita por código e não pelo modelo:**
-   - fonte de item do dossiê: o id precisa existir e o trecho precisa estar no item; o nível não passa do nível
-     máximo do item;
-   - fonte da autodeclaração: o trecho precisa estar no relatório; sem confirmação no dossiê, vale no máximo nível 4;
-   - cálculo: o dado de partida precisa estar no dossiê ou no relatório; vale no máximo nível 2;
-   - fonte não encontrada derruba o argumento para nível 5;
-   - valores em R$, percentuais e datas do memorando são conferidos no dossiê e no relatório;
-   - citações de lei vão para uma lista de revisão da assessoria jurídica; dúvidas jurídicas que a norma responde
-     saem do mapa e aparecem à parte, para a PGE;
-   - a confiança da análise é calculada a partir da conferência do dossiê, das fontes rebaixadas, do peso da
-     autodeclaração e da estabilidade; a completude do relatório é só informada;
-   - um modelo diferente do que escreveu o memorando revisa a **neutralidade**.
-9. **Registro.** Cada análise é gravada em `registros/`, com modelos, versão do prompt, dossiê, confronto, insumos,
-   verificação, tokens, buscas e custo. Use o botão **Registro (.json)** para baixar e guardar a trilha de cada análise.
-
-## Regras do método
-
-- O dossiê é a única base factual. Nenhum argumento passa do nível máximo do item que o sustenta.
-- O relatório do órgão nunca é a única base de um polo.
-- Simetria: o baseline registra o custo de esperar e o risco de agir errado; caso histórico contra a inércia pede um
-  caso em que agir da forma proposta deu errado.
-- Personas são papéis institucionais, nunca pessoas reais.
-- Nunca fabricar dissenso: convergência legítima é registrada como convergência.
-
-## Modo "Personas independentes"
-
-No modo rápido, um único modelo simula todas as personas numa chamada, e as rodadas medem se ele é consistente.
-No modo **Personas independentes**, o debate acontece de verdade:
-
-1. **Fase 1:** cada persona propõe o seu plano numa chamada própria.
-2. **Fase 2:** cada persona recebe os planos das outras e os critica.
-3. **Fase 2.5:** cada persona recebe as críticas que sofreu e decide revisar, defender ou manter o plano.
-4. **Fase 3:** um modelo de outra família (Gemini, por padrão) dá notas aos planos finais sem saber quem os
-   propôs, com o dossiê à mão para julgar a ancoragem. O código embaralha os planos e retira deles os nomes e ids das
-   personas.
-5. **Fase 4:** o modelo do debate extrai o Tension Map do histórico real. O código confere se cada polo foi
-   defendido por uma persona que de fato participou.
-
-O histórico completo aparece na aba **Debate** e vai para o registro. Personas que não respondem ficam de fora,
-com aviso; com menos de 3, o debate não acontece. Os modelos Gemini usam a `GEMINI_API_KEY` dos Secrets.
-
-Com o Sonnet 5.5 nas personas e o Opus 5.5 na síntese e no memorando, o debate custa cerca de US$ 0,60, sem a
-pesquisa. O custo exibido no painel não inclui o Gemini, que ainda não tem preço cadastrado (aparece marcado com *).
-
-## Comparar com uma análise anterior
-
-Suba na barra lateral o **registro (.json) de uma análise anterior**. O painel compara os trade-offs (pareados pelo
-mecanismo causal por um modelo barato e conferidos por código), a matriz de risco, a confiança e, se houver relatório
-do órgão nas duas análises, as seções do relatório e os valores em R$ que mudaram.
-
-## Economia de tokens
-
-- **Material em cache uma vez só.** As rodadas do debate e a síntese do modo independente usam o mesmo começo de
-  mensagem (prompt de sistema comum, mesma ferramenta, o dossiê e o relatório). O material é gravado em cache por
-  1 hora e as demais chamadas o leem por 5% do preço.
-- **Parada antecipada das rodadas.** Com 3 ou mais rodadas, o painel roda as rodadas 1 e 2 e confere se chegaram aos
-  mesmos trade-offs; se chegaram, as demais não rodam. Dá para desligar na barra lateral.
-- **Pesquisa reaproveitada.** A mesma pesquisa (modelo, órgão, data de corte e foco) não é refeita enquanto o app não
-  reinicia.
-
-## Custo aproximado
-
-- **Pesquisa:** cinco chamadas em paralelo, uma por grupo de blocos, com até 5 buscas cada. Se uma resposta parar
-  antes do JSON (turno pausado pela API ou resposta cortada), o painel pede que o modelo termine; o motivo de cada
-  chamada aparece em "Diagnóstico da pesquisa", no painel do dossiê. Com o Sonnet 5.5, a Anthropic cobra US$ 10 por mil
-  buscas além dos tokens; o painel soma as buscas no custo. Uma pesquisa repetida com os mesmos insumos é
-  reaproveitada sem nova busca enquanto o app não reinicia ("Pesquisar de novo do zero" força uma nova).
-- **Contexto do Estado pesquisado uma vez.** Situação fiscal, dívida, previdência, calendário e cenário político são
-  iguais para todos os órgãos. No app, a primeira análise do dia pesquisa o Estado; as seguintes, com o mesmo modelo,
-  data de corte e foco, reaproveitam essa parte e pesquisam só o órgão (3 das 5 pesquisas). O lote já fazia assim.
-- **Debate e memorando:** com o Opus 5.5 no debate e 3 rodadas, cerca de US$ 0,50 a 0,60. O material fica em cache
-  por 5 minutos, o bastante para as rodadas de uma deliberação, e as rodadas o leem por 5% do preço.
-
-O valor real de cada análise aparece no painel e no registro.
-
-## Testes
-
-Os testes **não chamam nenhuma API**: o modelo é substituído por uma versão falsa, e o relatório usado é fictício
-(`tests/fixtures/relatorio_exemplo.md`). Rodam de graça, no computador ou no GitHub Actions.
-
-```bash
-pip install -r requirements-dev.txt
-pytest -q tests
-```
-
-O GitHub Actions roda os testes a cada push na `main` e a cada pull request (`.github/workflows/testes.yml`).
-
-## Estrutura
-
-| Arquivo | O que é |
-|---|---|
-| `app.py` | O painel (Streamlit) |
-| `tests/` | Testes automáticos e relatório fictício |
-| `requirements.txt` | Dependências para rodar o painel |
-| `requirements-dev.txt` | Dependências para rodar os testes |
-| `orquestrador.py`, `validador.py`, `prompts.py` | Versão anterior, em linha de comando, com auditoria cruzada por modelos Gemini. Não é usada pelo `app.py`. |
-| `lote.py` | Processamento em lote a partir do Google Drive (usa as funções do `app.py`); o app usa a leitura do Drive dele. |
-| `.github/workflows/lote.yml` | Workflow manual que roda o `lote.py` em paralelo e entrega o zip criptografado. |
-| `lote_api.py` | Modo econômico do lote: fila que envia as chamadas à Batch API da Anthropic. |
-| `requirements-lote.txt` | Dependências extras do lote (acesso ao Google Drive e à Batch API). |
-| `extraido/lacunas_oficio/` | Diagnóstico de lacunas e minuta de ofício, retirados do painel na versão 2.0. Ponto de partida da ferramenta própria de triagem; não é usado pelo `app.py`. |
-
-## Produtos de cada análise
-
-| Produto | O que é | Como é feito |
-|---|---|---|
-| **Memorando executivo** (Word) | Para o gestor: decisões a tomar, dados a obter, prazos e riscos, em linguagem simples. Anexos com o debate em detalhe e a verificação | Modelo (corpo) e código (anexos) |
-| **Dossiê do órgão** (Word) | Fatos por tema, com fonte clicável e selo de conferência; comparação com o que o órgão informou; o que foi procurado sem fonte | Código, a partir do dossiê |
-| **Calendário de vencimentos críticos** (Excel) | Uma linha por evento com data (contratos, convênios, prazos legais, orçamento, controle), com criticidade, valor, decisão que a data cobra e o trecho de origem | Modelo extrai; o código confere se o trecho está no relatório ou no dossiê e se a data está no trecho. O que não confere vai para a aba "Descartados" |
-| **Diagnóstico e opções de organização** (Word) | Parte 1: como o órgão está e se organiza hoje (missão, estrutura, pessoas, orçamento, contratos, controle, pontos críticos, o que não se sabe). Parte 2: 2 ou 3 opções de organização, sempre com "manter a estrutura atual", com ganhos, perdas, riscos jurídicos, impacto nas pessoas, pré-requisitos e comparação. Nenhuma opção é recomendada | Modelo auxiliar escreve o diagnóstico; o modelo do debate, as opções. Cada afirmação e cada fundamento citam a origem, conferida por código; o que não confere sai do texto |
-| **Mapa de tensões** (JSON) e **registro** (JSON) | Resultado estruturado do debate e trilha de auditoria | Modelo e código |
-
-Na análise de vários órgãos e no lote, cada órgão tem a sua pasta com esses arquivos, e a raiz traz o
-`calendario_consolidado.xlsx`, com as datas de todos os órgãos numa planilha só, ordenada por data.
-
-## Vários órgãos de uma vez (relatórios resumidos)
-
-A documentação bruta de cada órgão é resumida fora deste app, num relatório menor em Word ou PDF. Com a pasta dos
-resumos baixada como .zip, abra **📦 Analisar vários órgãos de uma vez**, no topo da tela, e suba o .zip.
-
-- Cada arquivo Word ou PDF vira um órgão. O nome sai do nome do arquivo (sem "Resumo", "Relatório resumido" etc.) e
-  pode ser corrigido na tabela; dá para desmarcar órgãos.
-- **Analisar** roda, para cada órgão, o mesmo caminho do lote: dossiê (o contexto do Estado é pesquisado uma vez),
-  insumos, deliberação e memorando, com os modelos e as rodadas da barra lateral, sem parada para revisão. O resumo do
-  órgão entra como autodeclaração, confrontada com o dossiê.
-- O **modo econômico** (marcado por padrão) usa a Batch API da Anthropic: metade do preço dos tokens, mas cada etapa
-  espera a fila, de minutos a uma hora. Os órgãos rodam ao mesmo tempo.
-- A análise roda em segundo plano, no servidor do app: dá para fechar a página e voltar depois. O andamento se atualiza
-  sozinho. **Não faça merge nem reinicie o app enquanto ela roda**: isso a interrompe.
-- No fim, **Baixar os resultados** entrega um .zip com a pasta de cada órgão (memorando em Word e Markdown, mapa de
-  tensões, dossiê, registro) e o resumo geral (`resumo.md` e `resumo.csv`, com situação e custo de cada órgão). O .zip
-  fica disponível até o app reiniciar: baixe logo.
-
-## Drive no app
-
-**Sem configurar nada: envie a pasta em .zip.** No Drive, clique com o botão direito na pasta da secretaria e escolha
-**Fazer download**. Envie o .zip na seção **2** (pastas grandes vêm em mais de um .zip: envie todos juntos). O app
-aplica as mesmas regras do Drive e do lote: subpastas que repetem o nome da secretaria ou que são genéricas
-("Anexos", "Resposta ao Ofício 5") entram junto; subpastas de órgãos vinculados podem ser escolhidas à parte; arquivos
-com dados pessoais no nome não são lidos. Limite do Streamlit: 200 MB por arquivo.
-
-**Com a conta de serviço: lista direto do Drive.**
-
-Com a conta de serviço configurada, a seção **1. Órgão e pesquisa** mostra a lista **Órgão (pastas do Drive)**, com as
-secretarias e, marcados com ↳, os órgãos vinculados. A lista sai da pasta DOCUMENTOS RECEBIDOS, com as mesmas regras do
-lote. Escolher um órgão preenche o nome usado na pesquisa. Na seção **2**, o botão **Ler os documentos de ... no Drive**
-baixa e lê os arquivos da pasta do órgão. Eles entram no debate como a versão do órgão, igual a um relatório enviado à
-mão. A lista dos arquivos lidos, pulados e cortados aparece logo abaixo. O envio manual de arquivo continua funcionando.
-
-Para ligar, use a mesma conta de serviço do lote (passos 1 a 3 da configuração abaixo). No Streamlit Cloud, em
-**Manage app > ⋮ > Settings > Secrets**, acrescente:
-
-```toml
-DRIVE_PASTA_ID = "o ID da pasta DOCUMENTOS RECEBIDOS (o trecho do link depois de /folders/)"
-GOOGLE_SERVICE_ACCOUNT_JSON = '''
-{ cole aqui o conteúdo inteiro do arquivo JSON da conta de serviço }
-'''
-```
-
-Use três aspas **simples**: assim o `\n` da chave privada continua como está. Sem esses dois segredos, o app funciona
-como antes, sem a lista do Drive.
-
-## Processamento em lote a partir do Drive
-
-O `lote.py` lê a pasta DOCUMENTOS RECEBIDOS no Google Drive e roda, sem parar, a análise de cada secretaria e de cada
-órgão vinculado: baixa os documentos, monta o dossiê, prepara os insumos, delibera e gera o memorando. Usa as mesmas
-funções do painel. Roda no GitHub Actions, disparado à mão, e entrega um zip criptografado.
-
-**Como as pastas são lidas**
-- Cada pasta da raiz é uma secretaria. Subpasta que repete o nome ou a sigla da secretaria (ex.: "SEFAZ" dentro de
-  "Secretaria de Fazenda - SEFAZ") ou que é genérica ("Anexos", "Resposta ao Ofício 5") é juntada a ela. Subpastas
-  com nome de entidade ou sigla ("Junta Comercial ... - JUCERJA") são órgãos vinculados, com análise própria.
-- Lê PDF, Word, Excel, PowerPoint, CSV, texto, arquivos do Google Docs/Planilhas/Apresentações e o que estiver dentro
-  de zips (como os exportados do SEI). Pula outros formatos e arquivos acima de 30 MB.
-- **Dados pessoais:** arquivos cujo nome indica contatos, telefones, CPF ou pontos focais não são baixados. Nos demais,
-  CPFs e telefones são apagados do texto antes de ir para a API. E-mails são apagados como no painel.
-- Os textos são juntados num limite de 150 mil caracteres por órgão, com relatórios e resumos primeiro. O que for
-  cortado fica registrado em `arquivos_lidos.json`.
-- **Sem revisão humana:** o dossiê e os insumos não passam pela equipe antes do debate. O quadro "Sobre este
-  documento" diz isso em cada memorando. Revise antes de circular.
-
-**O que sai, por órgão:** `memorando.docx`, `memorando.md`, `tension_map.json`, `dossie.json` (com o diagnóstico da
-pesquisa), `registro.json` e `arquivos_lidos.json`. Na raiz, `resumo.md` e `resumo.csv` com situação, itens do dossiê,
-confiança e custo de cada órgão. Uma falha num órgão não para os outros.
-
-**Configuração (uma vez)**
-1. No [Google Cloud Console](https://console.cloud.google.com/), crie um projeto (ou use um existente) e ative a
-   **Google Drive API**.
-2. Em **IAM e administrador > Contas de serviço**, crie uma conta de serviço (não precisa de papel). Em **Chaves >
-   Adicionar chave > JSON**, baixe o arquivo. Guarde-o com cuidado: ele dá acesso ao que for compartilhado com a conta.
-3. O dono da pasta DOCUMENTOS RECEBIDOS compartilha a pasta com o e-mail da conta de serviço
-   (`...@...iam.gserviceaccount.com`) como **Leitor**. As subpastas herdam o acesso.
-4. No GitHub, em **Settings > Secrets and variables > Actions**, crie os segredos:
-   `GOOGLE_SERVICE_ACCOUNT_JSON` (o conteúdo do arquivo JSON), `DRIVE_PASTA_ID` (o ID da pasta, o trecho do link depois
-   de `/folders/`), `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` (se usar Gemini) e `RESULTADOS_SENHA` (a senha do zip).
-
-**Como rodar**
-1. Em **Actions > Processamento em lote (Drive) > Run workflow**, rode primeiro com "Só listar" marcado. O zip traz
-   `orgaos.json` com os órgãos e o número de arquivos de cada um, sem gastar nada com modelos.
-2. Rode de novo com "Só listar" desmarcado. Para testar, preencha "Só estes órgãos" com uma ou duas siglas.
-3. Ao final, baixe o artefato **resultados** e abra com a senha. O zip usa criptografia AES: no Windows, abra com o
-   7-Zip ou o WinRAR (o Explorador de Arquivos não abre).
-
-**Modo econômico (Batch API).** Vem marcado por padrão no workflow. As chamadas aos modelos da Anthropic vão pela
-Message Batches API, que cobra **metade do preço** dos tokens (as buscas na web custam o mesmo). Em troca, cada resposta
-leva de minutos a, raramente, uma hora. Para compensar, todos os órgãos rodam ao mesmo tempo: cada chamada entra numa
-fila e, quando a fila para de receber pedidos por alguns segundos, ela segue como um lote só. Assim, cada etapa de todos
-os órgãos (pesquisa, insumos, rodadas, memorando) vai junta. A análise é a mesma do modo normal; muda só o caminho das
-chamadas. O código está em `lote_api.py`.
-- Deixe "Execuções em paralelo" em **1**: os órgãos já rodam juntos, e cada execução extra pesquisaria o Estado de novo.
-- A execução espera no máximo 320 minutos (o GitHub encerra o trabalho em 6 horas). O que não terminar nesse prazo sai
-  como erro no `resumo.csv`; o que terminou fica no zip.
-- Modelos Gemini, se escolhidos, continuam pela chamada normal.
-
-**Custo.** A camada do Estado (situação fiscal, dívida, previdência, calendário e cenário político) é igual para todos
-os órgãos: é pesquisada uma vez por execução e reaproveitada, e o resumo mostra esse custo à parte. Cada órgão pesquisa
-só a própria camada. O padrão do lote é Sonnet no debate e no memorando, com 2 rodadas: estimativa de US$ 0,40 a 0,70
-por órgão. Com Opus e 3 rodadas, a estimativa sobe para US$ 0,80 a 1,20. No modo econômico, a parte dos tokens cai pela metade. Com 4 partes em paralelo, cerca de 40 órgãos
-levam de 1h a 1h30. O custo real de cada órgão sai no `resumo.csv`.
-
-**Atenção: o repositório é público.** Logs e artefatos do GitHub Actions de um repositório público podem ser vistos
-por qualquer pessoa com conta no GitHub. Por isso o zip sai criptografado e os logs mostram só nomes de órgãos,
-contagens e erros. O mais seguro é tornar o repositório privado (o Streamlit Community Cloud funciona com repositórios
-privados).
-
-## Código retirado
-
-O diagnóstico de lacunas, a conferência dos ofícios já enviados, os pedidos gerados das questões do debate e a minuta
-de ofício saíram do painel na versão 2.0. O código e os testes estão em `extraido/lacunas_oficio/`, como estavam na
-versão 1.11, para servir de base à ferramenta própria de triagem de relatórios. Eles dependem de funções que
-continuam no `app.py` (lista no topo de `lacunas_oficio.py`).
-
-## Cuidados
-
-- Não envie ao painel propostas de licitação em andamento, processos sigilosos ou dados pessoais além do necessário.
-  O texto vai para a API do provedor do modelo.
-- O painel abre os links do dossiê para conferi-los. Endereços locais e de rede interna não são abertos.
-- Use papéis nas personas, nunca nomes de pessoas: o debate atribui posições simuladas a quem estiver nelas.
-- O memorando é gerado com apoio de IA e diz isso no rodapé e na seção de verificação. Ele não substitui a revisão
-  técnica e jurídica.
+Testes: `pip install -r requirements-dev.txt && pytest -q tests`

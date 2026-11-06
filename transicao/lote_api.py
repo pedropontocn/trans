@@ -1,10 +1,10 @@
 """Modo econômico do lote: as chamadas aos modelos da Anthropic vão pela Message Batches API, que cobra metade do preço
 dos tokens. Em troca, cada resposta demora mais: a API processa os pedidos em fila (em geral, em minutos).
 
-Como funciona: os órgãos rodam em paralelo, cada um no seu fio de execução, com o mesmo código do app. Cada chamada ao
-modelo entra numa fila e espera. Quando a fila fica alguns segundos sem pedidos novos, ela é enviada como um lote
+Como funciona: os órgãos rodam em paralelo, cada um no seu fio de execução. Cada chamada ao modelo entra numa fila e
+espera (transicao.modelo.usar_completion troca a chamada do fio pela da fila). Quando a fila fica alguns segundos sem pedidos novos, ela é enviada como um lote
 (batch). Assim, cada etapa de todos os órgãos (pesquisa, insumos, rodadas, memorando...) vai junta no mesmo lote.
-A resposta volta no formato do LiteLLM, então o app.py não precisa saber que está em modo econômico.
+A resposta volta no formato do LiteLLM, então o resto do código não precisa saber que está em modo econômico.
 
 Modelos que não são da Anthropic (Gemini) continuam pela chamada normal.
 """
@@ -232,33 +232,3 @@ class FilaBatch:
                 if not futuro.done():
                     futuro.set_exception(PrazoEsgotado("prazo da execução esgotado antes da resposta"))
             self.abertos.pop(lote_id, None)
-
-
-# --- ESTADO POR FIO -------------------------------------------------------------------------------------------------
-
-class SessaoDoFio(dict):
-    """O st.session_state do app, um por órgão: os órgãos rodam em paralelo e não podem dividir o mesmo estado."""
-
-    def __getattr__(self, nome):
-        try:
-            return self[nome]
-        except KeyError as e:
-            raise AttributeError(nome) from e
-
-
-class StPorFio:
-    """Substitui o módulo streamlit dentro das funções do app: tudo igual, menos o session_state, que é por fio."""
-
-    def __init__(self, st):
-        self._st = st
-        self._local = threading.local()
-
-    @property
-    def session_state(self):
-        sessao = getattr(self._local, "sessao", None)
-        if sessao is None:
-            sessao = self._local.sessao = SessaoDoFio()
-        return sessao
-
-    def __getattr__(self, nome):
-        return getattr(self._st, nome)

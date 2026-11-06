@@ -14,7 +14,6 @@ from types import SimpleNamespace as NS
 import pytest
 
 RAIZ = Path(__file__).resolve().parent.parent
-APP = RAIZ / "app.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 RELATORIO = (FIXTURES / "relatorio_exemplo.md").read_text(encoding="utf-8")
 
@@ -346,26 +345,6 @@ class ArquivoFalso:
         return b"%PDF falso " + self.texto.encode("utf-8")
 
 
-class DossieFalso:
-    name = "dossie.json"
-
-    def __init__(self, dados):
-        self.dados = dados
-
-    def getvalue(self):
-        return self.dados
-
-
-class RegistroFalso:
-    name = "registro_anterior.json"
-
-    def __init__(self, dados):
-        self.dados = dados
-
-    def getvalue(self):
-        return self.dados
-
-
 @pytest.fixture
 def llm(monkeypatch):
     """Instala o LiteLLM e o MarkItDown falsos e devolve o modelo falso para o teste configurar."""
@@ -407,38 +386,25 @@ def llm(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     monkeypatch.setitem(sys.modules, "litellm", litellm)
     monkeypatch.setitem(sys.modules, "markitdown", markitdown)
-    import streamlit
-    streamlit.cache_resource.clear()     # respostas guardadas de um teste não vazam para o próximo
-    streamlit.cache_data.clear()
+    if str(RAIZ) not in sys.path:
+        sys.path.insert(0, str(RAIZ))
+    from transicao import debate, entrada, modelo
+    modelo._GUARDADOS.clear()            # respostas guardadas de um teste não vazam para o próximo
+    entrada.converter_arquivo.cache_clear()
+    modelo.usar_completion(None)
+    debate.RODADAS_JUNTAS = False
     return falso
+
+
+MODULOS = ["config", "modelo", "entrada", "pesquisa", "verificacao", "debate", "produtos", "documentos", "analise"]
 
 
 @pytest.fixture
 def funcoes(llm):
-    """As funções do app, sem a interface (tudo o que vem antes de '# --- ESTADO INICIAL')."""
-    codigo = APP.read_text(encoding="utf-8").split("# --- ESTADO INICIAL")[0]
-    ns = {"__file__": str(APP), "__name__": "app_funcoes"}
-    exec(compile(codigo, str(APP), "exec"), ns)
-    return NS(**{k: v for k, v in ns.items() if not k.startswith("__")})
-
-
-@pytest.fixture
-def app(llm, monkeypatch, tmp_path):
-    """O app inteiro rodando no AppTest do Streamlit, com upload de um relatório falso."""
-    import streamlit
-    from streamlit.testing.v1 import AppTest
-
-    def uploader(rotulo, *a, **k):
-        if "dossiê" in rotulo.lower():
-            return DossieFalso(llm.dossie_arquivo) if llm.dossie_arquivo else None
-        if "anterior" in rotulo.lower():
-            return RegistroFalso(llm.registro_anterior) if llm.registro_anterior else None
-        if "relatórios resumidos" in rotulo.lower():
-            return getattr(llm, "resumos_enviados", None)
-        return None if llm.sem_relatorio else ArquivoFalso(llm.texto_relatorio)
-
-    monkeypatch.setattr(streamlit, "file_uploader", uploader)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("PAINEL_REGISTROS", str(tmp_path / "registros"))
-    at = AppTest.from_file(str(APP), default_timeout=120)
-    return at
+    """Todas as funções do pacote transicao num só lugar (os nomes não se repetem entre os módulos)."""
+    import importlib
+    nomes = {}
+    for m in MODULOS:
+        mod = importlib.import_module(f"transicao.{m}")
+        nomes.update({k: v for k, v in vars(mod).items() if not k.startswith("__")})
+    return NS(**nomes)
