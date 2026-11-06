@@ -251,9 +251,10 @@ def test_fontes_no_anexo_com_links_e_selos(funcoes):
     assert "✔ conferido na fonte" in md and "⚠" in md
     confronto = {"divergencias": [{"item": d["itens"][-1]["id"], "situacao": "contradiz", "o_orgao_declara": "100 obras",
                                    "trecho_relatorio": "100 obras", "as_fontes_mostram": "80 obras"}]}
-    anexo = funcoes.markdown_fontes(d, confronto)
-    assert anexo.startswith("## Anexo 1 – Fontes consultadas") and "\n# " not in anexo   # títulos descem um nível
-    assert "**As fontes mostram:** 80 obras" in anexo and "### Visão geral" in anexo
+    anexo = funcoes.markdown_fontes(d, confronto, citados={"O1", "E1"}, cobertura_md="## Cobertura\n| tabela |")
+    assert anexo.startswith("## Anexo A – Cobertura e fontes\n| tabela |") and "\n# " not in anexo
+    assert "**As fontes mostram:** 80 obras" in anexo and "- **O1** " in anexo and "- **O2** " not in anexo
+    assert "Visão geral" not in anexo and "Sobre este dossiê" not in anexo               # sem explicação de método
 
 
 def test_calendario_so_com_datas_conferidas(funcoes, llm):
@@ -305,15 +306,18 @@ def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
     diag = funcoes.extrair_diagnostico("anthropic/claude-sonnet-5-5", d, rel, "Secretaria de Exemplo")
     assert [s["titulo"] for s in diag["secoes"]] == funcoes.SECOES_DIAGNOSTICO   # sempre os mesmos blocos
     com_itens = {s["titulo"]: s for s in diag["secoes"] if s["itens"]}
-    assert list(com_itens) == ["Missão e estrutura", "Orçamento e execução"] and diag["descartados"] == 2
+    assert list(com_itens) == ["Orçamento e execução", "Estrutura e dirigentes"] and diag["descartados"] == 2
+    assert [(i["nome"], i["rotulo"]) for i in diag["indicadores"]] == [("LOA 2026", "confirmado em fonte oficial"),
+                                                                        ("Empenhado", "informado pelo órgão")]
     rotulos = [i["rotulo"] for i in com_itens["Orçamento e execução"]["itens"]]
     assert rotulos[1] == "informado pelo órgão" and rotulos[0].startswith(("confirmado", "fonte pública"))
     ids = [i["id"] for s in diag["secoes"] for i in s["itens"]]
     assert ids == [f"F{k}" for k in range(1, len(ids) + 1)]                     # numerados para os riscos citarem
-    md = funcoes.markdown_diagnostico(diag)
-    assert md.startswith("## Capítulo 1 – Diagnóstico") and "### Orçamento e execução" in md
+    md = funcoes.markdown_capitulos(diag)
+    assert md.startswith("## 1. Contratos") and "### Orçamento e execução" in md and "### Estrutura e dirigentes" in md
     assert "_Não se sabe:_ Organograma atualizado" in md and "40 subsecretarias" not in md
     assert "A secretaria tem pendências de controle." in md
+    assert md.index("## 1. Contratos") < md.index("## 2. Pessoal") < md.index("## 3. Passivos") < md.index("## 4. Orçamento")
 
 
 def test_regua_de_risco_igual_para_todos(funcoes):
@@ -377,22 +381,35 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     d = dossie_exemplo(funcoes)
     diag = funcoes.extrair_diagnostico("m", d, rel, "Secretaria de Exemplo")
     resultado = _resultado_exemplo()
+    criticos = [{"contrato": "Contrato 1/2026", "objeto": "Limpeza", "contratado": "A", "valor": "R$ 1,0 mi",
+                 "vigencia": "01/12/2026", "motivos": ["vence em breve", "emergencial"], "observacao": "prioridade máxima",
+                 "rotulo": "dado do SIGA/PNCP", "url": ""},
+                {"contrato": "Contrato 1/2026", "objeto": "repetido", "contratado": "A", "valor": "", "vigencia": "",
+                 "motivos": ["valor alto"], "observacao": "", "rotulo": "informado pelo órgão", "url": ""}]
+    cobertura = [{"id": "C1", "tema": "Contratos a vencer", "estado": "não procurado"}] + \
+                [{"id": f"C{k}", "tema": "x", "estado": "encontrado"} for k in range(2, 11)]
     texto = funcoes.documento_secretaria(resultado, diag, [("Contratos que vencem em até 180 dias", "3")], [], d, None,
-                                         funcoes.resumo_dossie(d), "", "## Anexo 3 – Como este documento foi feito\nx",
-                                         funcoes.sobre_o_documento("04/11/2026", {"nivel": "média"}))
-    ordem = [texto.index(t) for t in ["## Sobre este documento", "## O essencial", "## Os riscos mais urgentes",
-                                      "## Capítulo 1 – Diagnóstico", "### Ficha", "### Missão e estrutura",
-                                      "## Capítulo 2", "### R1. Risco 1", "### Outros riscos a acompanhar",
-                                      "### Decisões em aberto", "### Pedir à secretaria", "## Anexo 1", "## Anexo 3"]]
+                                         "## Cobertura – o que foi procurado\n| tabela |",
+                                         funcoes.nota_final("abc", {"auxiliar": "m1", "debate": "m2"},
+                                                            {"nivel": "média", "motivos": ["x"]}, "04/11/2026"),
+                                         cobertura=cobertura, contratos_criticos=criticos)
+    ordem = [texto.index(t) for t in ["## Resumo executivo", "**Números-chave**", "**Riscos mais urgentes**",
+                                      "**Decisões em aberto**", "**Lacunas: 1 de 10", "## 1. Contratos",
+                                      "**Contratos críticos**", "| Contrato 1/2026 |", "## 2. Pessoal", "## 3. Passivos",
+                                      "## 4. Orçamento, obras e estrutura", "### Estrutura e dirigentes",
+                                      "## 5. Riscos e decisões urgentes", "### R1. Risco 1", "### Outros riscos a acompanhar",
+                                      "### Decisões em aberto", "### Pedir à secretaria", "## Anexo A", "| tabela |",
+                                      "## Anexo B", "| Controle e jurídico (TCE-RJ, PGE, MPRJ) | aditivo irregular | legalidade |",
+                                      "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
+    assert texto.count("| Contrato 1/2026 |") == 1                                  # o repetido da planilha não entra duas vezes
     assert len(re.findall(r"^### R\d", texto, re.M)) == 5 and "| R6. Risco 6 |" in texto            # 5 em detalhe, o resto na tabela
-    assert "- **Em curso:** aditivo publicado" in texto and "_Não se sabe:_ Organograma atualizado" in texto
-    assert "_Controle e jurídico (TCE-RJ, PGE, MPRJ):_ teme aditivo irregular; valoriza legalidade" in texto
-    for bloco in funcoes.SECOES_DIAGNOSTICO:
-        assert f"### {bloco}" in texto                                          # ficha padrão: todos os blocos
+    assert "**Em curso:** aditivo publicado" in texto and "_Não se sabe:_ Organograma atualizado" in texto
+    assert "Sobre este documento" not in texto and "Como este documento foi feito" not in texto
+    assert "teme aditivo irregular" not in texto.split("## Anexo B")[0]             # os olhares só no anexo
     doc = docx.Document(io.BytesIO(funcoes.gerar_docx(texto, {"orgao": "Equipe", "assunto": "Secretaria de Exemplo"})))
     quebras = sum('w:br w:type="page"' in p._p.xml for p in doc.paragraphs)
-    assert quebras >= 4                                                           # capítulos e anexos em página nova
+    assert quebras == 2                                                           # só os anexos em página nova
 
 
 def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):

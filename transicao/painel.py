@@ -59,11 +59,7 @@ def markdown_painel(riscos, situacoes, eventos, temas, data_corte, linhas=None):
     secretarias = sorted({r["orgao"] for r in riscos})
     maximas = [r for r in riscos if r["prioridade"] == "Máxima"]
     contratos = [e for e in eventos if e.get("origem", "").startswith("Contratos") and 0 <= e["dias"] <= 90]
-    md = ["## Sobre este painel",
-          f"Consolida os riscos de {len(secretarias)} secretaria(s), com data de corte {data_corte}. A prioridade usa a "
-          "mesma régua em todas (impacto × urgência), calculada por código. Gerado com apoio de IA, sem revisão da "
-          "equipe; não recomenda decisões. O detalhe e a base de cada risco estão no documento de cada secretaria.",
-          "## O essencial",
+    md = ["## O essencial",
           f"- {len(maximas)} risco(s) de prioridade máxima e "
           f"{sum(r['prioridade'] == 'Alta' for r in riscos)} de prioridade alta em {len(secretarias)} secretaria(s).",
           f"- {sum(1 for r in riscos if r.get('agir_ate') and r['agir_ate'] <= hoje)} risco(s) já passaram da data para agir."]
@@ -126,10 +122,11 @@ def markdown_painel(riscos, situacoes, eventos, temas, data_corte, linhas=None):
         if erros:
             md.append("## Secretarias não analisadas")
             md += [f"- {l['orgao']}: {l.get('observacao') or 'erro'}" for l in erros]
-    md += ["## Limites",
-           "A base de contratos do Estado (SIGA) não traz contratos de gestão com OS, convênios nem concessões. Riscos "
-           "com base \"informado pelo órgão\" ou \"sem comprovação\" dependem de confirmação. Cada secretaria foi "
-           "analisada com o material disponível na data de corte."]
+    md.append(f"_Consolida os riscos de {len(secretarias)} secretaria(s), com data de corte {data_corte}, com a mesma "
+              "régua de prioridade (impacto × urgência) calculada por código. A base de contratos do Estado (SIGA) não "
+              "traz contratos de gestão com OS, convênios nem concessões. Riscos com base \"informado pelo órgão\" ou "
+              "\"sem comprovação\" dependem de confirmação. O detalhe e a base de cada risco estão no documento de "
+              "cada secretaria. Gerado com apoio de IA, sem revisão da equipe; não recomenda decisões._")
     return "\n".join(md)
 
 

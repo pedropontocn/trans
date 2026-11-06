@@ -123,11 +123,28 @@ class LLMFalso:
                  "item": "", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
                 {"texto": "A Secretaria tem 40 subsecretarias.", "origem": "relatorio", "item": "",
                  "trecho": "a Secretaria tem 40 subsecretarias"}]},
-            {"titulo": "Missão e estrutura", "itens": [
+            {"titulo": "Estrutura e dirigentes", "itens": [
                 {"texto": "Item que não existe.", "origem": "dossie", "item": "O999", "trecho": ""},
                 {"texto": "O TCE-RJ apontou atraso na prestação de contas de convênios.", "origem": "dossie",
                  "item": "O4", "trecho": ""}],
-             "leitura": "A secretaria tem pendências de controle.", "nao_se_sabe": ["Organograma atualizado"]}]}
+             "leitura": "A secretaria tem pendências de controle.", "nao_se_sabe": ["Organograma atualizado"]}],
+            "indicadores": [
+                {"nome": "LOA 2026", "valor": "R$ 412 mi", "origem": "dossie", "item": "O1", "trecho": ""},
+                {"nome": "Empenhado", "valor": "R$ 398,75 mi", "origem": "relatorio", "item": "",
+                 "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+                {"nome": "Inventado", "valor": "R$ 1 bi", "origem": "relatorio", "item": "", "trecho": "frase que não existe"}]}
+        self.contratos_criticos = {"contratos": [
+            {"contrato": "Contrato 99/2026", "objeto": "Manutenção predial", "contratado": "Empresa X", "valor": "R$ 398.750.000,00",
+             "vigencia": "15/12/2026", "motivos": ["vence em breve", "valor alto"], "observacao": "Vence antes da posse.",
+             "origem": "relatorio", "item": "", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+            {"contrato": "Contrato 7/2025", "objeto": "Obra", "contratado": "Y", "valor": "R$ 777 mi", "vigencia": "",
+             "motivos": ["paralisado"], "observacao": "valor inventado", "origem": "relatorio", "item": "",
+             "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+            {"contrato": "Contrato sem origem", "objeto": "x", "contratado": "Z", "valor": "", "vigencia": "",
+             "motivos": ["emergencial"], "observacao": "", "origem": "dossie", "item": "O999", "trecho": ""},
+            {"contrato": "Licitações adiadas", "objeto": "Quatro concorrências", "contratado": "", "valor": "R$ 120.500.000,00",
+             "vigencia": "", "motivos": ["passivo jurídico", "motivo inválido"], "observacao": "", "origem": "dossie",
+             "item": "O3", "trecho": ""}]}
         self.calendario = {"eventos": [
             {"data": "23/10/2026", "tipo": "orcamento", "evento": "Corte do empenho informado", "objeto": "LOA 2026",
              "valor": "R$ 398.750.000,00", "consequencia": "", "decisao": "Conferir o empenhado",
@@ -217,6 +234,9 @@ class LLMFalso:
         if "Você escreve o DIAGNÓSTICO" in contexto:
             self.mensagem_diagnostico_orgao = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.diagnostico_orgao) + "[FIM DO JSON]")
+        if "Você lista os CONTRATOS CRÍTICOS" in contexto:
+            self.mensagem_contratos = ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.contratos_criticos) + "[FIM DO JSON]")
         if "Você responde ao CHECKLIST obrigatório" in contexto:
             self.mensagem_checklist = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.checklist) + "[FIM DO JSON]")
