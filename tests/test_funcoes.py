@@ -1,5 +1,5 @@
 """Testes das funções do app, sem a interface."""
-from conftest import FONTE_AUTO, FONTE_FALSA, FONTE_OK, RELATORIO, SEM_FONTE, dossie_exemplo, tension_map, trade_off
+from conftest import MEMORANDO, FONTE_AUTO, FONTE_FALSA, FONTE_OK, RELATORIO, SEM_FONTE, dossie_exemplo, tension_map, trade_off
 
 
 def test_limpeza_tira_orientacoes_e_dados_pessoais(funcoes):
@@ -26,15 +26,6 @@ def test_mapear_campos_aceita_nomes_alternativos_e_aninhamento(funcoes):
     # fatos não são mais extraídos: vêm do dossiê
     assert "fatos" not in funcoes.mapear_campos({"fatos": ["f"], "problema": "x"})
 
-
-def test_completude_conta_campos_pendentes(funcoes):
-    texto, _ = funcoes.limpar_relatorio(RELATORIO)
-    comp = funcoes.indice_completude(texto)
-    pendentes = {s["secao"] for s in comp["secoes"] if s["pendencias"]}
-    assert any(s.startswith("1.2") for s in pendentes)     # dotação a complementar
-    assert any(s.startswith("2.1") for s in pendentes)     # agenda com datas em branco
-    assert any(s["secao"].startswith("1.1") and s["pendencias"] == 0 for s in comp["secoes"])  # seção completa
-    assert 0 < comp["indice"] < 1
 
 
 def test_evidencias_conferidas_no_dossie_e_na_autodeclaracao(funcoes):
@@ -114,9 +105,6 @@ def test_confianca_calculada(funcoes):
     assert funcoes.confianca_calculada(dict(bom, conferidos=3), estavel, vazio)["nivel"] == "baixa"   # dossiê mal conferido
     assert funcoes.confianca_calculada(None, estavel, vazio)["nivel"] == "baixa"                       # sem dossiê
     assert funcoes.confianca_calculada(bom, None, vazio)["nivel"] == "média"                           # estabilidade não medida
-    # a completude do relatório só é informada: o relatório é autodeclaração
-    c = funcoes.confianca_calculada(bom, estavel, vazio, completude={"indice": 0.2})
-    assert c["nivel"] == "alta" and any("20%" in m for m in c["motivos"])
     so_orgao = dict(vazio, conferidas=[1], autodeclaracoes=[1, 2, 3])
     assert funcoes.confianca_calculada(bom, estavel, so_orgao)["nivel"] == "média"
 
@@ -166,48 +154,8 @@ RELATORIO_NOVO = (RELATORIO
                   .replace("R$ 120.500.000,00", "R$ 98.000.000,00"))
 
 
-def test_retrato_e_comparacao_do_relatorio(funcoes):
-    antigo = funcoes.retrato_relatorio(funcoes.limpar_relatorio(RELATORIO)[0])
-    novo = funcoes.retrato_relatorio(funcoes.limpar_relatorio(RELATORIO_NOVO)[0])
-    c = funcoes.comparar_relatorios(antigo, novo)
-    assert [p["secao"][:3] for p in c["preenchidas"]] == ["1.2"]
-    mudou = {v["secao"][:3]: v for v in c["valores_mudaram"]}
-    assert mudou["3.1"]["sairam"] == ["120.500.000,00"] and mudou["3.1"]["entraram"] == ["98.000.000,00"]
-    assert "430.000.000,00" in mudou["1.2"]["entraram"]
 
 
-def test_comparacao_de_riscos(funcoes):
-    from conftest import MEMORANDO
-    novo = (MEMORANDO.replace("| Perda de propostas | Alta | Médio |", "| Perda das propostas | Média | Médio |")
-            .replace("| Obrigações sem caixa | Média | Alto | Demonstrativo de restos a pagar | Finanças |",
-                     "| Questionamento do TCE | Alta | Alto | Parecer da PGE | Jurídico |"))
-    r = funcoes.comparar_riscos(funcoes.extrair_matriz(MEMORANDO), funcoes.extrair_matriz(novo))
-    assert r["mudaram"] == [{"risco": "Perda das propostas", "mudancas": ["probabilidade Alta → Média"]}]
-    assert r["novos"] == ["Questionamento do TCE"] and r["sairam"] == ["Obrigações sem caixa"]
-
-
-def test_pareamento_descarta_ids_inexistentes_e_repetidos(funcoes, llm):
-    antigo = tension_map([trade_off("C1", "Licitações", estabilidade="2/3"), trade_off("C2", "Atas")])
-    novo = tension_map([trade_off("T1", "Licitações adiadas", estabilidade="3/3"), trade_off("T2", "Obras")])
-    llm.pareamento = {"pares": [{"anterior": "C1", "atual": "T1"}, {"anterior": "C2", "atual": "T1"},
-                                {"anterior": "C9", "atual": "T2"}]}
-    r = funcoes.comparar_trade_offs("anthropic/claude-sonnet-5-5", antigo, novo)
-    assert [(m["anterior"], m["atual"]) for m in r["mantidos"]] == [("C1", "T1")]
-    assert "estabilidade 2/3 → 3/3" in r["mantidos"][0]["mudancas"]
-    assert [t["id"] for t in r["novos"]] == ["T2"] and [t["id"] for t in r["sairam"]] == ["C2"]
-
-
-def test_ler_personas(funcoes):
-    texto = ("- [fazenda] Fazenda: foco em caixa\n- [controle] Controle externo: legalidade\n"
-             "3. Beneficiário\n- [fazenda] Outra fazenda: repetida\n\n")
-    p = funcoes.ler_personas(texto)
-    assert [x["id"] for x in p] == ["fazenda", "controle", "beneficiario", "fazenda_"]
-    assert p[0]["criterio"] == "foco em caixa" and p[2]["nome"] == "Beneficiário"
-
-
-def test_mesma_familia(funcoes):
-    assert funcoes.mesma_familia("anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5")
-    assert not funcoes.mesma_familia("gemini/gemini-3.1-pro-preview", "anthropic/claude-sonnet-5-5")
 
 
 def test_custo_da_escrita_de_cache_de_uma_hora(funcoes):
@@ -300,37 +248,6 @@ def test_html_vira_texto(funcoes):
     assert funcoes._html_para_texto("<p>a &amp; b</p><script>x()</script><style>p{}</style>").split() == ["a", "&", "b"]
 
 
-def test_tabela_editada_volta_para_os_itens(funcoes):
-    d = dossie_exemplo(funcoes)
-    linhas = funcoes.itens_para_tabela(d["itens"])
-    linhas[0]["Incluir"] = False                                                  # excluído do debate
-    linhas[3]["Link"] = "https://outro.exemplo/pagina"                            # mudou o link: checagem refeita
-    linhas[4]["Conferido pela equipe"] = True
-    linhas.append({"Incluir": None, "ID": None, "Camada": "Órgão", "Bloco": "pessoal", "Afirmação": "Nova linha",
-                   "Tipo": "Imprensa", "Confiança": float("nan")})                # linha nova, com vazios do editor
-    linhas.append({"Afirmação": float("nan")})                                    # linha vazia: ignorada
-    del linhas[5]                                                                 # linha apagada
-    itens = funcoes.tabela_para_itens(linhas, d["itens"])
-    assert len(itens) == 9 and not itens[0]["incluir"]
-    assert itens[3]["checagem"] == "nao_conferido" and itens[1]["checagem"] == d["itens"][1]["checagem"]
-    assert itens[4]["conferido_pela_equipe"]
-    nova = itens[-1]
-    assert nova["id"] == "O7" and nova["incluir"] and nova["tipo_fonte"] == "imprensa" and nova["confianca"] == "baixa"
-    assert len({i["id"] for i in itens}) == len(itens)
-
-
-def test_dossie_pronto_e_lido_e_reconferido(funcoes):
-    d = dossie_exemplo(funcoes)
-    for i in d["itens"]:
-        i["checagem"] = "conferido"                                              # o arquivo diz que tudo foi conferido...
-    lido = funcoes.ler_dossie_arquivo(funcoes.dossie_para_json(d).encode("utf-8"))
-    assert lido["origem"] == "arquivo" and len(lido["itens"]) == 9
-    assert {i["id"]: i["checagem"] for i in lido["itens"]}["O5"] == "inacessivel"  # ...mas o código confere de novo
-    import pytest
-    with pytest.raises(ValueError):
-        funcoes.ler_dossie_arquivo(b'{"nada": 1}')
-    with pytest.raises(ValueError):
-        funcoes.ler_dossie_arquivo(b'{"itens": [{"bloco": "x"}]}')
 
 
 def test_pesquisa_usa_busca_na_web_em_grupos(funcoes, llm):
@@ -400,11 +317,12 @@ def test_confronto_descarta_o_que_nao_confere(funcoes, llm):
 
 
 def test_quadro_sobre_o_documento(funcoes):
-    quadro = funcoes.sobre_o_documento({"itens": 9, "conferidos": 6}, "04/11/2026", {"nivel": "média"}, 4)
+    quadro = funcoes.sobre_o_documento({"itens": 9, "conferidos": 6}, "04/11/2026", {"nivel": "média"})
     memo = funcoes.inserir_sobre_documento("# Memorando Executivo\n## Em síntese\n- x", quadro)
     linhas = memo.splitlines()
     assert linhas[0] == "# Memorando Executivo" and linhas[2] == "## Sobre este documento"
     assert "Apoio à decisão gerado com IA" in memo and "Não recomenda decisões" in memo and "média" in memo
+    assert "sem revisão da equipe" in memo
     assert funcoes.inserir_sobre_documento("sem título", quadro).startswith("## Sobre este documento")
 
 
@@ -435,9 +353,9 @@ def test_memorando_sem_orgao_nem_unidade_no_cabecalho(funcoes):
 def test_conteudo_da_autodeclaracao_para_o_memorando(funcoes):
     rel = ("# ARQUIVO: relatorio.docx\n\n## 3. Contratos vigentes\n|Contrato|Obra|Valor|\n|-|-|-|\n"
            "|012/2025|Ponte do Rio|R$ 1.000.000,00|\n|013/2025|Escola|R$ 2.500.000,00|\n\n## 4. Pessoal\nTexto.")
-    texto = funcoes.conteudo_autodeclaracao(rel, funcoes.indice_completude(rel))
+    texto = funcoes.conteudo_autodeclaracao(rel)
     assert "relatorio.docx" in texto and "3. Contratos vigentes" in texto and "3 linha(s) com contratos" in texto
-    assert "não enviou" in funcoes.conteudo_autodeclaracao("", None)
+    assert "não enviou" in funcoes.conteudo_autodeclaracao("")
 
 
 def test_memorando_recebe_o_que_o_orgao_enviou(funcoes):
@@ -459,7 +377,7 @@ def test_anexo_do_debate_montado_por_codigo(funcoes):
     tm = tension_map([trade_off("T1", "Licitações", estabilidade="2/2"), trade_off("T2", "Atas")])
     tm["trade_offs"][0]["polo_a"]["defendido_por"] = ["p1"]
     anexo = funcoes.anexo_debate(tm, "- [p1] Fazenda: equilíbrio fiscal\n- [p2] Prefeituras: obras")
-    assert anexo.startswith("## Anexo 1 – O debate em detalhe")
+    assert anexo.startswith("## Anexo 2 – O debate em detalhe")
     assert "### Licitações" in anexo and "Defendida por: Fazenda." in anexo
     assert "Natureza do desacordo" in anexo and "apareceu em 2/2 rodadas" in anexo
     assert "nível" in anexo and "Nível" not in anexo.split("Informação:")[0]
@@ -479,21 +397,16 @@ def test_memorando_novo_sem_jargao_no_prompt_e_titulo_no_word(funcoes):
     assert any('w:br w:type="page"' in par._p.xml for par in doc.paragraphs)                 # anexo em página nova
 
 
-def test_dossie_em_word_com_links_e_selos(funcoes):
-    import io
-    import docx
+def test_fontes_no_anexo_com_links_e_selos(funcoes):
     d = dossie_exemplo(funcoes)
     md = funcoes.markdown_dossie(d)
     assert md.startswith("# Dossiê – ") and "## Visão geral" in md and "## O órgão" in md
     assert "✔ conferido na fonte" in md and "⚠" in md
     confronto = {"divergencias": [{"item": d["itens"][-1]["id"], "situacao": "contradiz", "o_orgao_declara": "100 obras",
                                    "trecho_relatorio": "100 obras", "as_fontes_mostram": "80 obras"}]}
-    assert "**As fontes mostram:** 80 obras" in funcoes.markdown_dossie(d, confronto)
-    documento = docx.Document(io.BytesIO(funcoes.dossie_docx(d, confronto, {"orgao": "Equipe de Transição"})))
-    xml = documento.element.xml
-    assert "w:hyperlink" in xml                                         # fonte clicável
-    assert any(p.text == "DOSSIÊ DO ÓRGÃO" for p in documento.paragraphs)
-    assert documento.part.rels and any("http" in r.target_ref for r in documento.part.rels.values() if r.is_external)
+    anexo = funcoes.markdown_fontes(d, confronto)
+    assert anexo.startswith("## Anexo 1 – Fontes consultadas") and "\n# " not in anexo   # títulos descem um nível
+    assert "**As fontes mostram:** 80 obras" in anexo and "### Visão geral" in anexo
 
 
 def test_calendario_so_com_datas_conferidas(funcoes, llm):
@@ -547,21 +460,24 @@ def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
     assert [s["titulo"] for s in diag["secoes"]] == ["Orçamento e execução"] and diag["descartados"] == 2
     rotulos = [i["rotulo"] for i in diag["secoes"][0]["itens"]]
     assert rotulos[1] == "informado pelo órgão" and rotulos[0].startswith(("confirmado", "fonte pública"))
-    op = funcoes.gerar_opcoes_organizacao("anthropic/claude-opus-5-5", d, rel, diag, "Secretaria de Exemplo")
-    assert [o["nome"] for o in op["opcoes"]][0] == "Manter a estrutura atual" and op["descartados"] == 1
-    assert "DIAGNÓSTICO CONFERIDO" in llm.mensagem_opcoes and "40 subsecretarias" not in llm.mensagem_opcoes
-    md = funcoes.markdown_diagnostico(diag, op, "Secretaria de Exemplo", "04/11/2026")
-    assert "## Parte 1 – Diagnóstico" in md and "### Opção 2 – Criar uma unidade" in md
-    assert "| Continuidade dos serviços | igual | pior |" in md and "Risco jurídico" not in md.split("Comparação")[1]
-    assert "### O que não se sabe" in md and "Nenhuma opção é recomendada" in md
+    md = funcoes.markdown_diagnostico(diag)
+    assert md.startswith("## Diagnóstico do órgão") and "### Orçamento e execução" in md
+    assert "### O que não se sabe" in md and "40 subsecretarias" not in md
 
 
-def test_diagnostico_em_word(funcoes, llm):
+def test_documento_unico_do_orgao(funcoes, llm):
     import io
     import docx
     rel, _ = funcoes.limpar_relatorio(RELATORIO)
     d = dossie_exemplo(funcoes)
     diag = funcoes.extrair_diagnostico("m", d, rel, "Secretaria de Exemplo")
-    dados = funcoes.diagnostico_docx(diag, {"opcoes": []}, "Secretaria de Exemplo", meta={"orgao": "Equipe"})
+    eventos = funcoes.extrair_calendario("m", d, rel, "Secretaria de Exemplo", "04/11/2026")["eventos"]
+    assert eventos
+    texto = funcoes.documento_orgao(MEMORANDO, diag, eventos, d, None, "## Anexo 2 – O debate em detalhe\nx",
+                                    "## Anexo 3 – Como este documento foi feito\ny")
+    ordem = [texto.index(t) for t in ["# Memorando", "## Diagnóstico do órgão", "### Próximos vencimentos",
+                                      "## Anexo 1", "## Anexo 2", "## Anexo 3"]]
+    assert ordem == sorted(ordem)
+    dados = funcoes.gerar_docx(texto, {"orgao": "Equipe", "data": "6 de novembro de 2026"})
     textos = [p.text for p in docx.Document(io.BytesIO(dados)).paragraphs]
-    assert "DIAGNÓSTICO DO ÓRGÃO" in textos and "Diagnóstico e opções de organização – Secretaria de Exemplo" in textos
+    assert "Diagnóstico do órgão" in textos and "Anexo 1 – Fontes consultadas" in textos
