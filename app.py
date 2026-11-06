@@ -21,8 +21,10 @@ from transicao.config import MODELOS
 
 load_dotenv()
 
-# custo por órgão, em US$, com Haiku na pesquisa, Sonnet no auxiliar e Opus no debate (medido em testes reais)
+# custo por órgão, em US$, com Haiku na pesquisa, Sonnet no auxiliar e Opus no debate (medido em testes reais);
+# com dossiê enviado, sem a pesquisa (cerca de 40% do custo)
 CUSTO_POR_ORGAO = {True: (1.0, 1.6), False: (2.0, 3.2)}
+FRACAO_SEM_PESQUISA = 0.6
 
 
 @st.cache_resource(show_spinner=False)
@@ -151,34 +153,49 @@ if not trabalho or trabalho["situacao"] != "rodando":
                         horizontal=True,
                         help="Resumos: o nome do órgão vem do nome do arquivo. Documentos brutos: suba o .zip da pasta "
                              "que tem uma subpasta por órgão; o app lê os Word, PDF e planilhas de cada uma.")
+        dossies_enviados = st.file_uploader(
+            "Dossiês das secretarias (opcional: o .zip da equipe, ou Word, PDF e Markdown)", type=["zip", "docx", "pdf", "md", "txt"],
+            accept_multiple_files=True,
+            help="O .zip de dossiês da equipe (por sigla: pesquisa com citações, painel do SIGA/PNCP e planilha de "
+                 "vencimentos) ou um arquivo por secretaria. Para o órgão que tiver dossiê, o app não pesquisa a web: "
+                 "confere os links do dossiê e põe os vencimentos da planilha direto no calendário.")
         if enviados:
             cada_pasta = modo.startswith("Cada pasta")
-            assinatura = hashlib.md5(b"".join(a.name.encode() + a.getvalue() for a in enviados)
+            assinatura = hashlib.md5(b"".join(a.name.encode() + a.getvalue() for a in enviados + (dossies_enviados or []))
                                      + str(cada_pasta).encode()).hexdigest()
             if st.session_state.get("lidos") != assinatura:
                 try:
-                    st.session_state["orgaos"] = entrada.orgaos_do_envio([(a.name, a.getvalue()) for a in enviados],
-                                                                         cada_pasta)
+                    orgaos_lidos = entrada.orgaos_do_envio([(a.name, a.getvalue()) for a in enviados], cada_pasta)
+                    st.session_state["dossies_sobrando"] = entrada.casar_dossies(
+                        orgaos_lidos, entrada.dossies_do_envio([(a.name, a.getvalue()) for a in dossies_enviados or []]))
+                    st.session_state["orgaos"] = orgaos_lidos
                 except zipfile.BadZipFile as e:
                     st.session_state["orgaos"] = []
                     st.error(f"Não foi possível abrir o .zip: {e}")
                 st.session_state["lidos"] = assinatura
                 st.session_state.pop("tabela", None)
             orgaos = st.session_state.get("orgaos") or []
+            sobrando = st.session_state.get("dossies_sobrando") or []
+            if sobrando:
+                st.warning("Dossiês sem órgão correspondente (renomeie o arquivo com o nome ou a sigla do órgão): "
+                           + ", ".join(d["arquivo"] for d in sobrando))
             if not orgaos:
                 st.warning("Não achei nenhum órgão no envio. Confira se escolheu a organização certa acima.")
             else:
                 tabela = st.data_editor(
-                    [{"analisar": True, "orgao": o["nome"], "arquivos": ", ".join(o["arquivos"])[:200]} for o in orgaos],
-                    key="tabela", hide_index=True, width="stretch", disabled=["arquivos"],
+                    [{"analisar": True, "orgao": o["nome"], "arquivos": ", ".join(o["arquivos"])[:200],
+                      "dossie": o.get("dossie_arquivo") or "— (o app pesquisa)"} for o in orgaos],
+                    key="tabela", hide_index=True, width="stretch", disabled=["arquivos", "dossie"],
                     column_config={"analisar": st.column_config.CheckboxColumn("Analisar"),
                                    "orgao": st.column_config.TextColumn("Órgão (corrija se precisar)"),
-                                   "arquivos": st.column_config.TextColumn("Arquivos ou pastas")})
+                                   "arquivos": st.column_config.TextColumn("Arquivos ou pastas"),
+                                   "dossie": st.column_config.TextColumn("Dossiê")})
                 registros = tabela.to_dict("records") if hasattr(tabela, "to_dict") else list(tabela)
                 escolhidos = [dict(o, nome=str(r["orgao"]).strip() or o["nome"])
                               for o, r in zip(orgaos, registros) if r.get("analisar")]
                 faixa = CUSTO_POR_ORGAO[economico]
-                st.caption(f"Estimativa: US$ {faixa[0] * len(escolhidos):.0f} a {faixa[1] * len(escolhidos):.0f} para "
+                peso = sum(FRACAO_SEM_PESQUISA if o.get("ler_dossie") else 1 for o in escolhidos)
+                st.caption(f"Estimativa: US$ {faixa[0] * peso:.0f} a {faixa[1] * peso:.0f} para "
                            f"{len(escolhidos)} órgão(s). O valor real sai no resumo. Não envie documentos sigilosos.")
                 if st.button(f"▶️ Analisar {len(escolhidos)} órgão(s)", type="primary", width="stretch",
                              disabled=not escolhidos):

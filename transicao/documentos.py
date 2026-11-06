@@ -652,7 +652,11 @@ def markdown_diagnostico(diag):
 
 def markdown_vencimentos(eventos, limite=12, dias_passados=30):
     """Os próximos vencimentos do órgão, em tabela curta. O calendário completo de todos os órgãos vai no Excel."""
-    proximos = [e for e in sorted(eventos or [], key=lambda x: x["data"]) if e["dias"] >= -dias_passados][:limite]
+    proximos = [e for e in eventos or [] if e["dias"] >= -dias_passados]
+    if len(proximos) > limite:                 # muitos vencimentos: os de maior valor nos próximos 90 dias
+        janela = [e for e in proximos if e["dias"] <= 90] or proximos
+        proximos = sorted(janela, key=lambda x: -(x.get("valor") or 0))[:limite]
+    proximos.sort(key=lambda x: x["data"])
     if not proximos:
         return ""
     linhas = ["### Próximos vencimentos",

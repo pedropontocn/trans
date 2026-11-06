@@ -1,4 +1,5 @@
 """Pesquisa: o dossiê de fontes públicas (Estado e órgão), com a conferência dos links e trechos por código."""
+import io
 import json
 import os
 import re
@@ -213,11 +214,12 @@ def baixar_pagina(url):
 
 def conferir_itens(itens):
     """Abre o link de cada item e procura o trecho citado. Feito por código; o modelo não participa."""
-    urls = sorted({i["url"] for i in itens if i["url"] and i["trecho"]})
+    urls = sorted({i["url"] for i in itens if i["url"] and (i["trecho"] or _numeros(i["afirmacao"]))})
     paginas = dict(zip(urls, _em_paralelo([lambda u=u: baixar_pagina(u) for u in urls]))) if urls else {}
     bases = {}
     for i in itens:
-        if not i["url"] or not i["trecho"]:
+        sem_trecho = not i["trecho"]
+        if not i["url"] or (sem_trecho and not _numeros(i["afirmacao"])):
             i["checagem"] = "sem_trecho"
             continue
         texto = paginas.get(i["url"])
@@ -227,7 +229,11 @@ def conferir_itens(itens):
         if i["url"] not in bases:
             comp = _comparavel(texto)
             bases[i["url"]] = (comp, _shingles(comp.split()))
-        i["checagem"] = "conferido" if trecho_confere(i["trecho"], *bases[i["url"]]) else "trecho_nao_encontrado"
+        if sem_trecho:              # sem trecho literal: os números da afirmação precisam estar na página
+            i["checagem"] = "conferido" if numeros_conferem(i["afirmacao"], bases[i["url"]][0]) else "trecho_nao_encontrado"
+            i["conferencia"] = "numeros"
+        else:
+            i["checagem"] = "conferido" if trecho_confere(i["trecho"], *bases[i["url"]]) else "trecho_nao_encontrado"
     return itens
 
 
@@ -428,3 +434,173 @@ def resumo_dossie(dossie):
 def dossie_para_json(dossie):
     campos = ("orgao", "data_corte", "foco", "modelo", "origem", "gerado_em", "itens", "nao_encontrado", "diagnostico")
     return json.dumps({k: dossie.get(k) for k in campos}, ensure_ascii=False, indent=2)
+
+
+# --- DOSSIÊ ENVIADO (montado fora do app: pesquisa com citações + contratos do SIGA/PNCP) ------------------
+
+TEMAS = [  # palavras do fato ou do título da seção → bloco do órgão (o dossiê enviado é de uma secretaria)
+    (r"comissionad|cargos? em comiss|servidores|concurso|terceiriz", "pessoal"),
+    (r"controle|pend[êe]ncias legais|tce|mprj|\bmp\b|judici|cge|auditoria", "controle_judicializacao"),
+    (r"apag[ãa]o|continuidade|descontinuidade|vencim", "riscos_continuidade"),
+    (r"contrato|conv[êe]nio|licita|preg[ãa]o|aditivo", "contratos_convenios"),
+    (r"or[çc]amento|empenh|dota[çc]|restos a pagar|pagamento", "orcamento_execucao"),
+    (r"pessoal|servidor|terceiriz", "pessoal"), (r"miss[ãa]o|estrutura|compet[êe]ncia", "mandato_estrutura"),
+    (r"indicador|entrega|meta", "entregas_indicadores"),
+]
+DOMINIOS_OFICIAIS = re.compile(r"(\.gov\.br|\.jus\.br|\.leg\.br|\.mp\.br|tcerj\.tc\.br|tce\.rj|alerj|doerj|pncp)", re.I)
+RE_LINK_MD = re.compile(r"\[([^\]]*)\]\((https?://[^)\s]+)\)")
+RE_NUMERO = re.compile(r"\d[\d.]*(?:,\d+)?")
+
+
+def _classificar(texto, padrao):
+    texto = _norm(texto)
+    return next((valor for padrao_re, valor in TEMAS if re.search(padrao_re, texto)), padrao)
+
+
+def _numeros(texto):
+    """Os números que identificam um fato (valores, quantidades, percentuais, números de processo), sem anos soltos."""
+    achados = []
+    for n in RE_NUMERO.findall(texto):
+        n = n.rstrip(".,")
+        if re.fullmatch(r"(19|20)\d\d", n) or len(re.sub(r"\D", "", n)) < 2:
+            continue
+        achados.append(n)
+    return list(dict.fromkeys(achados))
+
+
+def numeros_conferem(afirmacao, pagina_comparavel):
+    """Sem trecho literal, confere os números da afirmação na página: todos precisam aparecer."""
+    numeros = _numeros(afirmacao)
+    return bool(numeros) and all(_comparavel(n) in pagina_comparavel for n in numeros)
+
+
+def itens_citados(texto):
+    """Fatos de um texto em Markdown com citações: cada item de lista ou parágrafo com [título](link) vira um fato; o título da
+    seção ajuda a classificar. A seção de lacunas vira "procurado e não encontrado"; a de fontes dá as datas."""
+    datas = {url: d for url, d in re.findall(r"\]\((https?://[^)\s]+)\)\s*[—-]\s*(\d{4}-\d{2}-\d{2})", texto)}
+    itens, lacunas, secao = [], [], ""
+    for linha in texto.splitlines():
+        if linha.lstrip().startswith("#"):
+            secao = linha.strip("# ").strip()
+            continue
+        m = re.match(r"^\s*(?:(?:[-*•]|\d+[.)])\s+)?(.*\S)\s*$", linha)
+        if not m or "fontes" in _norm(secao) or not secao:
+            continue
+        corpo = m.group(1)
+        links = RE_LINK_MD.findall(corpo)
+        afirmacao = re.sub(r"\s+", " ", RE_LINK_MD.sub("", corpo).replace("**", "")).strip(" ;")
+        if not afirmacao:
+            continue
+        if "lacuna" in _norm(secao) or "nao encontrad" in _norm(secao):
+            lacunas.append(afirmacao)
+            continue
+        if not links:
+            continue
+        titulo, url = links[0]
+        if re.match(r"([^:]{0,40}:\s*)?(nada (foi )?encontrado|as fontes (consultadas )?n[ãa]o|n[ãa]o foram? encontrad)",
+                    _norm(afirmacao)):
+            lacunas.append(afirmacao)              # ausência de informação não é fato
+            continue
+        bloco = _classificar(afirmacao, "") or _classificar(secao, "outro_orgao")
+        dia = datas.get(url, "")
+        itens.append({"bloco": bloco, "camada": "orgao", "afirmacao": afirmacao, "fonte": titulo.strip(), "data_fonte": f"{dia[8:10]}/{dia[5:7]}/{dia[:4]}" if dia else "",
+                      "url": url, "trecho": "",
+                      "tipo_fonte": "documento_oficial" if DOMINIOS_OFICIAIS.search(url) else "imprensa",
+                      "confianca": "alta" if DOMINIOS_OFICIAIS.search(url) else "media"})
+    return itens, lacunas
+
+
+def ler_contratos(csv_texto):
+    """As linhas da planilha de vencimentos (separador ';'), como dicionários."""
+    import csv
+    return [dict(l) for l in csv.DictReader(io.StringIO((csv_texto or "").lstrip("﻿")), delimiter=";")]
+
+
+def _reais(valor):
+    try:
+        v = float(str(valor).replace(",", "."))
+    except ValueError:
+        return ""
+    return "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def itens_de_contratos(contratos, maximo=20):
+    """Os contratos que mais pesam na transição viram fatos do dossiê: os maiores que vencem em até 90 dias e, depois,
+    os maiores até 180 dias. Vêm da base de contratos do Estado (SIGA) com vigência conferida no PNCP ou no DOERJ."""
+    def valor(c):
+        try:
+            return float(c.get("valor_atualizado") or c.get("valor") or 0)
+        except ValueError:
+            return 0.0
+
+    def dias(c):
+        try:
+            return int(c.get("dias_para_vencer") or 9999)
+        except ValueError:
+            return 9999
+    escolhidos = sorted([c for c in contratos if dias(c) <= 90], key=valor, reverse=True)[:maximo]
+    escolhidos += sorted([c for c in contratos if 90 < dias(c) <= 180], key=valor, reverse=True)[:max(0, maximo - len(escolhidos))]
+    itens = []
+    for c in escolhidos:
+        objeto = re.sub(r"\s+", " ", c.get("objeto") or "").strip()
+        origem_data = c.get("fonte_vigencia", "").split(":")[0] or "SIGA"
+        itens.append({
+            "bloco": "contratos_convenios", "camada": "orgao",
+            "afirmacao": f"O contrato {c.get('contratacao')} com {c.get('fornecedor', '').strip()} "
+                         f"({objeto[:160]}{'…' if len(objeto) > 160 else ''}), de "
+                         f"{_reais(c.get('valor_atualizado') or c.get('valor'))}, termina em {c.get('fim')} "
+                         f"(data conferida em: {origem_data})"
+                         + ("; contratação emergencial" if c.get("flag_emerg") == "True" else "")
+                         + (f"; liquidado e não pago: {_reais(c['a_pagar_liquidado'])}"
+                            if valor({"valor": c.get("a_pagar_liquidado")}) > 0 else "") + ".",
+            "fonte": "Base de contratos do Estado (SIGA)" + (" e PNCP" if c.get("url_pncp") else ""),
+            "data_fonte": "", "url": c.get("url_pncp") or "", "trecho": "", "tipo_fonte": "dado_oficial",
+            "confianca": "alta", "conferido_pela_equipe": True})
+    return itens
+
+
+def itens_do_painel(texto):
+    """Os números do painel do dossiê (tabelas de indicadores e alertas automáticos), calculados pela equipe a partir
+    do SIGA e do PNCP. Linhas com link são da pesquisa web e ficam de fora (entram por itens_citados)."""
+    itens, secao, vistos = [], "", set()
+    for linha in (texto or "").splitlines():
+        if linha.startswith("#"):
+            secao = _norm(linha)
+            continue
+        if not any(s in secao for s in ("contratos", "indicadores", "alertas")) or "](http" in linha:
+            continue
+        celulas = [c.strip() for c in linha.strip().strip("|").split("|")] if linha.lstrip().startswith("|") else []
+        if len(celulas) >= 2 and not set(celulas[0]) <= set("-: ") and _norm(celulas[0]) not in ("indicador", "contrato siga"):
+            if "nao consta" in _norm(celulas[1]) or not re.search(r"\d", celulas[1]) or len(celulas) > 4:
+                continue
+            afirmacao = f"{celulas[0]}: {celulas[1]}."
+        elif linha.lstrip().startswith("- ") and re.search(r"\d", linha):
+            afirmacao = linha.strip()[2:].strip()
+        else:
+            continue
+        assinatura = tuple(sorted(_numeros(afirmacao)))
+        if assinatura in vistos:                 # o alerta repete um número da tabela
+            continue
+        vistos.add(assinatura)
+        itens.append({"bloco": _classificar(afirmacao, "contratos_convenios"), "camada": "orgao", "afirmacao": afirmacao,
+                      "fonte": "Painel de contratos da equipe (SIGA e PNCP)", "data_fonte": "", "url": "", "trecho": "",
+                      "tipo_fonte": "dado_oficial", "confianca": "alta", "conferido_pela_equipe": True})
+    return itens
+
+
+def dossie_enviado(partes, orgao, data_corte, estado=None):
+    """O dossiê a partir do que a equipe enviou, no lugar da pesquisa do app. partes: textos "pesquisa" (Markdown
+    com citações), "dossie" (o dossiê reduzido, com o painel de contratos) e "contratos" (a planilha de vencimentos).
+    Os fatos da pesquisa têm o link aberto pelo código; os números do SIGA e do PNCP são da equipe."""
+    citados, lacunas = itens_citados(partes.get("pesquisa") or partes.get("dossie") or "")
+    contratos = ler_contratos(partes.get("contratos") or "")
+    brutos = itens_do_painel(partes.get("dossie") or "") + itens_de_contratos(contratos) + citados
+    novos = conferir_itens(_unicos_ordenados([x for x in (normalizar_item(b) for b in brutos) if x]))
+    itens = ([dict(i, id="") for i in deepcopy(estado["itens"])] if estado else []) + [dict(i, id="") for i in novos]
+    return {"orgao": orgao, "data_corte": data_corte, "foco": "", "modelo": "dossiê enviado pela equipe",
+            "origem": "arquivo", "gerado_em": datetime.now().isoformat(timespec="seconds"),
+            "itens": numerar_itens(_unicos_ordenados(itens)),
+            "nao_encontrado": (deepcopy(estado["nao_encontrado"]) if estado else [])
+            + [{"camada": "orgao", "bloco": "", "procurado": n} for n in lacunas],
+            "uso": [], "diagnostico": [], "reaproveitado": False, "estado_compartilhado": estado is not None,
+            "contratos": contratos}

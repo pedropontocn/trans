@@ -27,7 +27,8 @@ def test_fluxo_unico_da_tela(llm, monkeypatch):
     from streamlit.testing.v1 import AppTest
     llm.texto_relatorio = RELATORIO
     envio = [Envio("resumos.zip", _zip({"SETUR - Turismo.docx": b"a", "SEFAZ - Fazenda.pdf": b"b"}))]
-    monkeypatch.setattr(streamlit, "file_uploader", lambda *a, **k: envio)
+    dossies = [Envio("Dossiê SETUR.md", b"### Fato\n- Afirmacao: x\n")]
+    monkeypatch.setattr(streamlit, "file_uploader", lambda rotulo, *a, **k: dossies if "Dossiê" in rotulo else envio)
     at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=60)
     at.run()
     assert not at.exception
