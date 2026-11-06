@@ -27,7 +27,8 @@ def test_fluxo_unico_da_tela(llm, monkeypatch):
     from streamlit.testing.v1 import AppTest
     llm.texto_relatorio = RELATORIO
     envio = [Envio("resumos.zip", _zip({"SETUR - Turismo.docx": b"a", "SEFAZ - Fazenda.pdf": b"b"}))]
-    dossies = [Envio("Dossiê SETUR.md", b"### Fato\n- Afirmacao: x\n")]
+    dossies = [Envio("Dossiê SETUR.md", b"### Fato\n- Afirmacao: x\n"),
+               Envio("Dossiê SECID.md", b"# SECID")]                 # sem documento enviado: entra desmarcada
     monkeypatch.setattr(streamlit, "file_uploader", lambda rotulo, *a, **k: dossies if "Dossiê" in rotulo else envio)
     at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=60)
     at.run()
@@ -43,3 +44,15 @@ def test_fluxo_unico_da_tela(llm, monkeypatch):
         time.sleep(0.5)
     assert any("Pronto" in s.value for s in at.success), [e.value for e in at.error]
     assert any(getattr(d, "label", "").startswith("⬇️") for d in at.get("download_button"))
+
+
+def test_so_com_dossies_a_tabela_ja_vem_marcada(llm, monkeypatch):
+    import streamlit
+    from streamlit.testing.v1 import AppTest
+    streamlit.cache_resource.clear()                  # sem a análise do teste anterior na memória do app
+    dossies = [Envio("Dossiê SECID.md", b"# SECID"), Envio("Dossiê SES.md", b"# SES")]
+    monkeypatch.setattr(streamlit, "file_uploader", lambda rotulo, *a, **k: dossies if "Dossiê" in rotulo else [])
+    at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=60)
+    at.run()
+    assert not at.exception
+    assert any(b.label.startswith("▶️ Analisar 2") for b in at.button)

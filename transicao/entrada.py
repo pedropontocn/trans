@@ -560,3 +560,9 @@ def casar_dossies(orgaos, dossies):
             o["dossie_arquivo"] = ", ".join(d["arquivos"])
             o["ler_dossie"] = lambda d=d: _texto_dossie(d)
     return livres
+
+
+def orgaos_so_com_dossie(dossies):
+    """Secretarias que têm dossiê, mas nenhum documento enviado: analisadas só com o dossiê."""
+    return [{"nome": d["orgao"], "arquivos": [], "texto": "", "so_dossie": True,
+             "dossie_arquivo": ", ".join(d["arquivos"]), "ler_dossie": lambda d=d: _texto_dossie(d)} for d in dossies]

@@ -157,31 +157,35 @@ if not trabalho or trabalho["situacao"] != "rodando":
             help="O .zip de dossiês da equipe (por sigla: pesquisa com citações, painel do SIGA/PNCP e planilha de "
                  "vencimentos) ou um arquivo por secretaria. Para o órgão que tiver dossiê, o app não pesquisa a web: "
                  "confere os links do dossiê e põe os vencimentos da planilha direto no calendário.")
-        if enviados:
+        enviados, dossies_enviados = enviados or [], dossies_enviados or []
+        if enviados or dossies_enviados:
             cada_pasta = modo.startswith("Cada pasta")
-            assinatura = hashlib.md5(b"".join(a.name.encode() + a.getvalue() for a in enviados + (dossies_enviados or []))
+            assinatura = hashlib.md5(b"".join(a.name.encode() + a.getvalue() for a in enviados + dossies_enviados)
                                      + str(cada_pasta).encode()).hexdigest()
             if st.session_state.get("lidos") != assinatura:
                 try:
                     orgaos_lidos = entrada.orgaos_do_envio([(a.name, a.getvalue()) for a in enviados], cada_pasta)
-                    st.session_state["dossies_sobrando"] = entrada.casar_dossies(
-                        orgaos_lidos, entrada.dossies_do_envio([(a.name, a.getvalue()) for a in dossies_enviados or []]))
-                    st.session_state["orgaos"] = orgaos_lidos
+                    sobrando = entrada.casar_dossies(
+                        orgaos_lidos, entrada.dossies_do_envio([(a.name, a.getvalue()) for a in dossies_enviados]))
+                    # secretaria com dossiê e sem documento enviado: pode ser analisada só com o dossiê (desmarcada)
+                    st.session_state["orgaos"] = orgaos_lidos + entrada.orgaos_so_com_dossie(sobrando)
                 except zipfile.BadZipFile as e:
                     st.session_state["orgaos"] = []
                     st.error(f"Não foi possível abrir o .zip: {e}")
                 st.session_state["lidos"] = assinatura
                 st.session_state.pop("tabela", None)
             orgaos = st.session_state.get("orgaos") or []
-            sobrando = st.session_state.get("dossies_sobrando") or []
-            if sobrando:
-                st.warning("Dossiês sem órgão correspondente (renomeie o arquivo com o nome ou a sigla do órgão): "
-                           + ", ".join(d["arquivo"] for d in sobrando))
+            so_dossie = [o for o in orgaos if o.get("so_dossie")]
+            if so_dossie and enviados:
+                st.caption(f"{len(so_dossie)} secretaria(s) têm dossiê, mas nenhum documento enviado: aparecem no fim da "
+                           "tabela, desmarcadas. Marque as que quiser analisar só com o dossiê. Se uma delas tem "
+                           "documento, renomeie o arquivo com o nome ou a sigla da secretaria.")
             if not orgaos:
                 st.warning("Não achei nenhum órgão no envio. Confira se escolheu a organização certa acima.")
             else:
                 tabela = st.data_editor(
-                    [{"analisar": True, "orgao": o["nome"], "arquivos": ", ".join(o["arquivos"])[:200],
+                    [{"analisar": not o.get("so_dossie") or not enviados, "orgao": o["nome"],
+                      "arquivos": ", ".join(o["arquivos"])[:200] or "— (só o dossiê)",
                       "dossie": o.get("dossie_arquivo") or "— (o app pesquisa)"} for o in orgaos],
                     key="tabela", hide_index=True, width="stretch", disabled=["arquivos", "dossie"],
                     column_config={"analisar": st.column_config.CheckboxColumn("Analisar"),
