@@ -539,14 +539,55 @@ def test_pesquisa_recebe_os_pontos_obrigatorios_do_checklist(funcoes, llm):
     assert "C5:" in grupo_controle and "C6:" in grupo_controle and "C3:" not in grupo_controle
 
 
+def test_esquema_de_modelos_por_familia(funcoes):
+    opus, sonnet = "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5"
+    # sem chave de fora: todos os agentes no principal e a neutralidade no auxiliar (ao menos outro modelo)
+    e = funcoes.esquema_de_modelos(opus, sonnet, [], [])
+    assert e["agentes"] == [opus] * 6 and e["neutralidade"] == sonnet and not e["independente"]
+    # com as duas chaves: o esquema por papel, nenhuma família com maioria, neutralidade fora da Anthropic
+    e = funcoes.esquema_de_modelos(opus, sonnet, [], ["openai", "gemini"])
+    assert e["agentes"] == [opus, "openai/gpt-6-astra", "gemini/gemini-4-argon", "openai/gpt-6-astra", "gemini/gemini-4-argon", "openai/gpt-6-astra"]
+    assert e["neutralidade"] == "openai/gpt-6-astra" and e["independente"]
+    assert max(e["agentes"].count(m) for m in set(e["agentes"])) <= 3
+    # só uma chave: os papéis da família que falta caem para o principal
+    e = funcoes.esquema_de_modelos(opus, sonnet, [], ["gemini"])
+    assert e["agentes"] == [opus, opus, "gemini/gemini-4-argon", opus, "gemini/gemini-4-argon", opus]
+    assert e["neutralidade"] == "gemini/gemini-4-argon"
+    # lista informada à mão vale sobre o esquema
+    e = funcoes.esquema_de_modelos(opus, sonnet, ["a", " b "], ["openai"])
+    assert e["agentes"] == ["a", "b", "a", "b", "a", "b"]
+    assert funcoes.familias_disponiveis({"OPENAI_API_KEY": "x", "GEMINI_API_KEY": " "}) == ["openai"]
+
+
 def test_agentes_podem_usar_modelos_diferentes(funcoes, llm):
-    assert funcoes.modelos_dos_agentes("anthropic/claude-opus-5-5") == ["anthropic/claude-opus-5-5"] * 5
-    assert funcoes.modelos_dos_agentes("a", ["", None]) == ["a"] * 5
-    modelos = funcoes.modelos_dos_agentes("a", ["anthropic/claude-opus-5-5", " gemini/gemini-2.5-pro "])
-    assert modelos == ["anthropic/claude-opus-5-5", "gemini/gemini-2.5-pro"] * 2 + ["anthropic/claude-opus-5-5"]
+    modelos = ["anthropic/claude-opus-5-5", "gemini/gemini-4-argon"] * 3
     revisoes = funcoes.revisar_por_agentes("a", "MATERIAL", {"riscos": []}, [], modelos)
     assert [r["modelo"] for r in revisoes] == modelos and all(not r.get("erro") for r in revisoes)
-    chamadas = [c for c in llm.chamadas if "Você revisa a análise de riscos" in str(c["mensagens"][0]["content"])]
+    assert [r["papel"] for r in revisoes][-1] == "Advogado do diabo" and revisoes[-1]["contestados"]
+    chamadas = [c for c in llm.chamadas if "Você revisa a análise de riscos" in str(c["mensagens"][0]["content"])
+                or "ADVOGADO DO DIABO" in str(c["mensagens"][0]["content"])]
     assert sorted(c["modelo"] for c in chamadas) == sorted(modelos)
     md = funcoes.markdown_metodo("x", {}, None, {"nivel": "alta", "motivos": []}, [], None, revisoes, {"riscos": []})
-    assert "gemini/gemini-2.5-pro" in md and "provedores diferentes" in md
+    assert "gemini/gemini-4-argon" in md and "provedores diferentes" in md
+
+
+def test_proveniencia_de_cada_risco_por_codigo(funcoes):
+    analise = {"riscos": [{"id": "R1"}, {"id": "R2"}]}
+    revisoes = [{"papel": "Fazenda e orçamento", "exagerados": [{"risco": "R2", "motivo": "valor pequeno"}]},
+                {"papel": "Área-fim e usuário do serviço", "exagerados": []},
+                {"papel": "Operação e servidores", "erro": "fora do ar"},
+                {"papel": "Advogado do diabo", "contestados": [{"risco": "R2", "motivo": "já resolvido", "fatos": ["F4"]}],
+                 "sustentados": ["R1"]}]
+    finais = [{"id": "R1", "id_anterior": "R2"}, {"id": "R2", "id_anterior": "R1"},
+              {"id": "R3", "id_anterior": "novo: Área-fim e usuário do serviço"}, {"id": "R4", "id_anterior": "R9"}]
+    funcoes.proveniencia(finais, revisoes, analise)
+    r = {f["id"]: f["revisao"] for f in finais}
+    assert r["R1"]["agentes"] == 3 and r["R1"]["sem_objecao"] == 1 and r["R1"]["contestado"]
+    assert [(o["papel"], o["tipo"]) for o in r["R1"]["objecoes"]] == [("Fazenda e orçamento", "exagerado"),
+                                                                       ("Advogado do diabo", "contestado")]
+    assert r["R2"] == {"origem": "análise", "objecoes": [], "agentes": 3, "sem_objecao": 3, "contestado": False}
+    assert r["R3"]["origem"] == "apontado por Área-fim e usuário do serviço" and r["R3"]["sem_objecao"] == 3
+    assert r["R4"]["origem"] == "análise" and r["R4"]["objecoes"] == []          # id_anterior desconhecido: só a contagem
+    linha = funcoes._linha_revisao(r["R1"])
+    assert linha.startswith("**Revisão:** 1 de 3 agentes sem objeção; Fazenda e orçamento vê exagero: valor pequeno; "
+                            "Advogado do diabo contesta: já resolvido (F4).")

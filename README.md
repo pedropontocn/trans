@@ -60,6 +60,8 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
 
 1. **Dossiê.** O pacote de dossiês da equipe (ou, sem ele, a pesquisa do app). Links abertos e números conferidos por
    código; contratos do SIGA/PNCP entram como dado oficial.
+   Por padrão, todas as etapas usam o modelo mais forte (Opus): qualidade primeiro; o modo econômico (Batch API)
+   só muda o tempo, não o modelo.
 2. **Diagnóstico.** Seis blocos fixos, na ordem do que mais pesa na transição: contratos (valores altos, objetos
    questionáveis, vigência acabando, paralisados, passivo); pessoal (tamanho e custo da folha, folha inchada, cargos
    que vagam, risco de apagão de equipe); passivos jurídicos e de controle; orçamento e execução; obras e entregas;
@@ -76,10 +78,17 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    licitação, aditivo recente no PNCP e prioridade (impacto × urgência).
 5. **Análise de riscos.** Uma análise lê o diagnóstico e os vencimentos e propõe riscos (causa → consequência),
    decisões em aberto e o que pedir à secretaria.
-6. **Cinco agentes independentes** revisam a análise sem ver uns aos outros: Fazenda e orçamento; controle e jurídico;
-   área-fim e usuário do serviço; operação e servidores; nova gestão (prioridades e articulação). Apontam riscos que
-   faltaram, riscos exagerados e o que temem e valorizam em cada opção. Cada agente pode usar um modelo diferente
-   (inclusive de outro provedor, pelo LiteLLM): os pontos cegos de um modelo deixam de se repetir nos cinco.
+6. **Seis agentes independentes** revisam a análise sem ver uns aos outros: Fazenda e orçamento; controle e jurídico;
+   área-fim e usuário do serviço; operação e servidores; nova gestão (prioridades e articulação); e o **advogado do
+   diabo**, que tenta derrubar cada risco com o material. Apontam riscos que faltaram, riscos exagerados ou
+   contestados e o que temem e valorizam em cada opção. O código registra, para cada risco final, quem apontou e
+   quem fez objeção ("5 de 6 agentes sem objeção; advogado do diabo contesta: ..."), e isso aparece no documento.
+
+   **Esquema de modelos.** Quem produz não confere, e quem confere não é da mesma família de quem produziu. Com as
+   chaves `OPENAI_API_KEY` e `GEMINI_API_KEY` nos Secrets, os agentes se distribuem entre Anthropic, OpenAI e Google
+   (o autor da análise tem um voto entre seis; nenhuma família tem maioria; o advogado do diabo e o controle jurídico
+   ficam com famílias de fora) e a revisão de neutralidade vai para outra família. Sem as chaves, tudo roda na
+   Anthropic e a barra lateral avisa. A lista de modelos na barra lateral vale sobre o esquema.
 7. **Consolidação e conferência.** Uma consolidação junta as revisões; o código confere os fatos citados por cada
    risco, dá a firmeza da informação e calcula a prioridade. Um segundo modelo revisa a neutralidade.
 8. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os

@@ -316,3 +316,18 @@ def trecho_confere(trecho, base_comparavel, base_shingles):
         return False
     sh = _shingles(palavras)
     return len(sh & base_shingles) / len(sh) >= 0.6
+
+
+def testar_modelos(modelos, timeout=60):
+    """Chama cada modelo com uma palavra e devolve {modelo: "ok" | "erro: ..."}: a conferência de chaves e nomes antes
+    de uma rodada grande. Não passa pela Batch API nem pelas respostas guardadas."""
+    import litellm
+    saida = {}
+    for m in dict.fromkeys(modelos):
+        try:
+            r = litellm.completion(model=m, messages=[{"role": "user", "content": "Responda só: ok"}], max_tokens=20,
+                                   timeout=timeout)
+            saida[m] = "ok" if (r.choices[0].message.content or "").strip() else "erro: resposta vazia"
+        except Exception as e:
+            saida[m] = f"erro: {type(e).__name__}: {str(e)[:160]}"
+    return saida

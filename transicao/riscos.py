@@ -31,7 +31,10 @@ PAPEIS = [
     ("governo", "Nova gestão: prioridades e articulação",
      "Olha as prioridades do governo eleito, a relação com a Alerj e com os municípios e os compromissos que "
      "amarram ou liberam a nova gestão."),
+    ("contra", "Advogado do diabo",
+     "Tenta derrubar cada risco: procura no material o que mostra que ele está errado, exagerado ou já resolvido."),
 ]
+PAPEL_CONTRA = "Advogado do diabo"
 
 LINGUAGEM = """LINGUAGEM: português claro, de gestão pública; frases de até 25 palavras. Não use: trade-off, persona,
 baseline, dossiê, autodeclaração, nível de evidência. Não recomende: nada de "deve", "é preciso", "recomenda-se",
@@ -82,20 +85,43 @@ Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
 {{"faltando": [{esquema}], "exagerados": [{{"risco": "R2", "motivo": "..."}}],
 "decisoes": [{{"decisao": "Q1", "opcao": 1, "teme": "...", "valoriza": "..."}}]}}"""
 
+PROMPT_CONTRA = """Você é o ADVOGADO DO DIABO na análise de riscos da transição de uma secretaria do Estado do Rio de
+Janeiro. Seu trabalho é tentar DERRUBAR cada risco da análise: o que no material mostra que ele está errado, exagerado,
+já resolvido (providência publicada, aditivo assinado, decisão cumprida) ou sem fato que o sustente. Seja duro e
+específico; o que sobreviver a você é mais sólido. Não invente: cada contestação cita os ids do material.
+
+Leia o material e a análise. Entregue:
+1. "contestados": os riscos que você consegue derrubar ou enfraquecer, cada um com "risco" (id), "motivo" (uma ou duas
+   frases, com os fatos) e "fatos" (ids do material que sustentam a contestação). Risco que você não consegue
+   contestar com o material NÃO entra aqui.
+2. "sustentados": os ids dos riscos que resistiram, em uma lista.
+3. "decisoes": para cada decisão (Q1, Q2...), o que você teme em cada opção, em uma frase (o que pode dar errado).
+
+""" + LINGUAGEM + """
+
+Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
+{"contestados": [{"risco": "R2", "motivo": "...", "fatos": ["F4"]}], "sustentados": ["R1", "R3"],
+"decisoes": [{"decisao": "Q1", "opcao": 1, "teme": "...", "valoriza": ""}]}"""
+
 PROMPT_CONSOLIDACAO = """Você consolida a análise de riscos da transição de uma secretaria do Estado do Rio de Janeiro
-com as revisões de cinco agentes independentes, cada um com um olhar de gestão.
+com as revisões de agentes independentes, cada um com um olhar de gestão, e de um ADVOGADO DO DIABO, que tentou
+derrubar cada risco.
 
 - Inclua um risco apontado como faltando só se ele citar fatos do material; junte riscos repetidos.
-- Ajuste ou retire um risco apontado como exagerado só se o motivo se apoiar no material.
+- Ajuste ou retire um risco apontado como exagerado ou contestado só se o motivo se apoiar no material. Contestação
+  sem fato não retira risco.
 - Mantenha 5 a 8 riscos, numerados de novo (R1, R2...), e 2 ou 3 decisões (Q1, Q2...).
+- Em cada risco, preencha "id_anterior": o id que ele tinha na ANÁLISE (ex.: "R3"); se veio de um agente como
+  faltando, escreva "novo: " e o nome do agente (ex.: "novo: Fazenda e orçamento"). O sistema usa isso para registrar
+  quem apontou e quem contestou cada risco.
 - Em cada decisão, acrescente "visoes": para cada agente que opinou, o que ele teme e valoriza, sem dizer qual opção
   é melhor. Mantenha o peso igual entre as opções.
 
 """ + LINGUAGEM + """
 
 Responda SOMENTE com JSON, no mesmo formato da análise, entre [INÍCIO DO JSON] e [FIM DO JSON]. Em cada decisão, inclua
-"visoes": [{"papel": "Fazenda e orçamento", "teme": "...", "valoriza": "..."}]. Cada risco segue este formato: """ \
-    + ESQUEMA_RISCO
+"visoes": [{"papel": "Fazenda e orçamento", "teme": "...", "valoriza": "..."}]. Cada risco segue este formato, mais
+"id_anterior": """ + ESQUEMA_RISCO
 
 
 # --- MATERIAL ------------------------------------------------------------------------------
@@ -144,31 +170,51 @@ def analisar(modelo, texto_material, uso):
                        12000, etapa="análise de riscos", uso_lista=uso) or {}
 
 
-def modelos_dos_agentes(principal, lista=None):
-    """O modelo de cada agente. lista: nomes de modelos (LiteLLM) que se revezam entre os cinco; vazia, todos usam o
-    principal. Agentes em modelos de provedores diferentes deixam de repetir os mesmos pontos cegos."""
-    lista = [m.strip() for m in (lista or []) if str(m or "").strip()]
-    if not lista:
-        return [principal] * len(PAPEIS)
-    return [lista[k % len(lista)] for k in range(len(PAPEIS))]
-
-
 def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
-    """Os cinco agentes, em paralelo e sem ver as respostas uns dos outros. modelos: um por agente (ver
-    modelos_dos_agentes); sem a lista, todos usam `modelo`."""
+    """Os seis agentes (cinco olhares e o advogado do diabo), em paralelo e sem ver as respostas uns dos outros.
+    modelos: um por agente (ver config.esquema_de_modelos); sem a lista, todos usam `modelo`."""
     pedido = texto_material + "\n\nANÁLISE A REVISAR:\n" + json.dumps(analise, ensure_ascii=False, indent=1)
     modelos = modelos or [modelo] * len(PAPEIS)
 
     def um(papel, modelo_agente):
         _, nome, criterio = papel
         try:
-            r = chamar_json(modelo_agente, [{"role": "system", "content": PROMPT_AGENTE.format(
-                papel=nome, criterio=criterio, esquema=ESQUEMA_RISCO)},
-                {"role": "user", "content": pedido}], 6000, etapa=f"agente: {nome}", uso_lista=uso)
+            sistema = PROMPT_CONTRA if nome == PAPEL_CONTRA else PROMPT_AGENTE.format(
+                papel=nome, criterio=criterio, esquema=ESQUEMA_RISCO)
+            r = chamar_json(modelo_agente, [{"role": "system", "content": sistema},
+                                            {"role": "user", "content": pedido}], 6000, etapa=f"agente: {nome}",
+                            uso_lista=uso)
         except Exception as e:
             return {"papel": nome, "modelo": modelo_agente, "erro": f"{type(e).__name__}: {e}"[:200]}
         return {"papel": nome, "modelo": modelo_agente, **(r if isinstance(r, dict) else {"erro": "resposta ilegível"})}
     return _em_paralelo([lambda p=p, m=m: um(p, m) for p, m in zip(PAPEIS, modelos)])
+
+
+def proveniencia(riscos_finais, revisoes, analise):
+    """Para cada risco final, por código e a partir das revisões brutas: de onde veio (análise ou agente que apontou),
+    quem fez objeção (exagerado ou contestado, com o motivo) e quantos agentes não objetaram. Usa o "id_anterior" que a
+    consolidação registra; sem ele, só conta os agentes que responderam."""
+    validas = [r for r in revisoes or [] if not r.get("erro")]
+    ids_analise = {str(r.get("id") or "") for r in (analise or {}).get("riscos") or [] if isinstance(r, dict)}
+    for risco in riscos_finais:
+        anterior = str(risco.get("id_anterior") or "").strip()
+        objecoes, origem = [], "análise"
+        if anterior.lower().startswith("novo"):
+            origem = "apontado por " + (anterior.split(":", 1)[1].strip() if ":" in anterior else "um agente")
+        elif anterior and anterior not in ids_analise:
+            anterior = ""
+        for rev in validas:
+            for e in rev.get("exagerados") or []:
+                if isinstance(e, dict) and anterior and str(e.get("risco") or "").strip() == anterior:
+                    objecoes.append({"papel": rev["papel"], "tipo": "exagerado", "motivo": str(e.get("motivo") or "").strip()})
+            for c in rev.get("contestados") or []:
+                if isinstance(c, dict) and anterior and str(c.get("risco") or "").strip() == anterior:
+                    objecoes.append({"papel": rev["papel"], "tipo": "contestado", "motivo": str(c.get("motivo") or "").strip(),
+                                     "fatos": [str(f) for f in c.get("fatos") or []]})
+        risco["revisao"] = {"origem": origem, "objecoes": objecoes, "agentes": len(validas),
+                            "sem_objecao": len(validas) - len({o["papel"] for o in objecoes}),
+                            "contestado": any(o["tipo"] == "contestado" for o in objecoes)}
+    return riscos_finais
 
 
 def consolidar(modelo, texto_material, analise, revisoes, uso):
@@ -237,7 +283,8 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
             nota = min(nota, 5)
         riscos.append({**{c: str(r.get(c) or "").strip() for c in ("titulo", "causa", "consequencia", "em_jogo", "prazo",
                                                                   "em_curso", "decisao", "quem_decide")},
-                       "id_original": str(r.get("id") or f"R{k}"), "categoria": r.get("categoria")
+                       "id_original": str(r.get("id") or f"R{k}"), "id_anterior": str(r.get("id_anterior") or "").strip(),
+                       "categoria": r.get("categoria")
                        if r.get("categoria") in CATEGORIAS else "Continuidade de serviço",
                        "impacto": impacto, "chance": r.get("chance") if r.get("chance") in ("Alta", "Média", "Baixa")
                        else "Média", "fatos": validos, "fatos_invalidos": [f for f in citados if f not in validos],

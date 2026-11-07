@@ -20,8 +20,8 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from transicao import VERSAO, analise, entrada
-from transicao.config import MODELOS
+from transicao import VERSAO, analise, entrada, modelo
+from transicao.config import FAMILIAS, MODELOS, esquema_de_modelos, familias_disponiveis
 
 load_dotenv()
 
@@ -192,18 +192,36 @@ if not SENHA:
 
 with st.sidebar:
     st.header("Modelos")
-    modelo_pesquisa = st.selectbox("Pesquisa em fontes públicas", MODELOS, index=MODELOS.index("anthropic/claude-haiku-5-5"),
+    # Qualidade primeiro: o modelo mais forte em todas as etapas. O modo econômico (abaixo) só muda o tempo.
+    modelo_pesquisa = st.selectbox("Pesquisa em fontes públicas", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"),
                                    help="Busca na web e monta o dossiê. A Anthropic cobra US$ 10 por mil buscas, além dos tokens.")
-    modelo_auxiliar = st.selectbox("Auxiliar", MODELOS, index=MODELOS.index("anthropic/claude-sonnet-5-5"),
-                                   help="Diagnóstico, calendário, confronto com o relatório e revisão de neutralidade.")
-    modelo_debate = st.selectbox("Riscos e agentes", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"),
-                                 help="Escreve a análise de riscos, faz os cinco agentes revisores e a consolidação.")
+    modelo_auxiliar = st.selectbox("Extrações", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"),
+                                   help="Diagnóstico, checklist, contratos críticos, calendário e confronto com o relatório.")
+    modelo_debate = st.selectbox("Riscos e consolidação", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"),
+                                 help="Escreve a análise de riscos e consolida as revisões dos agentes.")
     modelos_agentes = st.text_input(
         "Modelos dos agentes revisores (opcional)", value="",
-        placeholder="ex.: anthropic/claude-opus-5-5, gemini/gemini-2.5-pro, openai/gpt-5",
-        help="Nomes de modelos (LiteLLM) separados por vírgula, que se revezam entre os cinco agentes. Vazio: todos "
-             "usam o modelo de riscos. Modelos de outros provedores precisam da chave deles nos Secrets "
+        placeholder="ex.: anthropic/claude-opus-5-5, gemini/gemini-4-argon, openai/gpt-6-astra",
+        help="Nomes de modelos (LiteLLM) separados por vírgula, que se revezam entre os seis agentes. Vazio: o esquema "
+             "automático abaixo. Modelos de outros provedores precisam da chave deles nos Secrets "
              "(GEMINI_API_KEY, OPENAI_API_KEY) e não entram na estimativa de custo.")
+    familias = familias_disponiveis()
+    esquema = esquema_de_modelos(modelo_debate, modelo_auxiliar, [m.strip() for m in modelos_agentes.split(",") if m.strip()],
+                                 familias)
+    if esquema["independente"]:
+        st.caption("✅ Revisão independente: agentes em " + ", ".join(sorted({m.split("/")[0] for m in esquema["agentes"]}))
+                   + f"; neutralidade por {esquema['neutralidade']}.")
+    else:
+        faltam = ", ".join(FAMILIAS[f]["chave"] for f in FAMILIAS if f not in familias)
+        st.caption(f"⚠️ Todos os agentes na mesma família ({modelo_debate.split('/')[0]}): os pontos cegos do modelo se "
+                   f"repetem nos seis. Para revisão independente, defina {faltam} nos Secrets.")
+    if st.button("Testar modelos e chaves", help="Chama cada modelo do esquema com uma palavra. Confira antes de uma "
+                                                   "rodada grande: nome errado ou chave inválida aparecem aqui."):
+        with st.spinner("Chamando cada modelo..."):
+            testes = modelo.testar_modelos([modelo_pesquisa, modelo_auxiliar, modelo_debate, esquema["neutralidade"]]
+                                           + esquema["agentes"])
+        for nome_modelo, situacao in testes.items():
+            (st.success if situacao == "ok" else st.error)(f"{nome_modelo}: {situacao}")
     economico = st.checkbox("Modo econômico (Batch API)", value=True,
                             help="Metade do preço dos tokens. Cada etapa espera a fila da Anthropic: o total leva de "
                                  "uma a algumas horas, com todos os órgãos em paralelo.")
@@ -342,6 +360,7 @@ if not trabalho or trabalho["situacao"] != "rodando":
                              disabled=not escolhidos):
                     cfg = {"modelo_pesquisa": modelo_pesquisa, "modelo_auxiliar": modelo_auxiliar, "modelo": modelo_debate,
                            "modelos_agentes": [m.strip() for m in modelos_agentes.split(",") if m.strip()],
+                           "familias": familias,
                            "data_corte": data_corte.strftime("%d/%m/%Y"),
                            "foco": foco.strip(), "orgao_emissor": orgao_emissor, "unidade": unidade, "para": para}
                     try:

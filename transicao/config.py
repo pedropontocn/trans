@@ -42,9 +42,45 @@ PRECO_BUSCA_ANTHROPIC = 0.01
 MIN_ITENS_DOSSIE = 5
 
 
-# Modelos de outros provedores para os agentes revisores (nomes do LiteLLM). Cada um precisa da chave do provedor no
-# .env ou nos Secrets (GEMINI_API_KEY, OPENAI_API_KEY...). O custo desses modelos não é estimado (não estão em PRECOS).
-MODELOS_OUTROS_PROVEDORES = ["gemini/gemini-2.5-pro", "openai/gpt-5"]
+# --- ESQUEMA DE MODELOS -------------------------------------------------------------------------
+# Princípio: quem produz não confere, e quem confere não é da mesma família de quem produziu. O código já confere o
+# modelo; entre modelos, a independência vem de famílias diferentes nos revisores. Cada família de fora precisa da
+# chave do provedor no .env ou nos Secrets; sem a chave, a etapa cai para o modelo principal (Anthropic).
+# Modelos de ponta de cada família em novembro de 2026 (changelogs da OpenAI e do Google): gpt-6-astra ("our most
+# capable model") e gemini-4-argon ("our most capable model"). Nomes no formato do LiteLLM; atualizar quando mudarem.
+FAMILIAS = {
+    "openai": {"chave": "OPENAI_API_KEY", "modelo": "openai/gpt-6-astra"},
+    "gemini": {"chave": "GEMINI_API_KEY", "modelo": "gemini/gemini-4-argon"},
+}
+
+# Família de cada agente revisor, na ordem de PAPEIS (riscos.py): o autor da análise (Anthropic) tem um voto entre
+# seis, e nenhuma família tem maioria. O advogado do diabo e o controle jurídico, os papéis mais adversariais, ficam
+# com famílias de fora.
+FAMILIA_POR_AGENTE = ["anthropic", "openai", "gemini", "openai", "gemini", "openai"]
+
+
+def familias_disponiveis(ambiente=None):
+    """As famílias de fora com chave configurada."""
+    import os
+    ambiente = os.environ if ambiente is None else ambiente
+    return [f for f, dados in FAMILIAS.items() if (ambiente.get(dados["chave"]) or "").strip()]
+
+
+def esquema_de_modelos(principal, auxiliar, lista=None, familias=None):
+    """Os modelos de cada etapa de revisão. lista: modelos informados à mão, que se revezam entre os agentes (vale
+    sobre o esquema). Sem lista, cada agente usa a família de FAMILIA_POR_AGENTE se a chave existir, senão o principal.
+    A neutralidade vai para a primeira família de fora disponível; sem nenhuma, para o auxiliar (ao menos um modelo
+    diferente do que escreveu)."""
+    familias = familias_disponiveis() if familias is None else familias
+    lista = [m.strip() for m in (lista or []) if str(m or "").strip()]
+    if lista:
+        agentes = [lista[k % len(lista)] for k in range(len(FAMILIA_POR_AGENTE))]
+    else:
+        agentes = [FAMILIAS[f]["modelo"] if f in familias else principal for f in FAMILIA_POR_AGENTE]
+    de_fora = [FAMILIAS[f]["modelo"] for f in FAMILIAS if f in familias]
+    neutralidade = de_fora[0] if de_fora else (auxiliar if auxiliar != principal else principal)
+    return {"agentes": agentes, "neutralidade": neutralidade, "familias": familias,
+            "independente": len({m.split("/")[0] for m in agentes}) > 1}
 
 
 # Sem o modo econômico, quantas secretarias rodam ao mesmo tempo. Cada uma já faz até 8 chamadas em paralelo

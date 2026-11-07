@@ -17,7 +17,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from . import checklist, confronto as conf, documentos, entrada, modelo, painel, pesquisa, produtos, riscos, verificacao
-from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO
+from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO, esquema_de_modelos
 
 JUNTAS = False          # no modo econômico, as etapas independentes vão juntas para a mesma fila da Batch API
 
@@ -92,12 +92,14 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     analise = riscos.analisar(principal, material, uso)
     if not analise.get("riscos"):
         raise ErroAnalise("a análise de riscos não devolveu riscos legíveis")
-    progresso("Cinco agentes revisando a análise...")
-    modelos_agentes = riscos.modelos_dos_agentes(principal, cfg.get("modelos_agentes"))
+    progresso("Seis agentes revisando a análise (cinco olhares e o advogado do diabo)...")
+    esquema = esquema_de_modelos(principal, auxiliar, cfg.get("modelos_agentes"), cfg.get("familias"))
+    modelos_agentes = esquema["agentes"]
     revisoes = riscos.revisar_por_agentes(principal, material, analise, uso, modelos_agentes)
     progresso("Consolidando...")
     final = riscos.consolidar(principal, material, analise, revisoes, uso)
     resultado = riscos.conferir_e_ordenar(final, diagnostico, vencimentos, dossie, cfg["data_corte"])
+    riscos.proveniencia(resultado["riscos"], revisoes, analise)      # quem apontou e quem contestou cada risco
     confianca = riscos.confianca(resumo_dos, resultado["riscos"], cobertura)
 
     ficha = produtos.ficha_contratos(eventos)
@@ -109,7 +111,9 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     base = "\n".join([pesquisa.texto_dossie(dossie), relatorio, material])
     numeros = verificacao.verificar_numeros(corpo, base)
     progresso("Revisando a neutralidade...")
-    neutralidade = _seguro(lambda: riscos.revisar_neutralidade(auxiliar, corpo, uso), {"modelo": auxiliar})()
+    # neutralidade: um modelo de outra família, quando há chave; no mínimo, um diferente do que escreveu
+    neutralidade = _seguro(lambda: riscos.revisar_neutralidade(esquema["neutralidade"], corpo, uso),
+                           {"modelo": esquema["neutralidade"]})()
 
     uso_total = list(dossie.get("uso") or []) + uso
     custo, parcial = modelo.custo_estimado(uso_total)
@@ -119,7 +123,8 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
                                  + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO).encode()).hexdigest()[:8]
     registro_id = f"{versao_prompt}-{hashlib.md5((material + relatorio).encode()).hexdigest()[:8]}"
     modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal,
-               "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes))}
+               "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes)),
+               "neutralidade": esquema["neutralidade"], "familias_de_fora": esquema["familias"]}
     texto_doc = documentos.documento_secretaria(
         resultado, diagnostico, ficha, eventos, dossie, confronto, checklist.markdown(cobertura),
         documentos.nota_final(registro_id, modelos, confianca, cfg["data_corte"], neutralidade, revisoes),
