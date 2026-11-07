@@ -246,6 +246,15 @@ class LLMFalso:
         if "Você é analista de riscos" in sistema:
             self.material_riscos = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.analise_riscos) + "[FIM DO JSON]")
+        if "Você é o ADVOGADO DO DIABO" in sistema:
+            with self.trava:
+                self.agentes_vistos = getattr(self, "agentes_vistos", []) + ["Advogado do diabo"]
+            if "Advogado do diabo" in self.agentes_que_falham:
+                raise RuntimeError("agente fora do ar")
+            return self._resp("[INÍCIO DO JSON]" + json.dumps({
+                "contestados": [{"risco": "R2", "motivo": "o risco inventado não tem fato no material", "fatos": ["F1"]}],
+                "sustentados": ["R1"],
+                "decisoes": [{"decisao": "Q1", "opcao": 1, "teme": "licitar sem caixa", "valoriza": ""}]}) + "[FIM DO JSON]")
         if "Você revisa a análise de riscos" in sistema:
             papel = re.search(r"VOCÊ É: ([^.]+)\.", sistema).group(1)
             with self.trava:
@@ -255,9 +264,11 @@ class LLMFalso:
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.revisao_agente) + "[FIM DO JSON]")
         if "Você consolida a análise de riscos" in sistema:
             self.pedido_consolidacao = ultimo
-            final = self.consolidacao_riscos or dict(self.analise_riscos, decisoes=[dict(
-                q, visoes=[{"papel": "Fazenda e orçamento", "teme": "custo", "valoriza": "rapidez"}])
-                for q in self.analise_riscos["decisoes"]])
+            final = self.consolidacao_riscos or dict(
+                self.analise_riscos,
+                riscos=[dict(r, id_anterior=r["id"]) for r in self.analise_riscos["riscos"]],
+                decisoes=[dict(q, visoes=[{"papel": "Fazenda e orçamento", "teme": "custo", "valoriza": "rapidez"}])
+                          for q in self.analise_riscos["decisoes"]])
             return self._resp("[INÍCIO DO JSON]" + json.dumps(final) + "[FIM DO JSON]")
         if "TEMAS TRANSVERSAIS" in sistema:
             self.pedido_temas = ultimo

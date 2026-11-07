@@ -117,7 +117,7 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert "| Contrato 99/2026 |" in md and "Contrato 7/2025" not in md and "Contrato sem origem" not in md
     assert "Anexo 3 – Como este documento foi feito" in r["registro"]["metodo_md"]       # o método fica na auditoria
     reg = r["registro"]
-    assert len(reg["revisoes_dos_agentes"]) == 5 and r["agentes"] == 5                 # cinco agentes independentes
+    assert len(reg["revisoes_dos_agentes"]) == 6 and r["agentes"] == 6                 # cinco olhares e o advogado do diabo
     assert sorted(llm.agentes_vistos) == sorted(p[1] for p in __import__("transicao.riscos", fromlist=["x"]).PAPEIS)
     assert "Fazenda e orçamento" in llm.pedido_consolidacao or "teme" in llm.pedido_consolidacao
     riscos = reg["riscos"]["riscos"]
@@ -125,6 +125,9 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     inventado = next(x for x in riscos if x["titulo"] == "Risco inventado")
     assert inventado["firmeza"] == "sem comprovação" and inventado["fatos_invalidos"] == ["F99"]
     assert inventado["prioridade"] in ("Média", "Baixa")                               # sem base, no máximo Média
+    assert inventado["revisao"]["contestado"] and "Advogado do diabo contesta: o risco inventado" in md
+    assert riscos[0]["revisao"] == {"origem": "análise", "objecoes": [], "agentes": 6, "sem_objecao": 6, "contestado": False}
+    assert reg["modelos"]["neutralidade"] == CFG["modelo_auxiliar"] and len(reg["modelos"]["agentes"]) == 6
     assert "| Fazenda e orçamento | custo | rapidez |" in md                              # o olhar de cada agente, no anexo
     assert "[F" in llm.material_riscos and "DIAGNÓSTICO:" in llm.material_riscos
     assert reg["verificacao"]["neutralidade"]["recomendacoes_implicitas"][0]["trecho"].startswith("Retomar")
@@ -165,7 +168,7 @@ def test_agente_fora_do_ar_nao_derruba_a_analise(llm):
     from transicao import analise
     llm.agentes_que_falham = {"Operação e servidores"}
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
-    assert r["agentes"] == 4 and "4 agente(s) independente(s)" in r["documento_md"]
+    assert r["agentes"] == 5 and "5 agente(s) independente(s)" in r["documento_md"]
     assert "sem resposta: Operação e servidores" in r["registro"]["metodo_md"]
 
 

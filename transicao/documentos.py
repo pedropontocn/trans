@@ -617,6 +617,8 @@ def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
                     f"**Em curso:** {r['em_curso']}" if r.get("em_curso") else "",
                     f"**Base:** {r['firmeza']}" + (f" ({', '.join(r['fatos'])})" if r.get("fatos") else "")]
         linhas.append("- " + " · ".join(d for d in detalhes if d))
+        if r.get("revisao"):
+            linhas.append("- " + _linha_revisao(r["revisao"]))
         linhas.append(f"- **Decisão:** {r['decisao']}" + (f" — {r['quem_decide']}" if r.get("quem_decide") else ""))
     if len(riscos) > limite_detalhe:
         linhas += ["### Outros riscos a acompanhar", "| Risco | Categoria | Prioridade | Prazo | Base |", "|---|---|---|---|---|"]
@@ -640,14 +642,25 @@ def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
     return "\n".join(linhas)
 
 
+def _linha_revisao(rev):
+    """Quem apontou e quem contestou o risco, para o leitor pesar: 'Revisão: 5 de 6 agentes sem objeção; Advogado do
+    diabo contesta: ...'."""
+    partes = [f"**Revisão:** {rev['sem_objecao']} de {rev['agentes']} agentes sem objeção"
+              + (f" ({rev['origem']})" if rev.get("origem") and rev["origem"] != "análise" else "")]
+    for o in rev.get("objecoes") or []:
+        verbo = "contesta" if o["tipo"] == "contestado" else "vê exagero"
+        partes.append(f"{o['papel']} {verbo}: {o['motivo']}" + (f" ({', '.join(o['fatos'])})" if o.get("fatos") else ""))
+    return "; ".join(partes) + "."
+
+
 def markdown_visoes(resultado):
     """Anexo B: o que cada olhar de gestão teme e valoriza em cada decisão, em tabela."""
     decisoes = [q for q in resultado.get("decisoes") or [] if q.get("visoes")]
     if not decisoes:
         return ""
     linhas = ["## Anexo B – O que cada olhar de gestão teme e valoriza",
-              "Cinco agentes independentes, cada um com um olhar (Fazenda; controle e jurídico; área-fim; operação; nova "
-              "gestão), leram a análise sem ver uns aos outros. Nenhum escolhe uma opção."]
+              "Seis agentes independentes, cada um com um olhar (Fazenda; controle e jurídico; área-fim; operação; nova "
+              "gestão; advogado do diabo), leram a análise sem ver uns aos outros. Nenhum escolhe uma opção."]
     for q in decisoes:
         linhas += [f"**{q['id']}. {q['pergunta']}**", "| Olhar | Teme | Valoriza |", "|---|---|---|"]
         linhas += [f"| {v['papel']} | {v.get('teme') or '–'} | {v.get('valoriza') or '–'} |" for v in q["visoes"]]
