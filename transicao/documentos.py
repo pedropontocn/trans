@@ -770,11 +770,15 @@ def markdown_metodo(registro_id, modelos, resumo_dossie, confianca, numeros, neu
     opinaram = [r["papel"] for r in revisoes or [] if not r.get("erro")]
     falharam = [r["papel"] for r in revisoes or [] if r.get("erro")]
     usados = sorted({r.get("modelo") for r in revisoes or [] if r.get("modelo")})
+    substitutos = [f"{r['papel']} (previsto {r['modelo_previsto']}: {r.get('erro_do_previsto', '')[:60]})"
+                   for r in revisoes or [] if r.get("substituto")]
     linhas.append(f"- **Agentes que revisaram:** {len(opinaram)} de {len(revisoes or [])}"
                   + (f" (sem resposta: {', '.join(falharam)})" if falharam else "")
                   + (f". Modelos dos agentes: {', '.join(usados)}" + (" (provedores diferentes: os pontos cegos de um "
                      "modelo não se repetem nos cinco)" if len({m.split('/')[0] for m in usados}) > 1 else "")
-                     if usados else "") + ".")
+                     if usados else "")
+                  + (f". Rodaram no modelo principal porque o previsto falhou: {'; '.join(substitutos)}" if substitutos else "")
+                  + ".")
     invalidos = sorted({f for r in resultado.get("riscos") or [] for f in r.get("fatos_invalidos") or []})
     if invalidos:
         linhas.append(f"- **Referências citadas que não existem no material (ignoradas):** {', '.join(invalidos)}.")
@@ -881,11 +885,16 @@ def ids_citados(diag, resultado, contratos_criticos=None):
 def nota_final(registro_id, modelos, confianca, data_corte, neutralidade=None, revisoes=None):
     """Uma linha de proveniência no fim do documento. O método completo fica na auditoria."""
     agentes = sum(1 for r in revisoes or [] if not r.get("erro"))
+    familias = {r["modelo"].split("/")[0] for r in revisoes or [] if not r.get("erro") and r.get("modelo")}
+    substitutos = [r["papel"] for r in revisoes or [] if r.get("substituto")]
     partes = [f"Apoio à decisão gerado com IA (registro {registro_id}; {modelos.get('auxiliar')} e {modelos.get('debate')}) "
               f"a partir do dossiê de fontes públicas, dados do SIGA/PNCP e do que a secretaria informou, com data de "
               f"corte {data_corte or 'não informada'}. Não recomenda decisões. Confiança da análise: {confianca['nivel']} "
               f"({'; '.join(confianca['motivos'])}).",
-              f"{agentes} agente(s) independente(s) revisaram a análise." if revisoes else "",
+              (f"{agentes} agente(s) independente(s) revisaram a análise"
+               + (f", em {len(familias)} famílias de modelos" if len(familias) > 1 else ", todos na mesma família de modelos")
+               + (f"; {len(substitutos)} rodaram no modelo principal porque o previsto falhou ({', '.join(substitutos)})"
+                  if substitutos else "") + ".") if revisoes else "",
               f"Revisão de neutralidade: {neutralidade['avaliacao_geral'].replace('_', ' ')}."
               if neutralidade and not neutralidade.get("erro") and neutralidade.get("avaliacao_geral") else "",
               "Método, conferências por código e revisões completas no arquivo de auditoria. Gerado em processamento "

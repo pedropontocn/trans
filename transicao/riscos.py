@@ -178,15 +178,29 @@ def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
 
     def um(papel, modelo_agente):
         _, nome, criterio = papel
+        sistema = PROMPT_CONTRA if nome == PAPEL_CONTRA else PROMPT_AGENTE.format(
+            papel=nome, criterio=criterio, esquema=ESQUEMA_RISCO)
+        mensagens = [{"role": "system", "content": sistema}, {"role": "user", "content": pedido}]
         try:
-            sistema = PROMPT_CONTRA if nome == PAPEL_CONTRA else PROMPT_AGENTE.format(
-                papel=nome, criterio=criterio, esquema=ESQUEMA_RISCO)
-            r = chamar_json(modelo_agente, [{"role": "system", "content": sistema},
-                                            {"role": "user", "content": pedido}], 6000, etapa=f"agente: {nome}",
-                            uso_lista=uso)
+            r = chamar_json(modelo_agente, mensagens, 6000, etapa=f"agente: {nome}", uso_lista=uso)
+            if not isinstance(r, dict):
+                raise ValueError("resposta ilegível")
+            return {"papel": nome, "modelo": modelo_agente, **r}
         except Exception as e:
-            return {"papel": nome, "modelo": modelo_agente, "erro": f"{type(e).__name__}: {e}"[:200]}
-        return {"papel": nome, "modelo": modelo_agente, **(r if isinstance(r, dict) else {"erro": "resposta ilegível"})}
+            erro = f"{type(e).__name__}: {e}"[:200]
+        if modelo_agente == modelo:
+            return {"papel": nome, "modelo": modelo_agente, "erro": erro}
+        # o modelo de outra família falhou (cota, instabilidade, saldo): o olhar não se perde, roda no principal, e
+        # fica registrado que esta revisão não foi independente
+        try:
+            r = chamar_json(modelo, mensagens, 6000, etapa=f"agente: {nome} (substituto)", uso_lista=uso)
+            if not isinstance(r, dict):
+                raise ValueError("resposta ilegível")
+            return {"papel": nome, "modelo": modelo, "modelo_previsto": modelo_agente, "substituto": True,
+                    "erro_do_previsto": erro, **r}
+        except Exception as e:
+            return {"papel": nome, "modelo": modelo, "modelo_previsto": modelo_agente,
+                    "erro": f"{erro}; substituto: {type(e).__name__}: {e}"[:300]}
     return _em_paralelo([lambda p=p, m=m: um(p, m) for p, m in zip(PAPEIS, modelos)])
 
 
