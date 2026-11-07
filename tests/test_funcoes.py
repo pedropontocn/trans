@@ -253,7 +253,10 @@ def test_fontes_no_anexo_com_links_e_selos(funcoes):
                                    "trecho_relatorio": "100 obras", "as_fontes_mostram": "80 obras"}]}
     anexo = funcoes.markdown_fontes(d, confronto, citados={"O1", "E1"}, cobertura_md="## Cobertura\n| tabela |")
     assert anexo.startswith("## Anexo A – Cobertura e fontes\n| tabela |") and "\n# " not in anexo
-    assert "**As fontes mostram:** 80 obras" in anexo and "- **O1** " in anexo and "- **O2** " not in anexo
+    assert "**As fontes mostram:** 80 obras" in anexo and " — O1" in anexo and "O2" not in anexo.split("**O que o órgão")[0]
+    # uma linha por página, com os ids dos fatos que ela sustenta
+    todos = funcoes.markdown_fontes(d, None)
+    assert todos.count("\n- ") < len(funcoes.itens_incluidos(d))
     assert "Visão geral" not in anexo and "Sobre este dossiê" not in anexo               # sem explicação de método
 
 
@@ -399,17 +402,19 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
                                       "## 4. Orçamento, obras e estrutura", "### Estrutura e dirigentes",
                                       "## 5. Riscos e decisões urgentes", "### R1. Risco 1", "### Outros riscos a acompanhar",
                                       "### Decisões em aberto", "### Pedir à secretaria", "## Anexo A", "| tabela |",
-                                      "## Anexo B", "| Controle e jurídico (TCE-RJ, PGE, MPRJ) | aditivo irregular | legalidade |",
                                       "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
     assert texto.count("| Contrato 1/2026 |") == 1                                  # o repetido da planilha não entra duas vezes
     assert len(re.findall(r"^### R\d", texto, re.M)) == 5 and "| R6. Risco 6 |" in texto            # 5 em detalhe, o resto na tabela
     assert "**Em curso:** aditivo publicado" in texto and "_Não se sabe:_ Organograma atualizado" in texto
     assert "Sobre este documento" not in texto and "Como este documento foi feito" not in texto
-    assert "teme aditivo irregular" not in texto.split("## Anexo B")[0]             # os olhares só no anexo
+    assert "teme aditivo irregular" not in texto and "Anexo B" not in texto      # os olhares só no arquivo de anexos
+    anexos = funcoes.anexos_secretaria(resultado, d, None, "## Anexo 3 – Como este documento foi feito\nx")
+    assert "| Controle e jurídico (TCE-RJ, PGE, MPRJ) | aditivo irregular | legalidade |" in anexos
+    assert "## Todas as fontes do dossiê" in anexos and anexos.rstrip().endswith("x")
     doc = docx.Document(io.BytesIO(funcoes.gerar_docx(texto, {"orgao": "Equipe", "assunto": "Secretaria de Exemplo"})))
     quebras = sum('w:br w:type="page"' in p._p.xml for p in doc.paragraphs)
-    assert quebras == 2                                                           # só os anexos em página nova
+    assert quebras == 1                                                           # só o anexo em página nova
 
 
 def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):
@@ -598,8 +603,20 @@ def test_proveniencia_de_cada_risco_por_codigo(funcoes):
     assert r["R3"]["origem"] == "apontado por Área-fim e usuário do serviço" and r["R3"]["sem_objecao"] == 3
     assert r["R4"]["origem"] == "análise" and r["R4"]["objecoes"] == []          # id_anterior desconhecido: só a contagem
     linha = funcoes._linha_revisao(r["R1"])
-    assert linha.startswith("**Revisão:** 1 de 3 agentes sem objeção; Fazenda e orçamento vê exagero: valor pequeno; "
-                            "Advogado do diabo contesta: já resolvido (F4).")
+    assert linha == ("**Revisão:** 1 de 3 agentes sem objeção (1 vê exagero); Advogado do diabo contesta: já resolvido (F4) "
+                     "→ consolidação: sem resposta registrada.")
+    completo = funcoes.markdown_objecoes({"riscos": [{"id": "R1", "titulo": "T", "revisao": r["R1"]}]})
+    assert "- Fazenda e orçamento vê exagero: valor pequeno → consolidação: sem resposta registrada" in completo
+    # com a resposta da consolidação, ela aparece; sem id_anterior, o casamento é pelo título
+    consolidado = {"respostas_as_revisoes": [{"agente": "Advogado do diabo", "risco": "R2", "decisao": "não acatado",
+                                               "motivo": "o aditivo não foi publicado"}]}
+    analise2 = {"riscos": [{"id": "R1", "titulo": "Licitações adiadas travam obras"}, {"id": "R2", "titulo": "Frota vence em dezembro"}]}
+    finais2 = [{"id": "R1", "titulo": "Frota vence em dezembro sem aditivo"}, {"id": "R2", "titulo": "Convênios da Caixa pendentes"}]
+    revisoes2 = revisoes + [{"papel": "Nova gestão: prioridades e articulação",
+                             "faltando": [{"titulo": "Convênios da Caixa com pendências"}]}]
+    funcoes.proveniencia(finais2, revisoes2, analise2, consolidado)
+    assert finais2[0]["revisao"]["objecoes"][-1]["resposta"] == "não acatado (o aditivo não foi publicado)"
+    assert finais2[1]["revisao"]["origem"] == "apontado por Nova gestão: prioridades e articulação"
 
 
 def test_agente_de_outra_familia_que_falha_roda_no_principal(funcoes, llm):

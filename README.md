@@ -13,7 +13,8 @@ Um `.zip` com:
 | Arquivo | O que é |
 |---|---|
 | `painel_estadual.docx` | As urgências de todas as secretarias na mesma régua: ranking, temas que se repetem, mapa de calor por categoria e cronograma de quando agir |
-| `documentos/<secretaria>.docx` | **Um documento curto por secretaria**: resumo executivo (situação, números-chave, riscos mais urgentes, decisões em aberto, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. Riscos e decisões; anexos só com dados (cobertura e fontes citadas, olhares dos agentes, vencimentos). O método fica no arquivo de auditoria |
+| `documentos/<secretaria>.docx` | **O memorando executivo de cada secretaria, só com dados**: resumo executivo (situação, números-chave, riscos mais urgentes, decisões em aberto, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. Riscos e decisões (cada risco com quem objetou e a contestação do advogado do diabo); Anexo A com cobertura do checklist e fontes citadas; Anexo C com prazos que não são contratos |
+| `documentos/<secretaria>_anexos.docx` | Para quem quer aprofundar: o que cada agente temeu e valorizou em cada decisão, as objeções risco a risco com a resposta da consolidação, todas as fontes do dossiê e o método |
 | `calendario_consolidado.xlsx` | Os vencimentos de todas as secretarias; a aba Prioridades vem primeiro |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
 | `auditoria/` | O registro completo de cada análise (inclusive a revisão de cada agente), para conferência técnica |
