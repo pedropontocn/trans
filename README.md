@@ -85,10 +85,11 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    quem fez objeção ("5 de 6 agentes sem objeção; advogado do diabo contesta: ..."), e isso aparece no documento.
 
    **Esquema de modelos.** Quem produz não confere, e quem confere não é da mesma família de quem produziu. Com as
-   chaves `OPENAI_API_KEY` e `GEMINI_API_KEY` nos Secrets, os agentes se distribuem entre Anthropic, OpenAI e Google
-   (o autor da análise tem um voto entre seis; nenhuma família tem maioria; o advogado do diabo e o controle jurídico
-   ficam com famílias de fora) e a revisão de neutralidade vai para outra família. Sem as chaves, tudo roda na
-   Anthropic e a barra lateral avisa. A lista de modelos na barra lateral vale sobre o esquema.
+   chaves de outras famílias nos Secrets (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, qualquer
+   combinação), os agentes se repartem: o advogado do diabo e o controle jurídico vão para fora primeiro, e a
+   Anthropic, que escreveu a análise, nunca tem maioria (com uma família de fora, 3 a 3; com duas, fica com um
+   agente). A revisão de neutralidade vai para outra família. Sem nenhuma chave, tudo roda na Anthropic e a barra
+   lateral avisa. A lista de modelos na barra lateral vale sobre o esquema.
 7. **Consolidação e conferência.** Uma consolidação junta as revisões; o código confere os fatos citados por cada
    risco, dá a firmeza da informação e calcula a prioridade. Um segundo modelo revisa a neutralidade.
 8. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
