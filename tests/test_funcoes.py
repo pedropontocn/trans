@@ -541,22 +541,25 @@ def test_pesquisa_recebe_os_pontos_obrigatorios_do_checklist(funcoes, llm):
 
 def test_esquema_de_modelos_por_familia(funcoes):
     opus, sonnet = "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5"
+    gpt, gem, dsk = "openai/gpt-6-astra", "gemini/gemini-4-argon", "deepseek/deepseek-reasoner"
+    # ordem dos papéis: fiscal, controle, servico, operacao, governo, contra
     # sem chave de fora: todos os agentes no principal e a neutralidade no auxiliar (ao menos outro modelo)
     e = funcoes.esquema_de_modelos(opus, sonnet, [], [])
     assert e["agentes"] == [opus] * 6 and e["neutralidade"] == sonnet and not e["independente"]
-    # com as duas chaves: o esquema por papel, nenhuma família com maioria, neutralidade fora da Anthropic
-    e = funcoes.esquema_de_modelos(opus, sonnet, [], ["openai", "gemini"])
-    assert e["agentes"] == [opus, "openai/gpt-6-astra", "gemini/gemini-4-argon", "openai/gpt-6-astra", "gemini/gemini-4-argon", "openai/gpt-6-astra"]
-    assert e["neutralidade"] == "openai/gpt-6-astra" and e["independente"]
-    assert max(e["agentes"].count(m) for m in set(e["agentes"])) <= 3
-    # só uma chave: os papéis da família que falta caem para o principal
+    # uma família de fora: 3 a 3, com o advogado do diabo e o controle fora
     e = funcoes.esquema_de_modelos(opus, sonnet, [], ["gemini"])
-    assert e["agentes"] == [opus, opus, "gemini/gemini-4-argon", opus, "gemini/gemini-4-argon", opus]
-    assert e["neutralidade"] == "gemini/gemini-4-argon"
+    assert e["agentes"] == [opus, gem, gem, opus, opus, gem] and e["neutralidade"] == gem and e["independente"]
+    # duas (sem OpenAI): a primeira na ordem de preferência leva os papéis adversariais; Anthropic fica com um
+    e = funcoes.esquema_de_modelos(opus, sonnet, [], ["deepseek", "gemini"])
+    assert e["agentes"] == [opus, gem, dsk, gem, dsk, gem] and e["neutralidade"] == gem
+    # três: nenhuma família com mais de dois agentes
+    e = funcoes.esquema_de_modelos(opus, sonnet, [], ["openai", "gemini", "deepseek"])
+    assert e["agentes"] == [opus, gpt, gem, dsk, gem, gpt] and e["neutralidade"] == gpt
+    assert max(e["agentes"].count(m) for m in set(e["agentes"])) == 2
     # lista informada à mão vale sobre o esquema
     e = funcoes.esquema_de_modelos(opus, sonnet, ["a", " b "], ["openai"])
     assert e["agentes"] == ["a", "b", "a", "b", "a", "b"]
-    assert funcoes.familias_disponiveis({"OPENAI_API_KEY": "x", "GEMINI_API_KEY": " "}) == ["openai"]
+    assert funcoes.familias_disponiveis({"OPENAI_API_KEY": "x", "GEMINI_API_KEY": " ", "DEEPSEEK_API_KEY": "y"}) == ["openai", "deepseek"]
 
 
 def test_agentes_podem_usar_modelos_diferentes(funcoes, llm):

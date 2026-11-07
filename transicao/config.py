@@ -46,17 +46,24 @@ MIN_ITENS_DOSSIE = 5
 # Princípio: quem produz não confere, e quem confere não é da mesma família de quem produziu. O código já confere o
 # modelo; entre modelos, a independência vem de famílias diferentes nos revisores. Cada família de fora precisa da
 # chave do provedor no .env ou nos Secrets; sem a chave, a etapa cai para o modelo principal (Anthropic).
-# Modelos de ponta de cada família em novembro de 2026 (changelogs da OpenAI e do Google): gpt-6-astra ("our most
-# capable model") e gemini-4-argon ("our most capable model"). Nomes no formato do LiteLLM; atualizar quando mudarem.
+# Famílias de fora, em ordem de preferência, com o modelo de ponta de cada uma (nomes no formato do LiteLLM; os da
+# OpenAI e do Google são os "most capable" dos changelogs oficiais em nov/2026; os da DeepSeek são apelidos estáveis).
 FAMILIAS = {
     "openai": {"chave": "OPENAI_API_KEY", "modelo": "openai/gpt-6-astra"},
     "gemini": {"chave": "GEMINI_API_KEY", "modelo": "gemini/gemini-4-argon"},
+    "deepseek": {"chave": "DEEPSEEK_API_KEY", "modelo": "deepseek/deepseek-reasoner"},
 }
 
-# Família de cada agente revisor, na ordem de PAPEIS (riscos.py): o autor da análise (Anthropic) tem um voto entre
-# seis, e nenhuma família tem maioria. O advogado do diabo e o controle jurídico, os papéis mais adversariais, ficam
-# com famílias de fora.
-FAMILIA_POR_AGENTE = ["anthropic", "openai", "gemini", "openai", "gemini", "openai"]
+# Quem fica com cada papel (chaves de PAPEIS em riscos.py), conforme quantas famílias de fora têm chave. Os papéis
+# mais adversariais (advogado do diabo, controle jurídico) vão primeiro para fora; o autor da análise (Anthropic)
+# nunca tem maioria quando há ao menos uma família de fora. O número é o índice da família de fora, na ordem em que
+# estão disponíveis; papel ausente fica com o principal.
+DISTRIBUICAO = {
+    0: {},
+    1: {"contra": 0, "controle": 0, "servico": 0},                                   # 3 fora, 3 Anthropic
+    2: {"contra": 0, "controle": 0, "operacao": 0, "servico": 1, "governo": 1},      # 3 + 2, 1 Anthropic
+    3: {"contra": 0, "controle": 0, "servico": 1, "governo": 1, "operacao": 2},      # 2 + 2 + 1, 1 Anthropic
+}
 
 
 def familias_disponiveis(ambiente=None):
@@ -66,18 +73,23 @@ def familias_disponiveis(ambiente=None):
     return [f for f, dados in FAMILIAS.items() if (ambiente.get(dados["chave"]) or "").strip()]
 
 
+PAPEIS_ORDEM = ["fiscal", "controle", "servico", "operacao", "governo", "contra"]   # a ordem de PAPEIS em riscos.py
+
+
 def esquema_de_modelos(principal, auxiliar, lista=None, familias=None):
     """Os modelos de cada etapa de revisão. lista: modelos informados à mão, que se revezam entre os agentes (vale
-    sobre o esquema). Sem lista, cada agente usa a família de FAMILIA_POR_AGENTE se a chave existir, senão o principal.
+    sobre o esquema). Sem lista, DISTRIBUICAO reparte os papéis entre o principal e as famílias de fora com chave.
     A neutralidade vai para a primeira família de fora disponível; sem nenhuma, para o auxiliar (ao menos um modelo
     diferente do que escreveu)."""
     familias = familias_disponiveis() if familias is None else familias
+    familias = [f for f in FAMILIAS if f in familias]                   # na ordem de preferência
     lista = [m.strip() for m in (lista or []) if str(m or "").strip()]
     if lista:
-        agentes = [lista[k % len(lista)] for k in range(len(FAMILIA_POR_AGENTE))]
+        agentes = [lista[k % len(lista)] for k in range(len(PAPEIS_ORDEM))]
     else:
-        agentes = [FAMILIAS[f]["modelo"] if f in familias else principal for f in FAMILIA_POR_AGENTE]
-    de_fora = [FAMILIAS[f]["modelo"] for f in FAMILIAS if f in familias]
+        reparto = DISTRIBUICAO[min(len(familias), max(DISTRIBUICAO))]
+        agentes = [FAMILIAS[familias[reparto[p]]]["modelo"] if p in reparto else principal for p in PAPEIS_ORDEM]
+    de_fora = [FAMILIAS[f]["modelo"] for f in familias]
     neutralidade = de_fora[0] if de_fora else (auxiliar if auxiliar != principal else principal)
     return {"agentes": agentes, "neutralidade": neutralidade, "familias": familias,
             "independente": len({m.split("/")[0] for m in agentes}) > 1}
