@@ -560,6 +560,9 @@ def test_esquema_de_modelos_por_familia(funcoes):
     e = funcoes.esquema_de_modelos(opus, sonnet, ["a", " b "], ["openai"])
     assert e["agentes"] == ["a", "b", "a", "b", "a", "b"]
     assert funcoes.familias_disponiveis({"OPENAI_API_KEY": "x", "GEMINI_API_KEY": " ", "DEEPSEEK_API_KEY": "y"}) == ["openai", "deepseek"]
+    # o modelo da família pode ser trocado pelos Secrets (ex.: Flash na cota gratuita do Google)
+    assert funcoes.modelo_da_familia("gemini", {"GEMINI_MODELO": " gemini/gemini-3.8-flash "}) == "gemini/gemini-3.8-flash"
+    assert funcoes.modelo_da_familia("gemini", {}) == gem
 
 
 def test_agentes_podem_usar_modelos_diferentes(funcoes, llm):

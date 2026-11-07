@@ -89,7 +89,8 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    combinação), os agentes se repartem: o advogado do diabo e o controle jurídico vão para fora primeiro, e a
    Anthropic, que escreveu a análise, nunca tem maioria (com uma família de fora, 3 a 3; com duas, fica com um
    agente). A revisão de neutralidade vai para outra família. Sem nenhuma chave, tudo roda na Anthropic e a barra
-   lateral avisa. A lista de modelos na barra lateral vale sobre o esquema.
+   lateral avisa. A lista de modelos na barra lateral vale sobre o esquema. O modelo de cada família pode ser
+   trocado nos Secrets (`GEMINI_MODELO = "gemini/gemini-3.8-flash"` fica na cota gratuita do Google, por exemplo).
 7. **Consolidação e conferência.** Uma consolidação junta as revisões; o código confere os fatos citados por cada
    risco, dá a firmeza da informação e calcula a prioridade. Um segundo modelo revisa a neutralidade.
 8. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
