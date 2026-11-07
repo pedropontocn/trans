@@ -112,16 +112,18 @@ derrubar cada risco.
   sem fato não retira risco.
 - Mantenha 5 a 8 riscos, numerados de novo (R1, R2...), e 2 ou 3 decisões (Q1, Q2...).
 - Em cada risco, preencha "id_anterior": o id que ele tinha na ANÁLISE (ex.: "R3"); se veio de um agente como
-  faltando, escreva "novo: " e o nome do agente (ex.: "novo: Fazenda e orçamento"). O sistema usa isso para registrar
-  quem apontou e quem contestou cada risco.
+  faltando, escreva "novo: " e o nome do agente (ex.: "novo: Fazenda e orçamento").
+- "respostas_as_revisoes": para CADA risco apontado como faltando, exagerado ou contestado, diga o que fez:
+  {"agente": "...", "risco": "R2" ou o título do faltando, "decisao": "acatado|parcial|não acatado", "motivo": "uma
+  frase, com os fatos"}. Nenhuma revisão fica sem resposta.
 - Em cada decisão, acrescente "visoes": para cada agente que opinou, o que ele teme e valoriza, sem dizer qual opção
   é melhor. Mantenha o peso igual entre as opções.
 
 """ + LINGUAGEM + """
 
-Responda SOMENTE com JSON, no mesmo formato da análise, entre [INÍCIO DO JSON] e [FIM DO JSON]. Em cada decisão, inclua
-"visoes": [{"papel": "Fazenda e orçamento", "teme": "...", "valoriza": "..."}]. Cada risco segue este formato, mais
-"id_anterior": """ + ESQUEMA_RISCO
+Responda SOMENTE com JSON, no mesmo formato da análise, entre [INÍCIO DO JSON] e [FIM DO JSON], mais a lista
+"respostas_as_revisoes". Em cada decisão, inclua "visoes": [{"papel": "Fazenda e orçamento", "teme": "...",
+"valoriza": "..."}]. Cada risco segue este formato, mais "id_anterior": """ + ESQUEMA_RISCO
 
 
 # --- MATERIAL ------------------------------------------------------------------------------
@@ -204,19 +206,47 @@ def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
     return _em_paralelo([lambda p=p, m=m: um(p, m) for p, m in zip(PAPEIS, modelos)])
 
 
-def proveniencia(riscos_finais, revisoes, analise):
+def _palavras(texto):
+    return {w for w in re.findall(r"[a-z0-9]{3,}", _norm(texto))
+            if w not in {"com", "sem", "por", "para", "dos", "das", "que", "nao", "uma", "uns", "sob", "entre"}}
+
+
+def _parecido(a, b):
+    """Semelhança entre dois textos curtos (Jaccard das palavras): casa o risco final com o da análise ou com o faltando."""
+    pa, pb = _palavras(a), _palavras(b)
+    return len(pa & pb) / len(pa | pb) if pa and pb else 0.0
+
+
+def _id_na_analise(risco, analise):
+    """O id do risco na análise inicial: o id_anterior que a consolidação informou, se válido, senão o risco da análise
+    com título mais parecido (pelo menos metade das palavras em comum)."""
+    por_id = {str(r.get("id") or ""): r for r in (analise or {}).get("riscos") or [] if isinstance(r, dict)}
+    anterior = str(risco.get("id_anterior") or "").strip()
+    if anterior in por_id:
+        return anterior
+    if anterior.lower().startswith("novo"):
+        return None
+    melhor = max(((_parecido(risco.get("titulo", ""), r.get("titulo", "")), i) for i, r in por_id.items()), default=(0, None))
+    return melhor[1] if melhor[0] >= 0.5 else None
+
+
+def proveniencia(riscos_finais, revisoes, analise, consolidado=None):
     """Para cada risco final, por código e a partir das revisões brutas: de onde veio (análise ou agente que apontou),
-    quem fez objeção (exagerado ou contestado, com o motivo) e quantos agentes não objetaram. Usa o "id_anterior" que a
-    consolidação registra; sem ele, só conta os agentes que responderam."""
+    quem fez objeção (exagerado ou contestado, com o motivo e a resposta da consolidação) e quantos agentes não
+    objetaram. Não depende do modelo: casa os riscos pelo id informado ou pelo título."""
     validas = [r for r in revisoes or [] if not r.get("erro")]
-    ids_analise = {str(r.get("id") or "") for r in (analise or {}).get("riscos") or [] if isinstance(r, dict)}
+    respostas = [x for x in (consolidado or {}).get("respostas_as_revisoes") or [] if isinstance(x, dict)]
     for risco in riscos_finais:
-        anterior = str(risco.get("id_anterior") or "").strip()
+        anterior = _id_na_analise(risco, analise)
         objecoes, origem = [], "análise"
-        if anterior.lower().startswith("novo"):
-            origem = "apontado por " + (anterior.split(":", 1)[1].strip() if ":" in anterior else "um agente")
-        elif anterior and anterior not in ids_analise:
-            anterior = ""
+        if not anterior:
+            apontado = max(((_parecido(risco.get("titulo", ""), f.get("titulo", "")), rev["papel"])
+                            for rev in validas for f in rev.get("faltando") or [] if isinstance(f, dict)), default=(0, ""))
+            texto_anterior = str(risco.get("id_anterior") or "")
+            if texto_anterior.lower().startswith("novo") and ":" in texto_anterior:
+                origem = "apontado por " + texto_anterior.split(":", 1)[1].strip()
+            elif apontado[0] >= 0.4:
+                origem = "apontado por " + apontado[1]
         for rev in validas:
             for e in rev.get("exagerados") or []:
                 if isinstance(e, dict) and anterior and str(e.get("risco") or "").strip() == anterior:
@@ -225,10 +255,52 @@ def proveniencia(riscos_finais, revisoes, analise):
                 if isinstance(c, dict) and anterior and str(c.get("risco") or "").strip() == anterior:
                     objecoes.append({"papel": rev["papel"], "tipo": "contestado", "motivo": str(c.get("motivo") or "").strip(),
                                      "fatos": [str(f) for f in c.get("fatos") or []]})
+        for o in objecoes:
+            resposta = next((x for x in respostas if str(x.get("risco") or "").strip() == anterior
+                             and _parecido(str(x.get("agente") or ""), o["papel"]) >= 0.5), None)
+            if resposta:
+                o["resposta"] = (str(resposta.get("decisao") or "").strip()
+                                 + (f" ({resposta['motivo']})" if resposta.get("motivo") else ""))
+            else:
+                o["resposta"] = "sem resposta registrada"
         risco["revisao"] = {"origem": origem, "objecoes": objecoes, "agentes": len(validas),
                             "sem_objecao": len(validas) - len({o["papel"] for o in objecoes}),
                             "contestado": any(o["tipo"] == "contestado" for o in objecoes)}
     return riscos_finais
+
+
+def visoes_por_codigo(decisoes_finais, analise, revisoes):
+    """As visões de cada agente sobre cada decisão, montadas das revisões brutas (o que cada um disse que teme e
+    valoriza em cada opção), em vez da paráfrase da consolidação. A decisão final casa com a da análise pela pergunta."""
+    validas = [r for r in revisoes or [] if not r.get("erro")]
+    da_analise = [q for q in (analise or {}).get("decisoes") or [] if isinstance(q, dict)]
+    for q in decisoes_finais:
+        nota, casada = max(((_parecido(q.get("pergunta", ""), a.get("pergunta", "")), a) for a in da_analise),
+                           default=(0, None), key=lambda x: x[0])
+        if not casada or nota < 0.4:
+            continue
+        id_analise = str(casada.get("id") or "")
+        nomes = [o.get("nome", "") for o in q.get("opcoes") or []]
+        visoes = []
+        for rev in validas:
+            minhas = [d for d in rev.get("decisoes") or []
+                      if isinstance(d, dict) and str(d.get("decisao") or "").strip() == id_analise]
+
+            def junta(campo):
+                partes = []
+                for d in sorted(minhas, key=lambda d: d.get("opcao") or 0):
+                    texto = str(d.get(campo) or "").strip()
+                    if texto:
+                        k = int(d.get("opcao") or 0) - 1
+                        nome = nomes[k] if 0 <= k < len(nomes) else f"Opção {k + 1}"
+                        partes.append(f"**{nome}:** {texto}")
+                return " ".join(partes)
+            teme, valoriza = junta("teme"), junta("valoriza")
+            if teme or valoriza:
+                visoes.append({"papel": rev["papel"], "teme": teme, "valoriza": valoriza})
+        if visoes:
+            q["visoes"] = visoes
+    return decisoes_finais
 
 
 def consolidar(modelo, texto_material, analise, revisoes, uso):

@@ -99,7 +99,8 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     progresso("Consolidando...")
     final = riscos.consolidar(principal, material, analise, revisoes, uso)
     resultado = riscos.conferir_e_ordenar(final, diagnostico, vencimentos, dossie, cfg["data_corte"])
-    riscos.proveniencia(resultado["riscos"], revisoes, analise)      # quem apontou e quem contestou cada risco
+    riscos.proveniencia(resultado["riscos"], revisoes, analise, final)   # quem apontou e quem contestou cada risco
+    riscos.visoes_por_codigo(resultado["decisoes"], analise, revisoes)   # o que cada agente teme e valoriza, do bruto
     confianca = riscos.confianca(resumo_dos, resultado["riscos"], cobertura)
 
     ficha = produtos.ficha_contratos(eventos)
@@ -148,7 +149,10 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
                         "confianca": confianca},
         "uso_tokens": uso_total, "custo_estimado_usd": round(custo, 4), "custo_parcial": parcial,
     }
-    return {"documento": documentos.gerar_docx(texto_doc, meta), "documento_md": texto_doc, "eventos": eventos,
+    texto_anexos = documentos.anexos_secretaria(resultado, dossie, confronto, registro["metodo_md"])
+    meta_anexos = dict(meta, assunto=f"{nome} – anexos", tipo="Anexos do memorando executivo")
+    return {"documento": documentos.gerar_docx(texto_doc, meta), "documento_md": texto_doc,
+            "anexos": documentos.gerar_docx(texto_anexos, meta_anexos), "anexos_md": texto_anexos, "eventos": eventos,
             "descartados": [dict(d, orgao=nome) for d in calendario.get("descartados") or []],
             "riscos": [dict(r, orgao=nome) for r in resultado["riscos"]], "situacao": resultado["situacao"],
             "registro": registro, "custo": custo, "confianca": confianca["nivel"],
@@ -177,7 +181,9 @@ def _gravar_resumo(saida, linhas, custo_estado):
     (saida / "LEIA-ME.txt").write_text(
         "Resultados da análise das secretarias\n\n"
         "- painel_estadual.docx: as urgências de todas as secretarias, com a mesma régua, num documento só.\n"
-        "- documentos/: um Word por secretaria: em uma página, diagnóstico, riscos e decisões urgentes, anexos.\n"
+        "- documentos/: dois Word por secretaria. <secretaria>.docx é o memorando executivo (resumo, contratos, pessoal,\n"
+        "  passivos, orçamento e obras, riscos e decisões); <secretaria>_anexos.docx traz o que cada agente temeu e\n"
+        "  valorizou, as objeções risco a risco, todas as fontes e o método.\n"
         "- calendario_consolidado.xlsx: os vencimentos de todas as secretarias; a aba Prioridades vem primeiro.\n"
         "- resumo.csv: situação, números e custo de cada órgão.\n"
         "- auditoria/: o registro completo de cada análise (para conferência técnica).\n\n"
@@ -308,6 +314,7 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                 r = analisar_orgao(nome, texto, cfg, estado=estado, dossie=dossie,
                                    progresso=lambda t: log(f"[{k}] {t}"))
                 (saida / "documentos" / f"{pasta}.docx").write_bytes(r["documento"])
+                (saida / "documentos" / f"{pasta}_anexos.docx").write_bytes(r["anexos"])
                 (saida / "auditoria" / f"{pasta}.json").write_text(
                     json.dumps(r["registro"], ensure_ascii=False, indent=2, default=str), encoding="utf-8")
                 linha.update(situacao="concluído", dossie=r["dossie"], itens_dossie=r["itens_dossie"], conferidos=r["conferidos"],

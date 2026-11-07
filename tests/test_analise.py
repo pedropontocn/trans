@@ -107,9 +107,13 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
     textos = [p.text for p in docx.Document(io.BytesIO(r["documento"])).paragraphs]
     for titulo in ["Resumo executivo", "1. Contratos", "2. Pessoal", "3. Passivos jurídicos e de controle",
-                   "4. Orçamento, obras e estrutura", "5. Riscos e decisões urgentes", "Anexo A – Cobertura e fontes",
-                   "Anexo B – O que cada olhar de gestão teme e valoriza"]:
+                   "4. Orçamento, obras e estrutura", "5. Riscos e decisões urgentes", "Anexo A – Cobertura e fontes"]:
         assert titulo in textos, titulo
+    assert not any("Anexo B" in t for t in textos)                                     # os olhares vão para o arquivo de anexos
+    anexos = [p.text for p in docx.Document(io.BytesIO(r["anexos"])).paragraphs]
+    for titulo in ["O que cada olhar de gestão teme e valoriza", "Revisão dos agentes, risco a risco", "Todas as fontes do dossiê",
+                   "Anexo 3 – Como este documento foi feito"]:
+        assert titulo in anexos, titulo
     assert not any(t.startswith(("Sobre este documento", "Anexo 3", "Como este documento foi feito")) for t in textos)
     md = r["documento_md"]
     assert md.index("## Resumo executivo") < md.index("## 1. Contratos") < md.index("## 5. Riscos") < md.index("## Anexo A")
@@ -125,10 +129,16 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     inventado = next(x for x in riscos if x["titulo"] == "Risco inventado")
     assert inventado["firmeza"] == "sem comprovação" and inventado["fatos_invalidos"] == ["F99"]
     assert inventado["prioridade"] in ("Média", "Baixa")                               # sem base, no máximo Média
-    assert inventado["revisao"]["contestado"] and "Advogado do diabo contesta: o risco inventado" in md
+    assert inventado["revisao"]["contestado"] and inventado["revisao"]["sem_objecao"] == 0     # 5 exageros + 1 contestação
     assert riscos[0]["revisao"] == {"origem": "análise", "objecoes": [], "agentes": 6, "sem_objecao": 6, "contestado": False}
     assert reg["modelos"]["neutralidade"] == CFG["modelo_auxiliar"] and len(reg["modelos"]["agentes"]) == 6
-    assert "| Fazenda e orçamento | custo | rapidez |" in md                              # o olhar de cada agente, no anexo
+    # o olhar de cada agente, no arquivo de anexos, montado do que o agente disse (não da paráfrase da consolidação)
+    assert "| Fazenda e orçamento | **Retomar:** custo | **Retomar:** rapidez |" in r["anexos_md"]
+    assert "| Advogado do diabo | **Retomar:** licitar sem caixa | – |" in r["anexos_md"]
+    assert "Advogado do diabo contesta: o risco inventado não tem fato no material (F1) → consolidação: sem resposta registrada" in md
+    assert "(5 veem exagero)" in md and "- Fazenda e orçamento vê exagero: sem base" in r["anexos_md"]
+    # a consolidação falsa não informa id_anterior: o casamento é pelo título
+    assert all(x["revisao"]["agentes"] == 6 for x in riscos)
     assert "[F" in llm.material_riscos and "DIAGNÓSTICO:" in llm.material_riscos
     assert reg["verificacao"]["neutralidade"]["recomendacoes_implicitas"][0]["trecho"].startswith("Retomar")
     assert r["custo"] > 0 and r["riscos"][0]["orgao"] == "Secretaria de Exemplo"
@@ -201,7 +211,7 @@ def test_varios_orgaos_gravam_documentos_calendario_e_resumo(llm, tmp_path):
     envio = [("resumos.zip", _zip({"SETUR - Turismo.docx": b"a", "SEFAZ - Fazenda.pdf": b"b"}))]
     linhas = analise.rodar_orgaos(entrada.orgaos_do_envio(envio), CFG, tmp_path, log=lambda *_: None)
     assert [l["situacao"] for l in linhas] == ["concluído", "concluído"]
-    assert len(list((tmp_path / "documentos").glob("*.docx"))) == 2
+    assert len(list((tmp_path / "documentos").glob("*[!s].docx"))) == 2
     assert (tmp_path / "calendario_consolidado.xlsx").exists() and (tmp_path / "LEIA-ME.txt").exists()
     assert len(list((tmp_path / "auditoria").glob("*_arquivos_lidos.json"))) == 2
     assert [r["situacao"] for r in _resumo(tmp_path)] == ["concluído", "concluído"]
@@ -384,7 +394,7 @@ def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
     assert linhas[0]["situacao"] == "concluído" and linhas[0]["dossie"] == "enviado"
     pedidos = [json.dumps(c["mensagens"][0]["content"], ensure_ascii=False) for c in llm.chamadas]
     assert not any("Monte a camada" in p and 'camada\\n\\"Estado\\"' not in p for p in pedidos)   # só o Estado
-    texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "documentos").glob("*.docx"))).paragraphs)
+    texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "documentos").glob("*[!s].docx"))).paragraphs)
     assert "Anexo A – Cobertura e fontes" in texto and "Contratos críticos" in texto
     import openpyxl
     planilha = openpyxl.load_workbook(tmp_path / "calendario_consolidado.xlsx").active

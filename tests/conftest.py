@@ -269,7 +269,7 @@ class LLMFalso:
             self.pedido_consolidacao = ultimo
             final = self.consolidacao_riscos or dict(
                 self.analise_riscos,
-                riscos=[dict(r, id_anterior=r["id"]) for r in self.analise_riscos["riscos"]],
+                riscos=[dict(r) for r in self.analise_riscos["riscos"]],          # sem id_anterior: casa pelo título
                 decisoes=[dict(q, visoes=[{"papel": "Fazenda e orçamento", "teme": "custo", "valoriza": "rapidez"}])
                           for q in self.analise_riscos["decisoes"]])
             return self._resp("[INÍCIO DO JSON]" + json.dumps(final) + "[FIM DO JSON]")

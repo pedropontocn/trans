@@ -200,7 +200,8 @@ def markdown(checklist):
     linhas = ["## Cobertura – o que foi procurado",
               f"Dez pontos que toda secretaria precisa responder. Estado conferido por código: {r['encontrado']} "
               f"encontrado(s), {r['procurado e não encontrado']} procurado(s) sem resultado, {r['não procurado']} não "
-              "procurado(s). **Ponto não procurado não significa que não há risco: significa que ninguém olhou.**",
+              "procurado(s). **Ponto não procurado não significa que não há risco: significa que ninguém olhou.** "
+              "Estado: ✔ encontrado · ○ procurado, sem resultado · ✖ não procurado.",
               "| # | Ponto | Estado | O que o material diz | Base |", "|---|---|---|---|---|"]
     for c in checklist:
         if c["estado"] == "encontrado":
@@ -209,9 +210,10 @@ def markdown(checklist):
             base = c.get("firmeza") or "registro da pesquisa"
         else:
             base = f"procurar em: {c['onde_procurar']}"
-        marca = {"encontrado": "✔ encontrado", "procurado e não encontrado": "○ procurado, sem resultado",
-                 "não procurado": "✖ NÃO PROCURADO"}[c["estado"]]
-        linhas.append(f"| {c['id']} | {c['tema']} | {marca} | {c.get('resposta') or '–'} | {base} |")
+        marca = {"encontrado": "✔", "procurado e não encontrado": "○", "não procurado": "✖ NÃO PROCURADO"}[c["estado"]]
+        resposta = re.sub(r"\s+", " ", c.get("resposta") or "–")
+        resposta = resposta if len(resposta) <= 170 else resposta[:169].rstrip() + "…"
+        linhas.append(f"| {c['id']} | {c['tema']} | {marca} | {resposta} | {base} |")
     return "\n".join(linhas)
 
 
