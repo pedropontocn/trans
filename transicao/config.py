@@ -48,11 +48,20 @@ MIN_ITENS_DOSSIE = 5
 # chave do provedor no .env ou nos Secrets; sem a chave, a etapa cai para o modelo principal (Anthropic).
 # Famílias de fora, em ordem de preferência, com o modelo de ponta de cada uma (nomes no formato do LiteLLM; os da
 # OpenAI e do Google são os "most capable" dos changelogs oficiais em nov/2026; os da DeepSeek são apelidos estáveis).
+# O modelo de cada família pode ser trocado pelos Secrets (OPENAI_MODELO, GEMINI_MODELO, DEEPSEEK_MODELO): por
+# exemplo, GEMINI_MODELO = "gemini/gemini-3.8-flash" para ficar na cota gratuita do Google.
 FAMILIAS = {
-    "openai": {"chave": "OPENAI_API_KEY", "modelo": "openai/gpt-6-astra"},
-    "gemini": {"chave": "GEMINI_API_KEY", "modelo": "gemini/gemini-4-argon"},
-    "deepseek": {"chave": "DEEPSEEK_API_KEY", "modelo": "deepseek/deepseek-reasoner"},
+    "openai": {"chave": "OPENAI_API_KEY", "modelo": "openai/gpt-6-astra", "troca": "OPENAI_MODELO"},
+    "gemini": {"chave": "GEMINI_API_KEY", "modelo": "gemini/gemini-4-argon", "troca": "GEMINI_MODELO"},
+    "deepseek": {"chave": "DEEPSEEK_API_KEY", "modelo": "deepseek/deepseek-reasoner", "troca": "DEEPSEEK_MODELO"},
 }
+
+
+def modelo_da_familia(familia, ambiente=None):
+    import os
+    ambiente = os.environ if ambiente is None else ambiente
+    dados = FAMILIAS[familia]
+    return (ambiente.get(dados["troca"]) or "").strip() or dados["modelo"]
 
 # Quem fica com cada papel (chaves de PAPEIS em riscos.py), conforme quantas famílias de fora têm chave. Os papéis
 # mais adversariais (advogado do diabo, controle jurídico) vão primeiro para fora; o autor da análise (Anthropic)
@@ -88,8 +97,8 @@ def esquema_de_modelos(principal, auxiliar, lista=None, familias=None):
         agentes = [lista[k % len(lista)] for k in range(len(PAPEIS_ORDEM))]
     else:
         reparto = DISTRIBUICAO[min(len(familias), max(DISTRIBUICAO))]
-        agentes = [FAMILIAS[familias[reparto[p]]]["modelo"] if p in reparto else principal for p in PAPEIS_ORDEM]
-    de_fora = [FAMILIAS[f]["modelo"] for f in familias]
+        agentes = [modelo_da_familia(familias[reparto[p]]) if p in reparto else principal for p in PAPEIS_ORDEM]
+    de_fora = [modelo_da_familia(f) for f in familias]
     neutralidade = de_fora[0] if de_fora else (auxiliar if auxiliar != principal else principal)
     return {"agentes": agentes, "neutralidade": neutralidade, "familias": familias,
             "independente": len({m.split("/")[0] for m in agentes}) > 1}
