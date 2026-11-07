@@ -563,6 +563,17 @@ def _origem(i):
     return f"[{i['rotulo']}]({i['url']})" if i.get("url") else i["rotulo"]
 
 
+BASE_CURTA = {"dado do SIGA/PNCP": "SIGA/PNCP", "confirmado em fonte oficial": "fonte oficial ✔",
+              "fonte pública conferida": "fonte pública ✔", "fonte pública não conferida": "fonte não conferida",
+              "informado pelo órgão": "órgão", "só na imprensa": "imprensa", "sem comprovação": "sem comprovação"}
+
+
+def _base_curta(i):
+    """A firmeza em poucas palavras, para caber em tabela (com o link, quando há)."""
+    rotulo = BASE_CURTA.get(i["rotulo"], i["rotulo"])
+    return f"[{rotulo}]({i['url']})" if i.get("url") else rotulo
+
+
 def markdown_diagnostico(diag, ficha=None, resumo_dossie=None):
     """Capítulo 1: a ficha de números (código) e os seis blocos, com cada afirmação conferida na origem."""
     linhas = ["## Capítulo 1 – Diagnóstico",
@@ -593,69 +604,133 @@ def _agir(r):
 
 
 def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
-    """Capítulo 2: riscos por prioridade (os primeiros em detalhe), decisões em aberto com o olhar de cada agente,
-    o que pedir à secretaria e o que o documento não cobre."""
+    """Capítulo 5: riscos por prioridade (os primeiros em detalhe), decisões em aberto com as opções e o que pedir à
+    secretaria. O que cada agente teme e valoriza fica no Anexo B."""
     riscos, decisoes = resultado.get("riscos") or [], resultado.get("decisoes") or []
-    linhas = ["## Capítulo 2 – Riscos e decisões urgentes",
-              "Riscos na ordem de prioridade (impacto × urgência), calculada por código com a mesma régua para todas as "
-              "secretarias. \"Base\" diz quão firme é a informação que sustenta o risco."]
+    linhas = ["## 5. Riscos e decisões urgentes",
+              "Ordem por prioridade (impacto × urgência), com a mesma régua em todas as secretarias. \"Base\" diz quão "
+              "firme é a informação que sustenta o risco."]
     for r in riscos[:limite_detalhe]:
-        linhas.append(f"### {r['id']}. {r['titulo']} – {_agir(r)}")
-        linhas.append(f"- **Risco:** {r['causa']} → {r['consequencia']}")
-        if r.get("em_jogo"):
-            linhas.append(f"- **Em jogo:** {r['em_jogo']}")
-        if r.get("em_curso"):
-            linhas.append(f"- **Em curso:** {r['em_curso']}")
-        linhas.append(f"- **Decisão a tomar:** {r['decisao']}" + (f" **Quem decide:** {r['quem_decide']}"
-                                                                  if r.get("quem_decide") else ""))
-        linhas.append(f"- **Prioridade:** {r['prioridade']} ({r['categoria']}; impacto {r['impacto'].lower()}, "
-                      f"chance {r['chance'].lower()}). **Base:** {r['firmeza']}")
+        linhas.append(f"### {r['id']}. {r['titulo']} – {_agir(r)} · {r['prioridade'].lower()}")
+        linhas.append(f"- {r['causa']} → {r['consequencia']}")
+        detalhes = [f"**Em jogo:** {r['em_jogo']}" if r.get("em_jogo") else "",
+                    f"**Em curso:** {r['em_curso']}" if r.get("em_curso") else "",
+                    f"**Base:** {r['firmeza']}" + (f" ({', '.join(r['fatos'])})" if r.get("fatos") else "")]
+        linhas.append("- " + " · ".join(d for d in detalhes if d))
+        linhas.append(f"- **Decisão:** {r['decisao']}" + (f" — {r['quem_decide']}" if r.get("quem_decide") else ""))
     if len(riscos) > limite_detalhe:
         linhas += ["### Outros riscos a acompanhar", "| Risco | Categoria | Prioridade | Prazo | Base |", "|---|---|---|---|---|"]
         linhas += [f"| {r['id']}. {r['titulo']} | {r['categoria']} | {r['prioridade']} | {_agir(r)} | {r['firmeza']} |"
                    for r in riscos[limite_detalhe:]]
     if decisoes:
-        linhas += ["### Decisões em aberto",
-                   "Decisões que não se resolvem só cumprindo um prazo. As opções têm o mesmo peso; abaixo de cada "
-                   "decisão, o que cada olhar de gestão teme e valoriza, segundo agentes independentes."]
+        linhas += ["### Decisões em aberto", "As opções têm o mesmo peso. O que cada olhar de gestão teme e valoriza em "
+                   "cada opção está no Anexo B."]
         for q in decisoes:
             linhas.append(f"**{q['id']}. {q['pergunta']}**" + (f" _(ligada a {', '.join(q['riscos'])})_" if q["riscos"] else ""))
-            linhas += [f"- **Opção {k} – {o['nome']}:** {o.get('o_que_e', '')}" for k, o in enumerate(q["opcoes"], 1)]
-            for v in q.get("visoes") or []:
-                partes = [x for x in [f"teme {v['teme']}" if v.get("teme") else "",
-                                      f"valoriza {v['valoriza']}" if v.get("valoriza") else ""] if x]
-                if partes:
-                    linhas.append(f"- _{v['papel']}:_ " + "; ".join(partes))
+            linhas += [f"- **{o['nome']}:** {o.get('o_que_e', '')}" for o in q["opcoes"]]
             if q.get("o_que_falta_saber"):
-                linhas.append(f"- **O que falta saber:** {q['o_que_falta_saber']}")
+                linhas.append(f"- _Falta saber:_ {q['o_que_falta_saber']}")
     if resultado.get("pedir"):
         linhas.append("### Pedir à secretaria")
         linhas += [f"{k}. {p['o_que']}" + (f" _(serve a {p['serve_a']})_" if p.get("serve_a") else "")
                    for k, p in enumerate(resultado["pedir"], 1)]
-    linhas.append("### O que este documento não cobre")
-    from .produtos import LIMITE_SIGA
-    linhas.append(("Os contratos vêm da base do Estado (SIGA), que " + LIMITE_SIGA.split("(SIGA) ", 1)[-1] + " "
-                   if cobre_siga else "")
-                  + "Os blocos do diagnóstico listam, em \"Não se sabe\", o que nem as fontes nem a secretaria trazem.")
+    if cobre_siga:
+        from .produtos import LIMITE_SIGA
+        linhas.append(f"_Os contratos vêm da base do Estado (SIGA), que {LIMITE_SIGA.split('(SIGA) ', 1)[-1]}_")
     return "\n".join(linhas)
 
 
-def em_uma_pagina(resultado, cobertura=None):
-    """A abertura: situação, os três riscos mais urgentes, as decisões em aberto e as lacunas, em uma página."""
+def markdown_visoes(resultado):
+    """Anexo B: o que cada olhar de gestão teme e valoriza em cada decisão, em tabela."""
+    decisoes = [q for q in resultado.get("decisoes") or [] if q.get("visoes")]
+    if not decisoes:
+        return ""
+    linhas = ["## Anexo B – O que cada olhar de gestão teme e valoriza",
+              "Cinco agentes independentes, cada um com um olhar (Fazenda; controle e jurídico; área-fim; operação; nova "
+              "gestão), leram a análise sem ver uns aos outros. Nenhum escolhe uma opção."]
+    for q in decisoes:
+        linhas += [f"**{q['id']}. {q['pergunta']}**", "| Olhar | Teme | Valoriza |", "|---|---|---|"]
+        linhas += [f"| {v['papel']} | {v.get('teme') or '–'} | {v.get('valoriza') or '–'} |" for v in q["visoes"]]
+    return "\n".join(linhas)
+
+
+def em_uma_pagina(resultado, cobertura=None, indicadores=None, limite_riscos=5):
+    """O resumo executivo: situação, números-chave, os riscos mais urgentes, as decisões em aberto e as lacunas.
+    Tudo o que quem decide precisa, em uma página; o resto do documento é a base disso."""
     from .checklist import linha_essencial
-    linhas = ["## O essencial"] + [f"- {x}" for x in resultado.get("situacao") or []]
-    lacunas = linha_essencial(cobertura) if cobertura else ""
-    if lacunas:
-        linhas.append(f"- {lacunas}")
+    linhas = ["## Resumo executivo"] + [f"- {x}" for x in resultado.get("situacao") or []]
+    if indicadores:
+        linhas += ["**Números-chave**", "| Indicador | Valor | Base |", "|---|---|---|"]
+        linhas += [f"| {i['nome']} | {i['valor']} | {_base_curta(i)} |" for i in indicadores]
     riscos = resultado.get("riscos") or []
     if riscos:
-        linhas.append("## Os riscos mais urgentes")
+        linhas.append("**Riscos mais urgentes**")
         linhas += [f"{k}. **{r['titulo']}** – {_agir(r)} · prioridade {r['prioridade'].lower()} · {r['firmeza']}"
-                   for k, r in enumerate(riscos[:3], 1)]
+                   for k, r in enumerate(riscos[:limite_riscos], 1)]
     if resultado.get("decisoes"):
-        linhas.append("## Decisões em aberto")
+        linhas.append("**Decisões em aberto**")
         linhas += [f"- {q['pergunta']}" for q in resultado["decisoes"]]
-    linhas.append("_Detalhes no Capítulo 2; a base de cada afirmação, no Capítulo 1 e no Anexo 1._")
+    lacunas = linha_essencial(cobertura) if cobertura else ""
+    if lacunas:
+        linhas.append(lacunas.replace("Ver a tabela de cobertura no Capítulo 1.", "Tabela no Anexo A."))
+    return "\n".join(linhas)
+
+
+def markdown_contratos_criticos(contratos):
+    """A tabela dos contratos que a nova gestão precisa conhecer: os da planilha do SIGA/PNCP (código) e os apontados
+    no material e conferidos (origem e valor)."""
+    if not contratos:
+        return ""
+    linhas = ["| Contrato | Objeto | Contratado | Valor | Vigência | Por que é crítico | Base |",
+              "|---|---|---|---|---|---|---|"]
+    vistos = set()
+    for c in contratos:
+        chave = _norm(c["contrato"])[:40]
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        motivo = ", ".join(c["motivos"]) + (f". {c['observacao']}" if c.get("observacao") else "")
+        linhas.append(f"| {c['contrato']} | {c.get('objeto') or '–'} | {c.get('contratado') or '–'} | "
+                      f"{c.get('valor') or '–'} | {c.get('vigencia') or '–'} | {motivo} | {_base_curta(c)} |")
+    return "\n".join(linhas)
+
+
+def _secao_diagnostico(sec):
+    linhas = []
+    if sec.get("leitura"):
+        linhas.append(sec["leitura"])
+    linhas += [f"- {i['texto']} _({_origem(i)})_" for i in sec["itens"]]
+    if not sec["itens"] and not sec.get("nao_se_sabe"):
+        linhas.append("_Sem informação conferida._")
+    if sec.get("nao_se_sabe"):
+        linhas.append("_Não se sabe:_ " + "; ".join(sec["nao_se_sabe"]))
+    return linhas
+
+
+CAPITULOS = [("1. Contratos", ["Contratos"]), ("2. Pessoal", ["Pessoal"]),
+             ("3. Passivos jurídicos e de controle", ["Passivos jurídicos e de controle"]),
+             ("4. Orçamento, obras e estrutura", ["Orçamento e execução", "Obras e entregas", "Estrutura e dirigentes"])]
+
+
+def markdown_capitulos(diag, contratos_criticos=None, ficha=None):
+    """Os capítulos de dados, na ordem do que mais pesa: contratos (com a tabela dos críticos), pessoal, passivos,
+    e por fim orçamento, obras e estrutura. Cada afirmação traz a origem conferida."""
+    por_titulo = {_norm(s["titulo"]): s for s in (diag or {}).get("secoes") or []}
+    linhas = []
+    for titulo, blocos in CAPITULOS:
+        linhas.append(f"## {titulo}")
+        if titulo.startswith("1.") and contratos_criticos:
+            linhas += ["**Contratos críticos**", markdown_contratos_criticos(contratos_criticos)]
+        if titulo.startswith("1.") and ficha:
+            linhas += ["| Carteira que vence (planilha SIGA/PNCP) | Contratos (valor) |", "|---|---|"]
+            linhas += [f"| {a} | {b} |" for a, b in ficha]
+        for bloco in blocos:
+            sec = por_titulo.get(_norm(bloco))
+            if not sec:
+                continue
+            if len(blocos) > 1:
+                linhas.append(f"### {sec['titulo']}")
+            linhas += _secao_diagnostico(sec)
     return "\n".join(linhas)
 
 
@@ -707,16 +782,19 @@ def _papeis():
     return PAPEIS
 
 
-def documento_secretaria(resultado, diag, ficha, eventos, dossie, confronto, resumo_dossie, cobertura_md, metodo_md,
-                         sobre_md, cobertura=None):
-    """O documento de cada secretaria, em Markdown: abertura em uma página, diagnóstico, cobertura do checklist,
-    riscos e decisões, anexos."""
+def documento_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
+                         contratos_criticos=None):
+    """O documento de cada secretaria, em Markdown: resumo executivo; capítulos de dados (contratos, pessoal, passivos,
+    orçamento e obras); riscos e decisões; anexos com cobertura e fontes, vencimentos e os olhares dos agentes. Sem
+    anexos de método: uma linha de proveniência no fim."""
     venc = markdown_vencimentos(eventos, limite=20)
-    venc = ("## Anexo 2 – Vencimentos prioritários\n" + venc.split("\n", 1)[1]) if venc else ""
+    venc = ("## Anexo C – Vencimentos prioritários\n" + venc.split("\n", 1)[1]) if venc else ""
     cobre_siga = any(e.get("origem", "").startswith("Contratos") for e in eventos or [])
-    partes = [sobre_md, em_uma_pagina(resultado, cobertura), markdown_diagnostico(diag, ficha, resumo_dossie),
-              cobertura_md, markdown_riscos(resultado, cobre_siga=cobre_siga), markdown_fontes(dossie, confronto), venc,
-              metodo_md]
+    partes = [em_uma_pagina(resultado, cobertura, (diag or {}).get("indicadores")),
+              markdown_capitulos(diag, contratos_criticos, ficha),
+              markdown_riscos(resultado, cobre_siga=cobre_siga),
+              markdown_fontes(dossie, confronto, ids_citados(diag, resultado, contratos_criticos), cobertura_md),
+              markdown_visoes(resultado), venc, nota_md]
     return "\n\n".join(p for p in partes if p)
 
 
@@ -747,9 +825,56 @@ def markdown_vencimentos(eventos, limite=12, dias_passados=30):
     return "\n".join(linhas)
 
 
-def markdown_fontes(dossie, confronto=None):
-    """Anexo 1: o dossiê do órgão (fatos por tema, com link e selo), um nível abaixo no documento único."""
-    md = markdown_dossie(dossie, confronto)
-    corpo = [l for l in md.splitlines() if not l.startswith("# ")]
-    corpo = [("#" + l) if l.startswith("## ") or l.startswith("### ") else l for l in corpo]
-    return "## Anexo 1 – Fontes consultadas\n" + "\n".join(corpo)
+def markdown_fontes(dossie, confronto=None, citados=None, cobertura_md=""):
+    """Anexo A: a cobertura do checklist, as fontes citadas no documento (uma linha cada, com link e selo) e o que o
+    órgão informou contra o que as fontes mostram. Sem explicação de método: isso fica no arquivo de auditoria."""
+    itens = itens_incluidos(dossie)
+    linhas = ["## Anexo A – Cobertura e fontes"]
+    if cobertura_md:
+        linhas.append(cobertura_md.split("\n", 1)[1] if cobertura_md.startswith("## ") else cobertura_md)
+    usados = [i for i in itens if not citados or i["id"] in citados]
+    if usados:
+        linhas.append("**Fontes citadas no documento**")
+        for i in usados:
+            if i.get("conferido_pela_equipe") and i["fonte"].startswith("Base de contratos"):
+                continue
+            selo = "✔ conferido pela equipe" if i.get("conferido_pela_equipe") else SELO_CHECAGEM.get(i["checagem"], "")
+            fonte = (i["fonte"] or "fonte") + (f", {i['data_fonte']}" if i["data_fonte"] else "")
+            fonte = f"[{fonte}]({i['url']})" if i["url"] else fonte
+            linhas.append(f"- **{i['id']}** {i['afirmacao']} — {fonte} · {selo}")
+    divs = (confronto or {}).get("divergencias") or []
+    if divs:
+        linhas.append("**O que o órgão informou e o que as fontes mostram**")
+        por_id = {i["id"]: i for i in itens}
+        for d in divs:
+            item = por_id.get(d["item"], {})
+            fonte = f" ([fonte]({item['url']}))" if item.get("url") else ""
+            if d["situacao"] == "contradiz":
+                linhas.append(f"- **O órgão informa:** {d['o_orgao_declara'] or d['trecho_relatorio']} "
+                              f"**As fontes mostram:** {d['as_fontes_mostram']}{fonte}")
+            else:
+                linhas.append(f"- **Não mencionado pelo órgão:** {d['as_fontes_mostram']}{fonte}")
+    return "\n".join(linhas)
+
+
+def ids_citados(diag, resultado, contratos_criticos=None):
+    """Os ids do dossiê (O1, E2...) que o documento usa: nos itens do diagnóstico, nos riscos e nos contratos."""
+    ids = {i.get("origem_item") for s in (diag or {}).get("secoes") or [] for i in s["itens"] if i.get("origem_item")}
+    ids |= {f for r in resultado.get("riscos") or [] for f in r.get("fatos") or [] if f[:1] in "OE"}
+    ids |= {i.get("origem_item") for i in (diag or {}).get("indicadores") or [] if i.get("origem_item")}
+    return ids
+
+
+def nota_final(registro_id, modelos, confianca, data_corte, neutralidade=None, revisoes=None):
+    """Uma linha de proveniência no fim do documento. O método completo fica na auditoria."""
+    agentes = sum(1 for r in revisoes or [] if not r.get("erro"))
+    partes = [f"Apoio à decisão gerado com IA (registro {registro_id}; {modelos.get('auxiliar')} e {modelos.get('debate')}) "
+              f"a partir do dossiê de fontes públicas, dados do SIGA/PNCP e do que a secretaria informou, com data de "
+              f"corte {data_corte or 'não informada'}. Não recomenda decisões. Confiança da análise: {confianca['nivel']} "
+              f"({'; '.join(confianca['motivos'])}).",
+              f"{agentes} agente(s) independente(s) revisaram a análise." if revisoes else "",
+              f"Revisão de neutralidade: {neutralidade['avaliacao_geral'].replace('_', ' ')}."
+              if neutralidade and not neutralidade.get("erro") and neutralidade.get("avaliacao_geral") else "",
+              "Método, conferências por código e revisões completas no arquivo de auditoria. Gerado em processamento "
+              "automático, sem revisão da equipe: confira antes de usar."]
+    return "_" + " ".join(p for p in partes if p) + "_"

@@ -106,12 +106,16 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     from transicao import analise
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
     textos = [p.text for p in docx.Document(io.BytesIO(r["documento"])).paragraphs]
-    for titulo in ["Sobre este documento", "Os riscos mais urgentes", "Decisões em aberto", "Capítulo 1 – Diagnóstico",
-                   "Capítulo 2 – Riscos e decisões urgentes", "Anexo 1 – Fontes consultadas",
-                   "Anexo 3 – Como este documento foi feito"]:
+    for titulo in ["Resumo executivo", "1. Contratos", "2. Pessoal", "3. Passivos jurídicos e de controle",
+                   "4. Orçamento, obras e estrutura", "5. Riscos e decisões urgentes", "Anexo A – Cobertura e fontes",
+                   "Anexo B – O que cada olhar de gestão teme e valoriza"]:
         assert titulo in textos, titulo
+    assert not any(t.startswith(("Sobre este documento", "Anexo 3", "Como este documento foi feito")) for t in textos)
     md = r["documento_md"]
-    assert md.index("## O essencial") < md.index("## Capítulo 1") < md.index("## Capítulo 2") < md.index("## Anexo 1")
+    assert md.index("## Resumo executivo") < md.index("## 1. Contratos") < md.index("## 5. Riscos") < md.index("## Anexo A")
+    assert "| LOA 2026 | R$ 412 mi |" in md and "| Empenhado | R$ 398,75 mi |" in md and "Inventado" not in md
+    assert "| Contrato 99/2026 |" in md and "Contrato 7/2025" not in md and "Contrato sem origem" not in md
+    assert "Anexo 3 – Como este documento foi feito" in r["registro"]["metodo_md"]       # o método fica na auditoria
     reg = r["registro"]
     assert len(reg["revisoes_dos_agentes"]) == 5 and r["agentes"] == 5                 # cinco agentes independentes
     assert sorted(llm.agentes_vistos) == sorted(p[1] for p in __import__("transicao.riscos", fromlist=["x"]).PAPEIS)
@@ -121,7 +125,7 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     inventado = next(x for x in riscos if x["titulo"] == "Risco inventado")
     assert inventado["firmeza"] == "sem comprovação" and inventado["fatos_invalidos"] == ["F99"]
     assert inventado["prioridade"] in ("Média", "Baixa")                               # sem base, no máximo Média
-    assert "_Fazenda e orçamento:_ teme custo; valoriza rapidez" in md                   # o olhar de cada agente
+    assert "| Fazenda e orçamento | custo | rapidez |" in md                              # o olhar de cada agente, no anexo
     assert "[F" in llm.material_riscos and "DIAGNÓSTICO:" in llm.material_riscos
     assert reg["verificacao"]["neutralidade"]["recomendacoes_implicitas"][0]["trecho"].startswith("Retomar")
     assert r["custo"] > 0 and r["riscos"][0]["orgao"] == "Secretaria de Exemplo"
@@ -161,7 +165,8 @@ def test_agente_fora_do_ar_nao_derruba_a_analise(llm):
     from transicao import analise
     llm.agentes_que_falham = {"Operação e servidores"}
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
-    assert r["agentes"] == 4 and "sem resposta: Operação e servidores" in r["documento_md"]
+    assert r["agentes"] == 4 and "4 agente(s) independente(s)" in r["documento_md"]
+    assert "sem resposta: Operação e servidores" in r["registro"]["metodo_md"]
 
 
 def test_analise_sem_riscos_legiveis_para(llm):
@@ -377,7 +382,7 @@ def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
     pedidos = [json.dumps(c["mensagens"][0]["content"], ensure_ascii=False) for c in llm.chamadas]
     assert not any("Monte a camada" in p and 'camada\\n\\"Estado\\"' not in p for p in pedidos)   # só o Estado
     texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "documentos").glob("*.docx"))).paragraphs)
-    assert "Anexo 1 – Fontes consultadas" in texto
+    assert "Anexo A – Cobertura e fontes" in texto and "Contratos críticos" in texto
     import openpyxl
     planilha = openpyxl.load_workbook(tmp_path / "calendario_consolidado.xlsx").active
     assert any("2025000001" in str(c.value) for linha in planilha.iter_rows() for c in linha)
@@ -399,8 +404,9 @@ def test_painel_estadual_consolida_as_secretarias(llm, tmp_path):
     doc = docx.Document(tmp_path / "painel_estadual.docx")
     textos = [p.text for p in doc.paragraphs] + [c.text.split("\n")[0] for t in doc.tables for c in t._cells]
     for titulo in ["O ESSENCIAL", "As urgências do Estado", "Temas que se repetem entre secretarias", "Mapa de calor",
-                   "Cronograma: quando agir", "Limites"]:
+                   "Cronograma: quando agir"]:
         assert titulo in textos, titulo
+    assert "Limites" not in textos and "Sobre este painel" not in textos and any("Consolida os riscos de 2" in t for t in textos)
     assert "Contratos vencendo" in textos and "Tema de uma só" not in textos   # tema de uma secretaria só sai
     celulas = [c.text for t in doc.tables for c in t._cells]
     assert "SEX" in celulas and "SEY" in celulas and "Obras e projetos" in celulas

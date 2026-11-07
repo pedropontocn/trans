@@ -13,7 +13,7 @@ Um `.zip` com:
 | Arquivo | O que é |
 |---|---|
 | `painel_estadual.docx` | As urgências de todas as secretarias na mesma régua: ranking, temas que se repetem, mapa de calor por categoria e cronograma de quando agir |
-| `documentos/<secretaria>.docx` | **Um documento curto por secretaria**: em uma página (com as lacunas do checklist); Capítulo 1, diagnóstico (ficha padrão de seis blocos) e a cobertura do checklist obrigatório; Capítulo 2, riscos e decisões urgentes; anexos com fontes, vencimentos e método |
+| `documentos/<secretaria>.docx` | **Um documento curto por secretaria**: resumo executivo (situação, números-chave, riscos mais urgentes, decisões em aberto, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. Riscos e decisões; anexos só com dados (cobertura e fontes citadas, olhares dos agentes, vencimentos). O método fica no arquivo de auditoria |
 | `calendario_consolidado.xlsx` | Os vencimentos de todas as secretarias; a aba Prioridades vem primeiro |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
 | `auditoria/` | O registro completo de cada análise (inclusive a revisão de cada agente), para conferência técnica |
@@ -60,9 +60,12 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
 
 1. **Dossiê.** O pacote de dossiês da equipe (ou, sem ele, a pesquisa do app). Links abertos e números conferidos por
    código; contratos do SIGA/PNCP entram como dado oficial.
-2. **Diagnóstico.** Seis blocos fixos (missão e estrutura; orçamento e execução; pessoas; contratos e fornecedores;
-   entregas e programas; controle, passivos e judicialização), com uma ficha de números calculada por código. Cada
-   afirmação cita o dossiê ou um trecho literal do relatório da secretaria; o que não confere é retirado.
+2. **Diagnóstico.** Seis blocos fixos, na ordem do que mais pesa na transição: contratos (valores altos, objetos
+   questionáveis, vigência acabando, paralisados, passivo); pessoal (tamanho e custo da folha, folha inchada, cargos
+   que vagam, risco de apagão de equipe); passivos jurídicos e de controle; orçamento e execução; obras e entregas;
+   estrutura e dirigentes. Mais os números-chave do resumo executivo e a **tabela de contratos críticos** (da
+   planilha do SIGA/PNCP, por código, e os apontados no material). Cada afirmação, número e contrato cita o dossiê
+   ou um trecho literal do relatório da secretaria; o que não confere é retirado.
 3. **Checklist obrigatório.** Dez pontos que toda secretaria precisa responder (contratos a vencer, emergenciais,
    execução, restos a pagar, TCE-RJ, judicialização, convênios federais, obras, pessoal, sistemas críticos). Cada um
    sai com estado conferido por código: **encontrado** (com os fatos), **procurado e não encontrado** (a pesquisa
