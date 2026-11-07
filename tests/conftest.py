@@ -190,6 +190,7 @@ class LLMFalso:
                                  {"trecho": "Retomar as licitações agora ou esperar", "por_que": "soa como ordem"},
                                  {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
         self.falhar_neutralidade = False
+        self.modelos_que_falham = set()           # modelos (nomes) que respondem como fora do ar
         self.checklist = {"respostas": [
             {"id": "C3", "resposta": "LOA 2026 de R$ 412 milhões.", "itens": ["O1"], "trechos": []},
             {"id": "C5", "resposta": "O TCE-RJ apontou atraso na prestação de contas de convênios.", "itens": ["O4"]}]}
@@ -203,6 +204,8 @@ class LLMFalso:
         return NS(choices=[NS(message=NS(content=conteudo, tool_calls=chamadas), finish_reason=motivo)], usage=uso)
 
     def __call__(self, model, messages, max_tokens, **kw):
+        if model in self.modelos_que_falham:
+            raise RuntimeError(f"{model} fora do ar")
         texto = lambda c: c if isinstance(c, str) else " ".join(p["text"] for p in c)
         ultimo = texto(messages[-1]["content"])
         sistema = texto(messages[0]["content"])

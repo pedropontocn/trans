@@ -597,3 +597,21 @@ def test_proveniencia_de_cada_risco_por_codigo(funcoes):
     linha = funcoes._linha_revisao(r["R1"])
     assert linha.startswith("**Revisão:** 1 de 3 agentes sem objeção; Fazenda e orçamento vê exagero: valor pequeno; "
                             "Advogado do diabo contesta: já resolvido (F4).")
+
+
+def test_agente_de_outra_familia_que_falha_roda_no_principal(funcoes, llm):
+    llm.modelos_que_falham = {"gemini/gemini-3.8-flash"}
+    modelos = ["anthropic/claude-opus-5-5", "gemini/gemini-3.8-flash"] * 3
+    revisoes = funcoes.revisar_por_agentes("anthropic/claude-opus-5-5", "MATERIAL", {"riscos": []}, [], modelos)
+    assert all(not r.get("erro") for r in revisoes)                      # nenhum olhar se perde
+    trocados = [r for r in revisoes if r.get("substituto")]
+    assert len(trocados) == 3 and all(r["modelo"] == "anthropic/claude-opus-5-5" for r in trocados)
+    assert all(r["modelo_previsto"] == "gemini/gemini-3.8-flash" and "fora do ar" in r["erro_do_previsto"] for r in trocados)
+    nota = funcoes.nota_final("x", {"auxiliar": "a", "debate": "b"}, {"nivel": "média", "motivos": []}, "04/11/2026",
+                              None, revisoes)
+    assert "6 agente(s) independente(s)" in nota and "todos na mesma família" in nota
+    assert "3 rodaram no modelo principal porque o previsto falhou (Controle e jurídico" in nota
+    # se o principal também falha, o agente fica sem resposta, como antes
+    llm.modelos_que_falham = {"gemini/gemini-3.8-flash", "anthropic/claude-opus-5-5"}
+    revisoes = funcoes.revisar_por_agentes("anthropic/claude-opus-5-5", "MATERIAL", {"riscos": []}, [], modelos)
+    assert all(r.get("erro") for r in revisoes) and "substituto:" in revisoes[1]["erro"]
