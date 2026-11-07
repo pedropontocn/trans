@@ -72,10 +72,11 @@ ESPERAS_NOVA_TENTATIVA = (10, 30, 60)
 
 
 def _transitorio(e):
-    """Erros que passam sozinhos: limite de uso por minuto (429), serviço indisponível (503) e sobrecarga (529)."""
+    """Erros que passam sozinhos: limite de uso por minuto (429), serviço indisponível (503), sobrecarga (529) e
+    tempo esgotado na conexão (comum na cota gratuita do Google em horário de pico)."""
     texto = f"{type(e).__name__} {e}".lower()
     return any(t in texto for t in ("ratelimit", "rate limit", "rate_limit", "429", "overloaded", "529", "503",
-                                    "serviceunavailable", "service unavailable", "high demand"))
+                                    "serviceunavailable", "service unavailable", "high demand", "timeout", "timed out"))
 
 
 def _com_novas_tentativas(chamada):
