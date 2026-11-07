@@ -99,7 +99,10 @@ def esquema_de_modelos(principal, auxiliar, lista=None, familias=None):
         reparto = DISTRIBUICAO[min(len(familias), max(DISTRIBUICAO))]
         agentes = [modelo_da_familia(familias[reparto[p]]) if p in reparto else principal for p in PAPEIS_ORDEM]
     de_fora = [modelo_da_familia(f) for f in familias]
-    neutralidade = de_fora[0] if de_fora else (auxiliar if auxiliar != principal else principal)
+    # sem família de fora, a neutralidade vai para um modelo diferente do que escreveu: o auxiliar ou, se for o mesmo,
+    # o outro modelo da casa (quem revisa a própria neutralidade não encontra o próprio viés)
+    outro_da_casa = next((m for m in MODELOS if m != principal), principal)
+    neutralidade = de_fora[0] if de_fora else (auxiliar if auxiliar != principal else outro_da_casa)
     return {"agentes": agentes, "neutralidade": neutralidade, "familias": familias,
             "independente": len({m.split("/")[0] for m in agentes}) > 1}
 

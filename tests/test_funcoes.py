@@ -546,6 +546,9 @@ def test_esquema_de_modelos_por_familia(funcoes):
     # sem chave de fora: todos os agentes no principal e a neutralidade no auxiliar (ao menos outro modelo)
     e = funcoes.esquema_de_modelos(opus, sonnet, [], [])
     assert e["agentes"] == [opus] * 6 and e["neutralidade"] == sonnet and not e["independente"]
+    # auxiliar igual ao principal (tudo no Opus): a neutralidade vai para outro modelo da casa, nunca para o autor
+    e = funcoes.esquema_de_modelos(opus, opus, [], [])
+    assert e["neutralidade"] == sonnet
     # uma família de fora: 3 a 3, com o advogado do diabo e o controle fora
     e = funcoes.esquema_de_modelos(opus, sonnet, [], ["gemini"])
     assert e["agentes"] == [opus, gem, gem, opus, opus, gem] and e["neutralidade"] == gem and e["independente"]
