@@ -518,8 +518,8 @@ def test_checklist_da_o_estado_de_cada_ponto(funcoes, llm):
     r = funcoes.resumo(funcoes.conferir(brutas, d2, rel, []))
     assert r["não procurado"] >= 5 and "C6" in r["nao_procurados"]
     md = funcoes.markdown(funcoes.conferir(brutas, d2, rel, []))
-    assert "NÃO PROCURADO" in md and "procurar em: PGE e TJRJ" in md and "O4" in md
-    assert "não foram procurados" in funcoes.linha_essencial(funcoes.conferir(brutas, d2, rel, []))
+    assert "SEM INFORMAÇÃO" in md and "procurar em: PGE e TJRJ" in md and "O4" in md
+    assert "ficaram sem informação" in funcoes.linha_essencial(funcoes.conferir(brutas, d2, rel, []))
 
 
 def test_checklist_responde_contratos_por_codigo(funcoes):
@@ -544,7 +544,11 @@ def test_confianca_cai_com_ponto_nao_procurado(funcoes):
     assert funcoes.confianca(dossie_bom, riscos, todos)["nivel"] == "alta"
     um = todos[:9] + [{"id": "C10", "estado": "não procurado"}]
     c = funcoes.confianca(dossie_bom, riscos, um)
-    assert c["nivel"] == "média" and "não procurados: C10" in c["motivos"][0]
+    assert c["nivel"] == "média" and "sem informação: C10" in c["motivos"][0]
+    assert c["por_que"] == ["dos 10 temas básicos que toda secretaria precisa ter verificados, 1 ficaram sem informação (c10)"]
+    assert c["lacuna_checklist"]
+    alta = funcoes.confianca(dossie_bom, riscos, todos)
+    assert alta["por_que"] == [] and not alta["lacuna_checklist"]
     muitos = todos[:4] + [{"id": f"C{k}", "estado": "não procurado"} for k in range(5, 11)]
     assert funcoes.confianca(dossie_bom, riscos, muitos)["nivel"] == "baixa"
 
@@ -730,3 +734,25 @@ def test_painel_mostra_servicos_essenciais_que_podem_parar(funcoes):
     assert "| SES | 1 (R$ 2,0 mi) | – | 1 (R$ 1,0 mi) | 2 (R$ 3,0 mi) |" in md
     assert "**Prioridade máxima (1)**" in md and "| 20/11/2026 | SES | 2026000001: Aquisição de medicamentos | FARMA LTDA |" in md
     assert funcoes.markdown_apagao([]) == []
+
+
+def test_quadro_antes_de_ler_diz_o_que_e_a_confianca_e_os_cortes(funcoes):
+    conf = funcoes.confianca({"itens": 10, "conferidos": 9}, [{"firmeza": "confirmado em fonte oficial"}] * 3,
+                             [{"id": "C3", "tema": "Execução orçamentária", "estado": "não procurado"},
+                              {"id": "C5", "tema": "TCE-RJ", "estado": "não procurado"}]
+                             + [{"id": f"C{k}", "tema": "x", "estado": "encontrado"} for k in (1, 2)])
+    assert conf["nivel"] == "média" and "execução orçamentária, tce-rj" in conf["por_que"][0]
+    cortes = funcoes.cortes_de_leitura(
+        {"cortados": [{"arquivo": "Controle_SECID.xlsx", "caracteres": 93411, "usados": 60000}]},
+        ["⚠️ O relatório tem 500.000 caracteres e passou do limite de 400.000: o final (cerca de 20%) foi cortado e não "
+         "entra na análise.", "3 endereço(s) de e-mail foram omitidos."])
+    assert cortes == ["Controle_SECID.xlsx (60 de 93 mil caracteres lidos)",
+                      "O relatório tem 500.000 caracteres e passou do limite de 400.000: o final (cerca de 20%) foi cortado"]
+    md = funcoes.antes_de_ler(conf, "04/11/2026", cortes)
+    assert md.startswith("## Antes de ler\n- **O que é:**") and "data de corte 04/11/2026" in md
+    assert "**Confiança desta análise: MÉDIA**, porque dos 4 temas básicos" in md
+    assert "Silêncio do documento sobre esses temas não quer dizer que não haja risco." in md
+    assert "Confirme os pontos marcados" in md and md.count("**Material cortado:**") == 2
+    assert "SIGA nem sempre registra aditivos" in md and md.rstrip().endswith("confira antes de usar.")
+    baixa = funcoes.confianca(None, [], None)
+    assert "não houve dossiê" in funcoes.antes_de_ler(baixa, "", []) and "não para afirmar" in funcoes.antes_de_ler(baixa, "", [])

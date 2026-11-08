@@ -202,11 +202,11 @@ def markdown(checklist):
     if not checklist:
         return ""
     r = resumo(checklist)
-    linhas = ["## Cobertura – o que foi procurado",
-              f"Dez pontos que toda secretaria precisa responder. Estado conferido por código: {r['encontrado']} "
-              f"encontrado(s), {r['procurado e não encontrado']} procurado(s) sem resultado, {r['não procurado']} não "
-              "procurado(s). **Ponto não procurado não significa que não há risco: significa que ninguém olhou.** "
-              "Estado: ✔ encontrado · ○ procurado, sem resultado · ✖ não procurado.",
+    linhas = ["## Cobertura dos temas básicos",
+              f"Dez temas básicos que toda secretaria precisa ter verificados. Estado conferido por código: "
+              f"{r['encontrado']} encontrado(s), {r['procurado e não encontrado']} procurado(s) sem resultado, "
+              f"{r['não procurado']} sem informação. **Tema sem informação não significa que não há risco: nem o material da secretaria nem as "
+              "fontes trazem nada conferível sobre ele.** Estado: ✔ encontrado · ○ procurado, sem resultado · ✖ sem informação.",
               "| # | Ponto | Estado | O que o material diz | Base |", "|---|---|---|---|---|"]
     for c in checklist:
         if c["estado"] == "encontrado":
@@ -215,7 +215,7 @@ def markdown(checklist):
             base = c.get("firmeza") or "registro da pesquisa"
         else:
             base = f"procurar em: {c['onde_procurar']}"
-        marca = {"encontrado": "✔", "procurado e não encontrado": "○", "não procurado": "✖ NÃO PROCURADO"}[c["estado"]]
+        marca = {"encontrado": "✔", "procurado e não encontrado": "○", "não procurado": "✖ SEM INFORMAÇÃO"}[c["estado"]]
         resposta = re.sub(r"\s+", " ", c.get("resposta") or "–")
         resposta = resposta if len(resposta) <= 170 else resposta[:169].rstrip() + "…"
         linhas.append(f"| {c['id']} | {c['tema']} | {marca} | {resposta} | {base} |")
@@ -228,7 +228,7 @@ def linha_essencial(checklist):
     if not r["total"]:
         return ""
     if not r["nao_procurados"]:
-        return f"Cobertura: os {r['total']} pontos obrigatórios foram procurados ({r['encontrado']} encontrados)."
+        return f"Cobertura: os {r['total']} temas básicos têm informação ({r['encontrado']} encontrados)."
     temas = {c["id"]: c["tema"] for c in checklist}
-    return (f"**Lacunas: {len(r['nao_procurados'])} de {r['total']} pontos obrigatórios não foram procurados** "
+    return (f"**Lacunas: {len(r['nao_procurados'])} de {r['total']} temas básicos ficaram sem informação** "
             f"({', '.join(temas[i] for i in r['nao_procurados'])}). Ver a tabela de cobertura no Capítulo 1.")

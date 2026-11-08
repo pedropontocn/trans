@@ -625,25 +625,35 @@ def revisar_neutralidade(modelo, texto, uso_lista=None):
 
 def confianca(resumo_dossie, riscos, cobertura=None):
     """Confiança da análise por regras explícitas: conferência do dossiê, firmeza dos fatos que sustentam os riscos e
-    cobertura do checklist obrigatório (ponto não procurado derruba a confiança: alta só sem nenhum em branco)."""
-    nivel, motivos = 2, []
+    cobertura do checklist (tema sem informação derruba a confiança: alta só sem nenhum em branco). Devolve também, em
+    português, o que derrubou a nota ("por_que"), para a abertura do documento."""
+    criterios = []                                   # (nível, motivo técnico, motivo em português)
     if cobertura:
-        em_branco = [c["id"] for c in cobertura if c["estado"] == "não procurado"]
-        motivos.append(f"{len(cobertura) - len(em_branco)} de {len(cobertura)} pontos do checklist obrigatório procurados"
-                       + (f" (não procurados: {', '.join(em_branco)})" if em_branco else ""))
-        nivel = min(nivel, 0 if len(em_branco) > len(cobertura) / 2 else 1 if em_branco else 2)
+        em_branco = [c for c in cobertura if c["estado"] == "não procurado"]
+        nivel = 0 if len(em_branco) > len(cobertura) / 2 else 1 if em_branco else 2
+        criterios.append((nivel, f"{len(cobertura) - len(em_branco)} de {len(cobertura)} temas do checklist com informação"
+                          + (f" (sem informação: {', '.join(c['id'] for c in em_branco)})" if em_branco else ""),
+                          f"dos {len(cobertura)} temas básicos que toda secretaria precisa ter verificados, {len(em_branco)} "
+                          f"ficaram sem informação ({', '.join(c.get('tema', c['id']).lower() for c in em_branco)})"))
     if resumo_dossie and resumo_dossie.get("itens"):
         c = resumo_dossie["conferidos"] / resumo_dossie["itens"]
-        motivos.append(f"{resumo_dossie['conferidos']} de {resumo_dossie['itens']} fatos do dossiê conferidos na fonte "
-                       "ou vindos do SIGA/PNCP")
-        nivel = min(nivel, 0 if c < 0.4 else 1 if c < 0.7 else 2)
+        criterios.append((0 if c < 0.4 else 1 if c < 0.7 else 2,
+                          f"{resumo_dossie['conferidos']} de {resumo_dossie['itens']} fatos do dossiê conferidos na fonte "
+                          "ou vindos do SIGA/PNCP",
+                          f"só {resumo_dossie['conferidos']} dos {resumo_dossie['itens']} fatos do dossiê puderam ser "
+                          "conferidos na fonte"))
     else:
-        motivos.append("sem dossiê de fontes independentes")
-        nivel = 0
+        criterios.append((0, "sem dossiê de fontes independentes", "não houve dossiê de fontes independentes"))
     if riscos:
         fracos = [r for r in riscos if r["firmeza"] in ("informado pelo órgão", "sem comprovação",
                                                         "fonte pública não conferida", "só na imprensa")]
-        motivos.append(f"{len(riscos) - len(fracos)} de {len(riscos)} riscos apoiados em fonte oficial, conferida ou "
-                       "no SIGA/PNCP")
-        nivel = min(nivel, 0 if len(fracos) / len(riscos) > 0.6 else 1 if len(fracos) / len(riscos) > 0.3 else 2)
-    return {"nivel": ["baixa", "média", "alta"][nivel], "motivos": motivos}
+        p = len(fracos) / len(riscos)
+        criterios.append((0 if p > 0.6 else 1 if p > 0.3 else 2,
+                          f"{len(riscos) - len(fracos)} de {len(riscos)} riscos apoiados em fonte oficial, conferida ou "
+                          "no SIGA/PNCP",
+                          f"{len(fracos)} dos {len(riscos)} riscos se apoiam só no que a secretaria informou ou em fonte "
+                          "que não pôde ser conferida"))
+    nivel = min(c[0] for c in criterios)
+    por_que = [c[2] for c in criterios if c[0] == nivel] if nivel < 2 else []
+    return {"nivel": ["baixa", "média", "alta"][nivel], "motivos": [c[1] for c in criterios], "por_que": por_que,
+            "lacuna_checklist": any(m.startswith("dos ") for m in por_que)}

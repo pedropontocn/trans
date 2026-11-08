@@ -705,6 +705,48 @@ def markdown_visoes(resultado):
     return "\n".join(linhas)
 
 
+FRASE_CONFIANCA = {"alta": "Pode servir de base; confira os pontos marcados como \"órgão\".",
+                   "média": "Confirme os pontos marcados como \"órgão\" ou \"sem comprovação\" antes de usar.",
+                   "baixa": "Use para saber o que perguntar à secretaria, não para afirmar."}
+
+
+def antes_de_ler(confianca, data_corte, cortes=None, contratos=True):
+    """O quadro de abertura do dossiê e do relatório de riscos: o que é o documento, a confiança (com o motivo em
+    português e o que fazer com ela), material cortado, como ler a base de cada informação e as ressalvas."""
+    linhas = ["## Antes de ler",
+              f"- **O que é:** apoio à decisão gerado com IA a partir do que a secretaria enviou, do dossiê de fontes "
+              f"públicas e dos dados do SIGA/PNCP e da SEPLAG, com data de corte {data_corte or 'não informada'}. Expõe "
+              "riscos e opções; não recomenda decisões."]
+    if confianca:
+        nivel = confianca["nivel"]
+        por_que = "; ".join(confianca.get("por_que") or [])
+        texto = f"- **Confiança desta análise: {nivel.upper()}**" + (f", porque {por_que}." if por_que else ".")
+        if confianca.get("lacuna_checklist"):
+            texto += " Silêncio do documento sobre esses temas não quer dizer que não haja risco."
+        linhas.append(f"{texto} {FRASE_CONFIANCA[nivel]}")
+    for c in cortes or []:
+        linhas.append(f"- **Material cortado:** {c}. O que estava no trecho cortado não entrou na análise.")
+    linhas.append("- **Base de cada informação:** \"SIGA/PNCP\" e \"fonte oficial ✔\" são dados conferidos; \"órgão\" é o "
+                  "que a secretaria declarou; \"sem comprovação\" precisa ser confirmado.")
+    if contratos:
+        linhas.append("- **Contratos:** o SIGA nem sempre registra aditivos de prazo. Confirme no PNCP ou no DOERJ antes "
+                      "de cobrar.")
+    linhas.append("- **Sem revisão da equipe:** confira antes de usar.")
+    return "\n".join(linhas)
+
+
+def cortes_de_leitura(manifesto=None, avisos=None):
+    """O que foi cortado do material da secretaria, em frases curtas: arquivos de uma pasta (pelo manifesto) e o
+    relatório que passou do limite (pelos avisos da limpeza)."""
+    cortes = []
+    for c in (manifesto or {}).get("cortados") or []:
+        cortes.append(f"{c['arquivo']} ({c['usados'] // 1000} de {c['caracteres'] // 1000} mil caracteres lidos)")
+    for a in avisos or []:
+        if "foi cortado" in a:
+            cortes.append(re.sub(r"^⚠️\s*", "", a).rstrip(". ").replace(" e não entra na análise", ""))
+    return cortes
+
+
 def resumo_do_dossie(resultado, cobertura=None, indicadores=None):
     """A abertura do dossiê: a situação da secretaria em poucas frases, os números-chave e as lacunas do checklist."""
     from .checklist import linha_essencial
@@ -916,7 +958,7 @@ def _papeis():
 
 
 def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
-                      contratos_criticos=None):
+                      contratos_criticos=None, antes_md=""):
     """Produto 2, o dossiê da secretaria atualizado com o que ela informou: resumo e números-chave; 1. Contratos (com
     a tabela dos críticos); 2. Pessoal; 3. Passivos; 4. Orçamento, obras e estrutura; 5. o confronto entre o que a
     secretaria informou e o que as fontes mostram; 6. a cobertura do checklist; anexos com fontes citadas e prazos que
@@ -924,7 +966,7 @@ def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobert
     outros = [e for e in eventos or [] if not e.get("origem", "").startswith("Contratos")]
     venc = markdown_vencimentos(outros, limite=10)
     venc = ("## Anexo – Prazos de controle, convênios e outros vencimentos\n" + venc.split("\n", 1)[1]) if venc else ""
-    partes = [resumo_do_dossie(resultado, cobertura, (diag or {}).get("indicadores")),
+    partes = [antes_md, resumo_do_dossie(resultado, cobertura, (diag or {}).get("indicadores")),
               markdown_capitulos(diag, contratos_criticos, ficha, (dossie or {}).get("folha")),
               markdown_confronto(dossie, confronto),
               markdown_fontes(dossie, None, ids_citados(diag, resultado, contratos_criticos), cobertura_md),
@@ -960,15 +1002,15 @@ def _divergencias(r):
     return "; ".join(partes)
 
 
-def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedir=5):
+def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedir=5, antes_md=""):
     """Produto 3, o relatório de riscos, em até 3 páginas: situação; tabela de todos os riscos (prazo, janela,
     prioridade, sensibilidade política, base, revisão); cada risco em três linhas; decisões em aberto com as opções numa
     linha; o que pedir à secretaria. Sem anexo: as visões e objeções completas ficam no registro de auditoria."""
     from .checklist import linha_essencial
     riscos = sorted((resultado.get("riscos") or [])[:limite_riscos], key=lambda r: (r.get("agir_ate") or date.max, -r["nota"]))
-    md = ["## Situação"] + [f"- {_curto(x, 260)}" for x in (resultado.get("situacao") or [])[:4]]
+    md = ([antes_md] if antes_md else []) + ["## Situação"] + [f"- {_curto(x, 260)}" for x in (resultado.get("situacao") or [])[:4]]
     lacunas = linha_essencial(cobertura) if cobertura else ""
-    if lacunas and "não foram procurados" in lacunas:
+    if lacunas and "sem informação" in lacunas:
         md.append(lacunas.replace(" Ver a tabela de cobertura no Capítulo 1.", " Ver o dossiê da secretaria."))
     if riscos:
         votado = any(r.get("votos") for r in riscos)
@@ -1124,6 +1166,5 @@ def nota_final(registro_id, modelos, confianca, data_corte, neutralidade=None, r
                   if substitutos else "") + ".") if revisoes else "",
               f"Revisão de neutralidade: {neutralidade['avaliacao_geral'].replace('_', ' ')}."
               if neutralidade and not neutralidade.get("erro") and neutralidade.get("avaliacao_geral") else "",
-              "Método, conferências por código e revisões completas no arquivo de auditoria. Gerado em processamento "
-              "automático, sem revisão da equipe: confira antes de usar."]
+              "Método, conferências por código e revisões completas no arquivo de auditoria."]
     return "_" + " ".join(p for p in partes if p) + "_"

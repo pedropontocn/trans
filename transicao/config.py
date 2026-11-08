@@ -10,7 +10,7 @@ MODELOS = [
 ]
 
 
-LIMITE_CARACTERES = 150_000      # documentos brutos de uma pasta (Drive ou .zip), somados
+LIMITE_CARACTERES = 400_000      # documentos brutos de uma pasta (Drive ou .zip), somados: o mesmo do relatório
 
 
 # Relatório ou resumo do órgão: é o material já preparado e precisa ser lido inteiro. 400 mil caracteres são cerca de

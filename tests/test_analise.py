@@ -535,3 +535,27 @@ def test_json_invalido_na_analise_e_pedido_de_novo_e_o_erro_diz_o_motivo(llm):
     with pytest.raises(analise.ErroAnalise) as erro:
         analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
     assert "motivo de parada: stop / stop" in str(erro.value) and "Pregão" in str(erro.value)
+
+
+def test_antes_de_ler_abre_dossie_e_relatorio(llm):
+    from transicao import analise
+    manifesto = {"cortados": [{"arquivo": "Controle.xlsx", "caracteres": 93411, "usados": 60000}]}
+    r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG, manifesto=manifesto)
+    for md in (r["dossie_md"], r["riscos_md"]):
+        assert md.startswith("## Antes de ler\n- **O que é:**")
+        assert "**Confiança desta análise:" in md and "Controle.xlsx (60 de 93 mil caracteres lidos)" in md
+    assert "sem revisão da equipe: confira antes de usar" not in r["riscos_md"].split("## Situação")[1]   # não repete no fim
+
+
+def test_pesquisa_do_estado_e_reaproveitada_no_mesmo_dia(llm, tmp_path):
+    from transicao import analise
+    orgaos = [{"nome": "Secretaria de Exemplo - SEX", "texto": RELATORIO}]
+    registros = []
+    analise.rodar_orgaos(orgaos, CFG, tmp_path / "a", log=registros.append)
+    pedidos_estado = lambda: sum('camada\n"Estado"' in c["mensagens"][0]["content"] for c in llm.chamadas)
+    antes = pedidos_estado()
+    assert antes > 0 and not any("reaproveitando" in x for x in registros)
+    registros.clear()
+    analise.rodar_orgaos(orgaos, CFG, tmp_path / "b", log=registros.append)
+    assert pedidos_estado() == antes and any("reaproveitando a pesquisa de hoje" in x for x in registros)
+    assert any("sem custo" in x for x in registros)
