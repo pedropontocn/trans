@@ -635,3 +635,39 @@ def test_agente_de_outra_familia_que_falha_roda_no_principal(funcoes, llm):
     llm.modelos_que_falham = {"gemini/gemini-3.8-flash", "anthropic/claude-opus-5-5"}
     revisoes = funcoes.revisar_por_agentes("anthropic/claude-opus-5-5", "MATERIAL", {"riscos": []}, [], modelos)
     assert all(r.get("erro") for r in revisoes) and "substituto:" in revisoes[1]["erro"]
+
+
+def test_dossies_embutidos_sao_lidos_e_o_enviado_vale_sobre_eles(funcoes, tmp_path, monkeypatch):
+    import zipfile, io
+    pacote = io.BytesIO()
+    with zipfile.ZipFile(pacote, "w") as z:
+        z.writestr("dossies/00_CONSOLIDACAO_ESTADUAL.md", "| Sigla | Secretaria |\n|---|---|\n| SETUR | Secretaria de Turismo |\n| SEFAZ | Secretaria de Fazenda |\n")
+        z.writestr("dossies/SETUR.md", "# Dossiê reduzido SETUR\n- fato")
+        z.writestr("dossies/SEFAZ.md", "# Dossiê reduzido SEFAZ\n- fato")
+        z.writestr("dossies_automaticos/dados_vencimentos/SETUR_vencimentos_180d.csv", "contratacao;fim\n1;01/12/2026\n")
+        z.writestr("referencia/REVISAO.md", "ignorar")
+    (tmp_path / "Transicao_RJ_dossies_06-11-2026.zip").write_bytes(pacote.getvalue())
+    (tmp_path / "LEIA-ME.md").write_text("como atualizar", encoding="utf-8")
+    dossies, data = funcoes.dossies_embutidos(tmp_path)
+    assert data == "06/11/2026" and [d["orgao"] for d in dossies] == ["Secretaria de Fazenda - SEFAZ", "Secretaria de Turismo - SETUR"]
+    assert all(d["embutido"] for d in dossies) and "contratos" in next(d for d in dossies if "SETUR" in d["orgao"])["partes"]
+    # pasta vazia ou inexistente: nada
+    assert funcoes.dossies_embutidos(tmp_path / "nada") == ([], "")
+    # a variável PASTA_DOSSIES aponta para outra pasta
+    monkeypatch.setenv("PASTA_DOSSIES", str(tmp_path))
+    assert len(funcoes.dossies_embutidos()[0]) == 2
+    # o enviado vale sobre o embutido da mesma secretaria; as demais continuam
+    enviado = funcoes.dossies_do_envio([("SETUR.md", b"# Dossie novo SETUR")])
+    juntos = {d["orgao"]: d for d in funcoes.juntar_dossies(dossies, enviado)}
+    assert set(juntos) == {"Secretaria de Fazenda - SEFAZ", "Secretaria de Turismo - SETUR"}   # casa pela sigla
+    assert not juntos["Secretaria de Turismo - SETUR"].get("embutido") and juntos["Secretaria de Fazenda - SEFAZ"]["embutido"]
+    assert b"novo" in juntos["Secretaria de Turismo - SETUR"]["partes"]["dossie"]
+
+
+def test_pacote_embutido_no_repositorio_cobre_as_31_secretarias(funcoes):
+    dossies, data = funcoes.dossies_embutidos()
+    assert data == "06/11/2026" and len(dossies) >= 31
+    secid = next(d for d in dossies if d["orgao"].endswith("- SECID"))
+    assert {"pesquisa", "dossie", "contratos"} <= set(secid["partes"])
+    textos = funcoes._texto_dossie(secid)
+    assert "contratacao;" in textos["contratos"] and "Secretaria de Estado das Cidades" in textos["dossie"]

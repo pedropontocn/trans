@@ -49,10 +49,17 @@ def trabalho_atual():
     return t[max(t)] if t else None
 
 
+@st.cache_resource(show_spinner=False)
+def _embutidos():
+    """O pacote de dossiês que vem com o app, lido uma vez."""
+    return entrada.dossies_embutidos()
+
+
 def montar_orgaos(enviados, dossies_enviados, cada_pasta):
-    """Lê os envios (lista de (nome, bytes)) e devolve a lista de órgãos da tabela e os dossiês por rótulo."""
+    """Lê os envios (lista de (nome, bytes)) e devolve a lista de órgãos da tabela e os dossiês por rótulo. Os dossiês
+    embutidos no app valem para toda secretaria; um pacote enviado vale sobre eles."""
     orgaos_lidos = entrada.orgaos_do_envio(enviados, cada_pasta)
-    todos_dossies = entrada.dossies_do_envio(dossies_enviados)
+    todos_dossies = entrada.juntar_dossies(_embutidos()[0], entrada.dossies_do_envio(dossies_enviados))
     dossies = {d["orgao"]: d for d in todos_dossies}
     sobrando = entrada.casar_dossies(orgaos_lidos, todos_dossies)
     # secretaria com dossiê e sem documento enviado: pode ser analisada só com o dossiê (desmarcada)
@@ -306,12 +313,18 @@ if not trabalho or trabalho["situacao"] != "rodando":
                         horizontal=True,
                         help="Resumos: o nome do órgão vem do nome do arquivo. Documentos brutos: suba o .zip da pasta "
                              "que tem uma subpasta por órgão; o app lê os Word, PDF e planilhas de cada uma.")
+        embutidos, data_embutidos = _embutidos()
+        if embutidos:
+            st.caption(f"📚 Dossiês embutidos: {len(embutidos)} secretarias, pacote de {data_embutidos or 'data não informada'} "
+                       "(pesquisa com citações, painel do SIGA/PNCP e planilha de vencimentos). Usados automaticamente; "
+                       "um pacote enviado abaixo vale sobre eles.")
         dossies_enviados = st.file_uploader(
-            "Dossiês das secretarias (opcional: o .zip da equipe, ou Word, PDF e Markdown)", type=["zip", "docx", "pdf", "md", "txt"],
+            "Dossiês mais novos (opcional: o .zip da equipe, ou Word, PDF e Markdown)", type=["zip", "docx", "pdf", "md", "txt"],
             accept_multiple_files=True,
             help="O .zip de dossiês da equipe (por sigla: pesquisa com citações, painel do SIGA/PNCP e planilha de "
-                 "vencimentos) ou um arquivo por secretaria. Para o órgão que tiver dossiê, o app não pesquisa a web: "
-                 "confere os links do dossiê e põe os vencimentos da planilha direto no calendário.")
+                 "vencimentos) ou um arquivo por secretaria. Vale sobre o dossiê embutido da mesma secretaria. Para o "
+                 "órgão que tiver dossiê, o app não pesquisa a web: confere os links do dossiê e põe os vencimentos da "
+                 "planilha direto no calendário.")
         enviados, dossies_enviados = enviados or [], dossies_enviados or []
         if enviados or dossies_enviados:
             cada_pasta = modo.startswith("Cada pasta")
@@ -330,10 +343,15 @@ if not trabalho or trabalho["situacao"] != "rodando":
             orgaos = st.session_state.get("orgaos") or []
             dossies = st.session_state.get("dossies") or {}
             so_dossie = [o for o in orgaos if o.get("so_dossie")]
+            mostrar_so_dossie = True
             if so_dossie and enviados:
-                st.caption(f"{len(so_dossie)} secretaria(s) têm dossiê, mas nenhum documento enviado: aparecem no fim da "
-                           "tabela, desmarcadas. Marque as que quiser analisar só com o dossiê. Se o dossiê é de uma "
-                           "secretaria que tem documento, escolha-o na coluna Dossiê da linha do documento.")
+                mostrar_so_dossie = st.checkbox(
+                    f"Mostrar as {len(so_dossie)} secretarias que têm dossiê mas nenhum documento enviado",
+                    value=False, help="Aparecem desmarcadas no fim da tabela; marque as que quiser analisar só com o "
+                                      "dossiê. Se o dossiê é de uma secretaria que tem documento, escolha-o na coluna "
+                                      "Dossiê da linha do documento.")
+            if not mostrar_so_dossie:
+                orgaos = [o for o in orgaos if not o.get("so_dossie")]
             if not orgaos:
                 st.warning("Não achei nenhum órgão no envio. Confira se escolheu a organização certa acima.")
             else:
