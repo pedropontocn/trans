@@ -96,7 +96,10 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
                                checklist.texto_para_analise(cobertura))
     analise = riscos.analisar(principal, material, uso)
     if not analise.get("riscos"):
-        raise ErroAnalise("a análise de riscos não devolveu riscos legíveis")
+        falha = modelo.ultima_falha()
+        detalhe = (f" (motivo de parada: {falha[1]}; início da resposta: \"{falha[2]}\")" if falha
+                   else " (o JSON veio sem a lista de riscos)")
+        raise ErroAnalise("a análise de riscos não devolveu riscos legíveis" + detalhe)
     progresso("Seis agentes revisando a análise (cinco olhares e o advogado do diabo)...")
     esquema = esquema_de_modelos(principal, auxiliar, cfg.get("modelos_agentes"), cfg.get("familias"))
     modelos_agentes = esquema["agentes"]

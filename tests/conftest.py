@@ -191,6 +191,7 @@ class LLMFalso:
                                  {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
         self.falhar_neutralidade = False
         self.modelos_que_falham = set()           # modelos (nomes) que respondem como fora do ar
+        self.analises_quebradas = 0               # quantas respostas da análise de riscos vêm com JSON inválido
         self.checklist = {"respostas": [
             {"id": "C3", "resposta": "LOA 2026 de R$ 412 milhões.", "itens": ["O1"], "trechos": []},
             {"id": "C5", "resposta": "O TCE-RJ apontou atraso na prestação de contas de convênios.", "itens": ["O4"]}]}
@@ -247,7 +248,11 @@ class LLMFalso:
             self.mensagem_calendario = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.calendario) + "[FIM DO JSON]")
         if "Você é analista de riscos" in sistema:
-            self.material_riscos = ultimo
+            if self.analises_quebradas > 0:                       # simula JSON inválido (aspas sem escape)
+                self.analises_quebradas -= 1
+                return self._resp('[INÍCIO DO JSON]{"situacao": ["O "Pregão" 002/2024"], "riscos": [[FIM DO JSON]')
+            if "não é um JSON válido" not in ultimo:
+                self.material_riscos = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.analise_riscos) + "[FIM DO JSON]")
         if "Você vota, item a item" in sistema:
             papel = re.search(r"VOCÊ É: ([^.]+)\.", sistema).group(1)
