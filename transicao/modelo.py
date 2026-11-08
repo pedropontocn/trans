@@ -49,6 +49,23 @@ def _completion_litellm(**kw):
     return completion(**kw)
 
 
+def em_lote():
+    """A chamada deste fio vai pela fila da Batch API (modo econômico)?"""
+    return getattr(_FIO, "completion", None) is not None
+
+
+def mensagens_compartilhadas(modelo, instrucoes, comum):
+    """Mensagens de uma chamada que repete o mesmo material em várias (os seis agentes, as seis votações): o material
+    vai primeiro, em cache, e as instruções de cada um depois. Assim a primeira chamada grava o material e as outras o
+    leem por 5% do preço. Fora da Anthropic, o formato de sempre."""
+    if not _usa_cache(modelo):
+        return [{"role": "system", "content": instrucoes}, {"role": "user", "content": comum}]
+    return [{"role": "system", "content": [{"type": "text", "text": SISTEMA_COMUM}]},
+            {"role": "user", "content": [
+                {"type": "text", "text": comum, "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": f"<instrucoes>\n{instrucoes.strip()}\n</instrucoes>\n\nSiga as instruções acima."}]}]
+
+
 def _contexto_do_fio():
     completion_pai, uso_pai = getattr(_FIO, "completion", None), uso_do_fio()
 
@@ -161,6 +178,7 @@ def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa="", uso_
     registro = {"etapa": etapa, "modelo": modelo, "entrada": normal + leitura + escrita, "entrada_sem_cache": normal,
                 "cache_leitura": leitura, "cache_escrita": escrita, "cache_escrita_1h": escrita_1h,
                 "saida": int(getattr(uso, "completion_tokens", 0) or 0), "buscas": int(buscas or 0),
+                "raciocinio": _tokens_de_raciocinio(uso),
                 "lote_api": bool(getattr(resp, "desconto_lote", False))}
     (uso_lista if uso_lista is not None else uso_do_fio()).append(registro)
     escolha = resp.choices[0]
@@ -176,6 +194,18 @@ def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa="", uso_
         except (json.JSONDecodeError, TypeError, AttributeError):
             continue
     return (msg.content or ""), argumentos, getattr(escolha, "finish_reason", None)
+
+
+def _tokens_de_raciocinio(uso):
+    """Quantos dos tokens de saída foram de raciocínio (pensamento), se a resposta disser: pagam como saída."""
+    detalhes = getattr(uso, "completion_tokens_details", None)
+    valor = getattr(detalhes, "reasoning_tokens", None)
+    if valor is None and isinstance(detalhes, dict):
+        valor = detalhes.get("reasoning_tokens")
+    try:
+        return int(valor or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 _FALHAS = threading.local()

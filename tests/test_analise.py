@@ -474,6 +474,24 @@ def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
     texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "dossies").glob("*_dossie.docx"))).paragraphs)
     assert "Cobertura do checklist obrigatório" in texto and "Contratos críticos" in texto
     import openpyxl
+    calendarios = list((tmp_path / "calendarios").glob("*_calendario.xlsx"))
+    celulas = [str(c.value) for f in calendarios for ws in openpyxl.load_workbook(f).worksheets
+               for linha in ws.iter_rows() for c in linha]
+    assert not any("2025000001" in v for v in celulas)            # contrato do SIGA/PNCP: fora por padrão
+    registro = json.loads(next((tmp_path / "auditoria").glob("secretaria_de_exemplo.json")).read_text(encoding="utf-8"))
+    fora = [i for i in registro["dossie"]["itens"] if i.get("fora_por")]
+    assert fora and all(i["bloco"] == "contratos_convenios" for i in fora)
+    material = " ".join(json.dumps(c["mensagens"], ensure_ascii=False) for c in llm.chamadas)
+    assert "2025000001" not in material                            # nem chega ao modelo
+
+
+def test_bases_de_contratos_podem_voltar(llm, tmp_path, monkeypatch):
+    import openpyxl
+    from transicao import analise, config
+    monkeypatch.setattr(config, "CONTRATOS_SO_DA_SECRETARIA", False)
+    partes = {"pesquisa": PESQUISA, "dossie": REDUZIDO, "contratos": CONTRATOS}
+    orgaos = [{"nome": "Secretaria de Exemplo", "texto": RELATORIO, "ler_dossie": lambda: partes}]
+    assert analise.rodar_orgaos(orgaos, CFG, tmp_path, log=lambda *_: None)[0]["situacao"] == "concluído"
     planilha = openpyxl.load_workbook(next((tmp_path / "calendarios").glob("*_calendario.xlsx"))).active
     assert any("2025000001" in str(c.value) for linha in planilha.iter_rows() for c in linha)
 

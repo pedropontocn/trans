@@ -28,7 +28,7 @@ def confrontar(modelo, dossie, relatorio):
     dados = chamar_json(
         modelo, mensagens_com_cache(modelo, PROMPT_CONFRONTO, material_referencia(dossie, relatorio),
                                     "Faça o confronto pedido nas instruções."),
-        8000, etapa="confronto autodeclaração × dossiê", uso_lista=uso)
+        16000, etapa="confronto autodeclaração × dossiê", uso_lista=uso)
     comp = _comparavel(relatorio)
     sh = _shingles(comp.split())
     validas, descartadas = [], 0

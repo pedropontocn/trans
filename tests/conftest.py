@@ -256,8 +256,8 @@ class LLMFalso:
             if "não é um JSON válido" not in ultimo:
                 self.material_riscos = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.analise_riscos) + "[FIM DO JSON]")
-        if "Você vota, item a item" in sistema:
-            papel = re.search(r"VOCÊ É: ([^.]+)\.", sistema).group(1)
+        if "Você vota, item a item" in contexto:
+            papel = re.search(r"VOCÊ É: ([^.]+)\.", contexto).group(1)
             with self.trava:
                 self.votantes = getattr(self, "votantes", []) + [papel]
             if papel in self.agentes_que_falham:
@@ -270,7 +270,7 @@ class LLMFalso:
                       "por_que_sensibilidade": "TCE apontou (F4)" if i == "R1" else "gestão interna",
                       "fatos": ["F1"]} for i in ids]
             return self._resp("[INÍCIO DO JSON]" + json.dumps({"votos": votos}) + "[FIM DO JSON]")
-        if "Você é o ADVOGADO DO DIABO" in sistema:
+        if "Você é o ADVOGADO DO DIABO" in contexto:
             with self.trava:
                 self.agentes_vistos = getattr(self, "agentes_vistos", []) + ["Advogado do diabo"]
             if "Advogado do diabo" in self.agentes_que_falham:
@@ -279,8 +279,8 @@ class LLMFalso:
                 "contestados": [{"risco": "R2", "motivo": "o risco inventado não tem fato no material", "fatos": ["F1"]}],
                 "sustentados": ["R1"],
                 "decisoes": [{"decisao": "Q1", "opcao": 1, "teme": "licitar sem caixa", "valoriza": ""}]}) + "[FIM DO JSON]")
-        if "Você revisa a análise de riscos" in sistema:
-            papel = re.search(r"VOCÊ É: ([^.]+)\.", sistema).group(1)
+        if "Você revisa a análise de riscos" in contexto:
+            papel = re.search(r"VOCÊ É: ([^.]+)\.", contexto).group(1)
             with self.trava:
                 self.agentes_vistos = getattr(self, "agentes_vistos", []) + [papel]
             if papel in self.agentes_que_falham:
