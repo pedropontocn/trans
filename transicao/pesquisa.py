@@ -490,7 +490,7 @@ def dossie_para_json(dossie):
     return json.dumps({k: dossie.get(k) for k in campos}, ensure_ascii=False, indent=2)
 
 
-# --- DOSSIÊ ENVIADO (montado fora do app: pesquisa com citações + contratos do SIGA/PNCP) ------------------
+# --- DOSSIÊ ENVIADO (montado fora do app: pesquisa com citações) -----------------------------------------
 
 TEMAS = [  # palavras do fato ou do título da seção → bloco do órgão (o dossiê enviado é de uma secretaria)
     (r"comissionad|cargos? em comiss|servidores|concurso|terceiriz", "pessoal"),
@@ -564,97 +564,6 @@ def itens_citados(texto):
     return itens, lacunas
 
 
-def ler_contratos(csv_texto):
-    """As linhas da planilha de vencimentos (separador ';'), como dicionários."""
-    import csv
-    return [dict(l) for l in csv.DictReader(io.StringIO((csv_texto or "").lstrip("﻿")), delimiter=";")]
-
-
-def _reais(valor):
-    try:
-        v = float(str(valor).replace(",", "."))
-    except ValueError:
-        return ""
-    return "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-def itens_de_contratos(contratos, maximo=20):
-    """Os contratos que mais pesam na transição viram fatos do dossiê: os maiores que vencem em até 90 dias e, depois,
-    os maiores até 180 dias. Vêm da base de contratos do Estado (SIGA) com vigência conferida no PNCP ou no DOERJ."""
-    def valor(c):
-        try:
-            return float(c.get("valor_atualizado") or c.get("valor") or 0)
-        except ValueError:
-            return 0.0
-
-    def dias(c):
-        try:
-            return int(c.get("dias_para_vencer") or 9999)
-        except ValueError:
-            return 9999
-    def confirmada(c):
-        return str(c.get("fonte_vigencia") or "").strip().upper().startswith(("PNCP", "DOERJ"))
-    so_siga = [c for c in contratos if not confirmada(c) and 0 <= dias(c) <= 180]
-    contratos = [c for c in contratos if confirmada(c)]
-    escolhidos = sorted([c for c in contratos if dias(c) <= 90], key=valor, reverse=True)[:maximo]
-    escolhidos += sorted([c for c in contratos if 90 < dias(c) <= 180], key=valor, reverse=True)[:max(0, maximo - len(escolhidos))]
-    itens = []
-    for c in escolhidos:
-        objeto = re.sub(r"\s+", " ", c.get("objeto") or "").strip()
-        origem_data = c.get("fonte_vigencia", "").split(":")[0] or "SIGA"
-        itens.append({
-            "bloco": "contratos_convenios", "camada": "orgao",
-            "afirmacao": f"O contrato {c.get('contratacao')} com {c.get('fornecedor', '').strip()} "
-                         f"({objeto[:160]}{'…' if len(objeto) > 160 else ''}), de "
-                         f"{_reais(c.get('valor_atualizado') or c.get('valor'))}, termina em {c.get('fim')} "
-                         f"(data conferida em: {origem_data})"
-                         + ("; contratação emergencial" if c.get("flag_emerg") == "True" else "")
-                         + (f"; liquidado e não pago: {_reais(c['a_pagar_liquidado'])}"
-                            if valor({"valor": c.get("a_pagar_liquidado")}) > 0 else "") + ".",
-            "fonte": "Base de contratos do Estado (SIGA)" + (" e PNCP" if c.get("url_pncp") else ""),
-            "data_fonte": "", "url": c.get("url_pncp") or "", "trecho": "", "tipo_fonte": "dado_oficial",
-            "confianca": "alta", "conferido_pela_equipe": True})
-    if so_siga:
-        total = sum(valor(c) for c in so_siga)
-        itens.append({
-            "bloco": "contratos_convenios", "camada": "orgao",
-            "afirmacao": f"Outros {len(so_siga)} contrato(s), somando {_reais(total)}, aparecem no SIGA com fim em até "
-                         "180 dias, mas a data não foi confirmada no PNCP nem no DOERJ; o SIGA nem sempre registra os "
-                         "aditivos de prazo, e a data precisa ser confirmada com a secretaria.",
-            "fonte": "Base de contratos do Estado (SIGA)", "data_fonte": "", "url": "", "trecho": "",
-            "tipo_fonte": "dado_oficial", "confianca": "media", "conferido_pela_equipe": True})
-    return itens
-
-
-def itens_do_painel(texto):
-    """Os números do painel do dossiê (tabelas de indicadores e alertas automáticos), calculados pela equipe a partir
-    do SIGA e do PNCP. Linhas com link são da pesquisa web e ficam de fora (entram por itens_citados)."""
-    itens, secao, vistos = [], "", set()
-    for linha in (texto or "").splitlines():
-        if linha.startswith("#"):
-            secao = _norm(linha)
-            continue
-        if not any(s in secao for s in ("contratos", "indicadores", "alertas")) or "](http" in linha:
-            continue
-        celulas = [c.strip() for c in linha.strip().strip("|").split("|")] if linha.lstrip().startswith("|") else []
-        if len(celulas) >= 2 and not set(celulas[0]) <= set("-: ") and _norm(celulas[0]) not in ("indicador", "contrato siga"):
-            if "nao consta" in _norm(celulas[1]) or not re.search(r"\d", celulas[1]) or len(celulas) > 4:
-                continue
-            afirmacao = f"{celulas[0]}: {celulas[1]}."
-        elif linha.lstrip().startswith("- ") and re.search(r"\d", linha):
-            afirmacao = linha.strip()[2:].strip()
-        else:
-            continue
-        assinatura = tuple(sorted(_numeros(afirmacao)))
-        if assinatura in vistos:                 # o alerta repete um número da tabela
-            continue
-        vistos.add(assinatura)
-        itens.append({"bloco": _classificar(afirmacao, "contratos_convenios"), "camada": "orgao", "afirmacao": afirmacao,
-                      "fonte": "Painel de contratos da equipe (SIGA e PNCP)", "data_fonte": "", "url": "", "trecho": "",
-                      "tipo_fonte": "dado_oficial", "confianca": "alta", "conferido_pela_equipe": True})
-    return itens
-
-
 def acrescentar_itens(dossie, brutos):
     """Acrescenta ao dossiê fatos de bases oficiais embutidas (já conferidos na origem), com id novo."""
     novos = [x for x in (normalizar_item(b) for b in brutos or []) if x]
@@ -665,12 +574,10 @@ def acrescentar_itens(dossie, brutos):
 
 
 def dossie_enviado(partes, orgao, data_corte, estado=None):
-    """O dossiê a partir do que a equipe enviou, no lugar da pesquisa do app. partes: textos "pesquisa" (Markdown
-    com citações), "dossie" (o dossiê reduzido, com o painel de contratos) e "contratos" (a planilha de vencimentos).
-    Os fatos da pesquisa têm o link aberto pelo código; os números do SIGA e do PNCP são da equipe."""
-    citados, lacunas = itens_citados(partes.get("pesquisa") or partes.get("dossie") or "")
-    contratos = ler_contratos(partes.get("contratos") or "")
-    brutos = itens_do_painel(partes.get("dossie") or "") + itens_de_contratos(contratos) + citados
+    """O dossiê a partir do que a equipe enviou, no lugar da pesquisa do app: a pesquisa com citações (Markdown), com
+    o link de cada fato aberto pelo código. As bases de contratos (SIGA, PNCP) não entram: são defasadas."""
+    citados, lacunas = itens_citados(partes.get("pesquisa") or "")
+    brutos = citados
     novos = conferir_itens(_unicos_ordenados([x for x in (normalizar_item(b) for b in brutos) if x]))
     itens = ([dict(i, id="") for i in deepcopy(estado["itens"])] if estado else []) + [dict(i, id="") for i in novos]
     return {"orgao": orgao, "data_corte": data_corte, "foco": "", "modelo": "dossiê enviado pela equipe",
@@ -678,5 +585,4 @@ def dossie_enviado(partes, orgao, data_corte, estado=None):
             "itens": numerar_itens(_unicos_ordenados(itens)),
             "nao_encontrado": (deepcopy(estado["nao_encontrado"]) if estado else [])
             + [{"camada": "orgao", "bloco": "", "procurado": n} for n in lacunas],
-            "uso": [], "diagnostico": [], "reaproveitado": False, "estado_compartilhado": estado is not None,
-            "contratos": contratos}
+            "uso": [], "diagnostico": [], "reaproveitado": False, "estado_compartilhado": estado is not None}

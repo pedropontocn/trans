@@ -16,7 +16,7 @@ Um `.zip` com:
 | `dossies/<secretaria>_dossie.docx` | **2. Dossiê da secretaria, atualizado com o que ela informou**: em resumo (situação, números-chave, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. O que a secretaria informou e o que as fontes mostram; 6. Cobertura do checklist; anexo de fontes citadas e prazos que não são contratos |
 | `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, até 3 páginas e sem anexo: situação; as decisões urgentes em ordem de prazo, com janela, impacto e repercussão política votados item a item pelos seis agentes (contagem dos votos e divergências), prioridade e base; decisões em aberto com opções de mesmo peso; o que pedir à secretaria |
 | `auditoria/<secretaria>.json` | **5. Auditoria**: o registro completo de cada análise: dossiê e conferências, análise inicial, revisões e votos dos seis agentes, consolidação, objeções risco a risco, método, descartes, custo |
-| `calendarios/<sigla>_calendario.xlsx` | **4. Calendário, por secretaria:** os vencimentos com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro; datas só do SIGA ficam na aba "A confirmar (SIGA)" |
+| `calendarios/<sigla>_calendario.xlsx` | **4. Calendário, por secretaria:** os vencimentos com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro. Só as datas que a secretaria informou |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
 
 ## Como usar
@@ -25,8 +25,9 @@ Um `.zip` com:
    `.zip` da pasta com uma subpasta de documentos brutos por órgão.
 2. O **pacote de dossiês das secretarias** montado pela equipe já vem embutido no app (`dossies_embutidos/`, pacote de
    06/11/2026, 31 secretarias) e é usado sozinho: por sigla, o app pega `SIGLA_pesquisa.md` (pesquisa web com
-   citações `[título](link)`), `SIGLA.md` (painel de contratos do SIGA/PNCP) e `SIGLA_vencimentos_180d.csv`
-   (contratos que vencem em 180 dias); os nomes por extenso vêm de `00_CONSOLIDACAO_ESTADUAL.md`. Para atualizar,
+   citações `[título](link)`); os nomes por extenso vêm de `00_CONSOLIDACAO_ESTADUAL.md`. As bases de contratos do
+   SIGA e do PNCP (painel `SIGLA.md` e planilha `SIGLA_vencimentos_180d.csv`) não são usadas: trazem datas
+   defasadas e foram tiradas do pacote; se vierem num pacote novo, são ignoradas. Para atualizar,
    troque o `.zip` da pasta (ou suba um pacote mais novo na tela: vale sobre o embutido para as secretarias que
    cobrir). Também aceita um arquivo por secretaria (Word, PDF ou Markdown) com fatos citados.
    A **folha de pessoal** de cada órgão (Caderno de RH da SEPLAG, `bases_embutidas/`) também entra sozinha, como
@@ -34,8 +35,8 @@ Um `.zip` com:
    de governo).
    Para quem tiver dossiê, o app não pesquisa a web sobre o órgão:
    - cada fato da pesquisa tem o link aberto pelo código, e os números da afirmação precisam estar na página;
-   - os números do SIGA/PNCP entram como dado oficial conferido pela equipe;
-   - os vencimentos da planilha vão direto para o calendário, sem passar pelo modelo.
+   - contratos e calendário saem só do que a secretaria informou; fatos de contrato da pesquisa ficam no registro
+     de auditoria, marcados, fora da análise.
    O contexto do Estado continua pesquisado pelo app, uma vez para todos.
 3. Confira a tabela de órgãos (dá para corrigir nomes e desmarcar; a coluna Dossiê mostra qual arquivo casou).
 4. Clique em **Analisar**. A análise roda em segundo plano; pode fechar a página.
@@ -65,14 +66,14 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
 ## Como funciona cada secretaria
 
 1. **Dossiê.** O pacote de dossiês da equipe (ou, sem ele, a pesquisa do app). Links abertos e números conferidos por
-   código; contratos do SIGA/PNCP entram como dado oficial.
+   código. Contratos: só o que a secretaria informou.
    Por padrão, todas as etapas usam o modelo mais forte (Opus): qualidade primeiro; o modo econômico (Batch API)
    só muda o tempo, não o modelo.
 2. **Diagnóstico.** Seis blocos fixos, na ordem do que mais pesa na transição: contratos (valores altos, objetos
    questionáveis, vigência acabando, paralisados, passivo); pessoal (tamanho e custo da folha, folha inchada, cargos
    que vagam, risco de apagão de equipe); passivos jurídicos e de controle; orçamento e execução; obras e entregas;
-   estrutura e dirigentes. Mais os números-chave do resumo executivo e a **tabela de contratos críticos** (da
-   planilha do SIGA/PNCP, por código, e os apontados no material). Cada afirmação, número e contrato cita o dossiê
+   estrutura e dirigentes. Mais os números-chave do resumo executivo e a **tabela de contratos críticos** (os que
+   a secretaria informou, apontados no material e conferidos). Cada afirmação, número e contrato cita o dossiê
    ou um trecho literal do relatório da secretaria; o que não confere é retirado.
 3. **Checklist obrigatório.** Dez temas básicos que toda secretaria precisa ter verificados (contratos a vencer, emergenciais,
    execução, restos a pagar, TCE-RJ, judicialização, convênios federais, obras, pessoal, sistemas críticos). Cada um
@@ -81,7 +82,7 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    página do documento, entra no que pedir à secretaria e derruba a confiança: alta só sem nenhum ponto em branco.
    A pesquisa do app recebe os pontos como obrigatórios e registra os que não achou.
 4. **Vencimentos.** Régua de risco por código: serviço essencial, impacto, data-limite para agir, tempo para nova
-   licitação, aditivo recente no PNCP e prioridade (impacto × urgência).
+   licitação e prioridade (impacto × urgência).
 5. **Análise de riscos.** Uma análise lê o diagnóstico e os vencimentos e propõe riscos (causa → consequência),
    decisões em aberto e o que pedir à secretaria.
 6. **Seis agentes independentes** revisam a análise sem ver uns aos outros: Fazenda e orçamento; controle e jurídico;

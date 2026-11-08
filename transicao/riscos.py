@@ -13,7 +13,7 @@ from datetime import date
 
 from .modelo import (_comparavel, _em_paralelo, _norm, _shingles, chamar_json, chamar_modelo, em_lote, extrair_json,
                      mensagens_compartilhadas, trecho_confere)
-from .produtos import IMPACTO_PONTOS, LIMITE_SIGA, _ler_data, confirmado, ordem_de_prioridade
+from .produtos import IMPACTO_PONTOS, _ler_data, ordem_de_prioridade
 from .pesquisa import TIPOS_OFICIAIS, itens_incluidos
 
 CATEGORIAS = ["Continuidade de serviço", "Fiscal e orçamentário", "Jurídico e controle", "Pessoas e capacidade",
@@ -155,12 +155,11 @@ Responda SOMENTE com JSON, no mesmo formato da análise, entre [INÍCIO DO JSON]
 
 def vencimentos_numerados(eventos, limite=15):
     """Os vencimentos de maior prioridade, com ids V1, V2... para os riscos citarem."""
-    escolhidos = sorted([e for e in eventos or [] if e["dias"] >= -30 and confirmado(e)],
-                        key=ordem_de_prioridade)[:limite]
+    escolhidos = sorted([e for e in eventos or [] if e["dias"] >= -30], key=ordem_de_prioridade)[:limite]
     return {f"V{k}": e for k, e in enumerate(escolhidos, 1)}
 
 
-def material(orgao, diag, vencimentos, txt_confronto="", data_corte="", txt_checklist="", txt_a_confirmar=""):
+def material(orgao, diag, vencimentos, txt_confronto="", data_corte="", txt_checklist=""):
     """O material da análise e dos agentes, em texto compacto e com ids."""
     linhas = [f"SECRETARIA: {orgao}" + (f" · data de corte {data_corte}" if data_corte else ""), "", "DIAGNÓSTICO:"]
     for sec in (diag or {}).get("secoes") or []:
@@ -176,20 +175,11 @@ def material(orgao, diag, vencimentos, txt_confronto="", data_corte="", txt_chec
             marcas = [f"prioridade {e.get('prioridade', '?').lower()}", f"agir até {e['agir_ate']:%d/%m/%Y}"
                       if e.get("agir_ate") else ""]
             marcas += ["serviço essencial" if e.get("essencial") else "",
-                       "sem tempo para nova licitação" if e.get("sem_tempo_licitar") else "", e.get("situacao_pncp", "")]
-            if e.get("fonte_data") == "órgão":
-                marcas.append("data informada pela secretaria"
-                              + (f"; o SIGA dizia {e['data_siga']:%d/%m/%Y}" if e.get("data_siga") else ""))
-            elif e.get("fonte_data") in ("PNCP", "DOERJ"):
-                marcas.append(f"data conferida no {e['fonte_data']}")
+                       "sem tempo para nova licitação" if e.get("sem_tempo_licitar") else ""]
             linhas.append(f"- [{vid}] vence {e['data']:%d/%m/%Y}: {e['evento']}"
                           + (f" – {e['objeto'][:140]}" if e.get("objeto") else "")
                           + (f" – {e['valor_texto']}" if e.get("valor_texto") else "")
                           + f" ({'; '.join(m for m in marcas if m)}) [{e.get('origem', '')}]")
-        if any(e.get("origem", "").startswith("Contratos") for e in vencimentos.values()):
-            linhas.append(f"Limite da base: {LIMITE_SIGA}")
-    if txt_a_confirmar:
-        linhas += ["", "DATAS A CONFIRMAR (não são prazos; não as use como data de decisão): " + txt_a_confirmar]
     if txt_confronto:
         linhas += ["", txt_confronto]
     if txt_checklist:
@@ -352,13 +342,11 @@ def consolidar(modelo, texto_material, analise, revisoes, uso):
 
 # --- CONFERÊNCIA E PRIORIDADE (código) -------------------------------------------------------------
 
-FIRMEZA = ["confirmado em fonte oficial", "dado do SIGA/PNCP", "fonte pública conferida", "só na imprensa",
+FIRMEZA = ["confirmado em fonte oficial", "fonte pública conferida", "só na imprensa",
            "fonte pública não conferida", "informado pelo órgão", "sem comprovação"]
 
 
 def _firmeza_item(item):
-    if item.get("conferido_pela_equipe"):
-        return "dado do SIGA/PNCP"
     if item.get("checagem") == "conferido":
         return "confirmado em fonte oficial" if item.get("tipo_fonte") in TIPOS_OFICIAIS else "fonte pública conferida"
     return "só na imprensa" if item.get("tipo_fonte") == "imprensa" else "fonte pública não conferida"
@@ -398,8 +386,7 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
         citados = [str(f).strip() for f in r.get("fatos") or []]
         validos = [f for f in citados if f in fatos or f in vencimentos or f in dossie_ids]
         firmezas = [fatos[f] if f in fatos else
-                    ("dado do SIGA/PNCP" if vencimentos[f].get("origem", "").startswith("Contratos") else
-                     "informado pelo órgão" if vencimentos[f].get("origem", "").startswith("Informado") else
+                    ("informado pelo órgão" if vencimentos[f].get("origem", "").startswith("Informado") else
                      "fonte pública conferida") if f in vencimentos else _firmeza_item(dossie_ids[f]) for f in validos]
         firmeza = min(firmezas, key=lambda x: FIRMEZA.index(x) if x in FIRMEZA else 99) if firmezas else "sem comprovação"
         impacto = r.get("impacto") if r.get("impacto") in IMPACTO_PONTOS else "Médio"
@@ -649,8 +636,7 @@ def confianca(resumo_dossie, riscos, cobertura=None):
     if resumo_dossie and resumo_dossie.get("itens"):
         c = resumo_dossie["conferidos"] / resumo_dossie["itens"]
         criterios.append((0 if c < 0.4 else 1 if c < 0.7 else 2,
-                          f"{resumo_dossie['conferidos']} de {resumo_dossie['itens']} fatos do dossiê conferidos na fonte "
-                          "ou vindos do SIGA/PNCP",
+                          f"{resumo_dossie['conferidos']} de {resumo_dossie['itens']} fatos do dossiê conferidos na fonte",
                           f"só {resumo_dossie['conferidos']} dos {resumo_dossie['itens']} fatos do dossiê puderam ser "
                           "conferidos na fonte"))
     else:
@@ -660,8 +646,7 @@ def confianca(resumo_dossie, riscos, cobertura=None):
                                                         "fonte pública não conferida", "só na imprensa")]
         p = len(fracos) / len(riscos)
         criterios.append((0 if p > 0.6 else 1 if p > 0.3 else 2,
-                          f"{len(riscos) - len(fracos)} de {len(riscos)} riscos apoiados em fonte oficial, conferida ou "
-                          "no SIGA/PNCP",
+                          f"{len(riscos) - len(fracos)} de {len(riscos)} riscos apoiados em fonte oficial ou conferida",
                           f"{len(fracos)} dos {len(riscos)} riscos se apoiam só no que a secretaria informou ou em fonte "
                           "que não pôde ser conferida"))
     nivel = min(c[0] for c in criterios)

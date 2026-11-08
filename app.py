@@ -350,15 +350,14 @@ if not trabalho or trabalho["situacao"] != "rodando":
         embutidos, data_embutidos = _embutidos()
         if embutidos:
             st.caption(f"📚 Dossiês embutidos: {len(embutidos)} secretarias, pacote de {data_embutidos or 'data não informada'} "
-                       "(pesquisa com citações, painel do SIGA/PNCP e planilha de vencimentos). Usados automaticamente; "
+                       "(pesquisa com citações; sem SIGA e PNCP). Usados automaticamente; "
                        "um pacote enviado abaixo vale sobre eles.")
         dossies_enviados = st.file_uploader(
             "Dossiês mais novos (opcional: o .zip da equipe, ou Word, PDF e Markdown)", type=["zip", "docx", "pdf", "md", "txt"],
             accept_multiple_files=True,
-            help="O .zip de dossiês da equipe (por sigla: pesquisa com citações, painel do SIGA/PNCP e planilha de "
-                 "vencimentos) ou um arquivo por secretaria. Vale sobre o dossiê embutido da mesma secretaria. Para o "
-                 "órgão que tiver dossiê, o app não pesquisa a web: confere os links do dossiê e põe os vencimentos da "
-                 "planilha direto no calendário.")
+            help="O .zip de dossiês da equipe (por sigla, a pesquisa com citações) ou um arquivo por secretaria. "
+                 "Vale sobre o dossiê embutido da mesma secretaria. Para o órgão que tiver dossiê, o app não pesquisa a "
+                 "web: confere os links do dossiê. Planilha de vencimentos e painel do SIGA/PNCP são ignorados.")
         enviados, dossies_enviados = enviados or [], dossies_enviados or []
         if enviados or dossies_enviados:
             cada_pasta = modo.startswith("Cada pasta")
