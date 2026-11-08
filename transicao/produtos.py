@@ -179,16 +179,115 @@ def eventos_de_contratos(contratos, orgao, data_corte=None):
             "consequencia": "", "decisao": "Renovar, licitar de novo ou encerrar",
             "contratacao": str(c.get("contratacao") or "").strip(), "fornecedor": str(c.get("fornecedor") or "").strip(),
             "origem": "Contratos do Estado (SIGA/PNCP)", "fonte": c.get("url_pncp") or "Base SIGA de contratos",
-            "trecho": c.get("fonte_vigencia") or "SIGA", "termos": c.get("termos_pncp") or ""})
+            "trecho": c.get("fonte_vigencia") or "SIGA", "termos": c.get("termos_pncp") or "",
+            "processo": str(c.get("processo") or "").strip(), "cnpj": str(c.get("cnpj") or "").strip(),
+            "fonte_data": fonte_da_data(c.get("fonte_vigencia")),
+            "data_confirmada": data_confirmada_na_fonte(c.get("fonte_vigencia"))})
     return sorted(eventos, key=lambda x: (x["data"], -(x["valor"] or 0)))
 
 
+def fonte_da_data(fonte_vigencia):
+    """Onde a data de fim do contrato foi conferida: "PNCP", "DOERJ" ou só "SIGA". A do SIGA sozinha é defasada: o
+    SIGA nem sempre registra os aditivos de prazo."""
+    f = str(fonte_vigencia or "").strip().upper()
+    return "PNCP" if f.startswith("PNCP") else "DOERJ" if f.startswith("DOERJ") else "SIGA"
+
+
+def data_confirmada_na_fonte(fonte_vigencia):
+    return fonte_da_data(fonte_vigencia) != "SIGA"
+
+
+def confirmado(e):
+    """O evento entra no calendário principal, nos documentos e na análise? Só sai quem foi marcado como a confirmar
+    (contrato com data só no SIGA ou só num portal público). Prazos do relatório do órgão entram sempre."""
+    return e.get("data_confirmada", True) is not False
+
+
+def so_no_siga(eventos):
+    """Os contratos cuja data de fim não foi confirmada pela secretaria nem no PNCP/DOERJ: ficam à parte, a confirmar."""
+    return [e for e in eventos or [] if not confirmado(e)]
+
+
+def resumo_so_no_siga(eventos, ate_dias=180):
+    """Uma frase sobre os contratos com data a confirmar, para a análise saber que existem sem tratá-los como prazo."""
+    lista = [e for e in so_no_siga(eventos) if -30 <= e["dias"] <= ate_dias]
+    if not lista:
+        return ""
+    total = sum(e.get("valor") or 0 for e in lista)
+    essenciais = sum(bool(e.get("essencial")) for e in lista)
+    return (f"{len(lista)} contrato(s) têm data de fim só no SIGA ou em portal público, sem confirmação da secretaria "
+            "nem no PNCP/DOERJ" + (f", somando {_mi(total)}" if total else "")
+            + (f"; {essenciais} de serviço essencial" if essenciais else "")
+            + ". Essas bases são defasadas (nem sempre registram aditivos): essas datas não são prazos, são pontos a "
+              "confirmar com a secretaria.")
+
+
+RE_NUMEROS = re.compile(r"\d[\d./-]{4,}\d")
+SUFIXOS_EMPRESA = {"ltda", "sa", "s/a", "me", "epp", "eireli", "s.a.", "s.a", "cia", "de", "da", "do", "das", "dos", "e"}
+
+
+def _digitos(texto):
+    return {re.sub(r"\D", "", m) for m in RE_NUMEROS.findall(texto or "")} - {""}
+
+
+def _nome_curto(fornecedor):
+    """As duas primeiras palavras significativas do fornecedor, para achá-lo no texto da secretaria."""
+    palavras = [w for w in re.findall(r"[a-z0-9]+", _norm(fornecedor)) if w not in SUFIXOS_EMPRESA and len(w) >= 3]
+    return " ".join(palavras[:2]) if len(palavras) >= 2 else ""
+
+
+def _casar_contrato(ext, planilha, por_nome):
+    """O contrato da planilha a que um evento extraído se refere: pelo número do contrato, do processo ou pelo CNPJ;
+    ou pelo nome do fornecedor, quando só um contrato do órgão é dele."""
+    texto = f"{ext.get('evento', '')} {ext.get('objeto', '')} {ext.get('trecho', '')}"
+    nums = _digitos(texto)
+    for c in planilha:
+        ids = {re.sub(r"\D", "", str(c.get(k) or "")) for k in ("contratacao", "processo", "cnpj")}
+        if nums & {i for i in ids if len(i) >= 6}:
+            return c
+    comp = " ".join(re.findall(r"[a-z0-9]+", _norm(texto)))
+    achados = [c for nome, c in por_nome.items() if nome and f" {nome} " in f" {comp} "]
+    return achados[0] if len(achados) == 1 else None
+
+
+def _portal_oficial(url):
+    return bool(re.search(r"pncp\.gov\.br|ioerj|doerj|diariooficial", str(url or ""), re.I))
+
+
 def juntar_eventos(dos_contratos, extraidos):
-    """Junta os vencimentos da planilha aos eventos extraídos do texto; um evento de contrato extraído na mesma data de
-    um contrato da planilha é tido como repetido."""
-    datas = {e["data"] for e in dos_contratos}
-    resto = [e for e in extraidos if not (e["tipo"] == "Contrato" and e["data"] in datas)]
-    return sorted(dos_contratos + resto, key=lambda x: (x["data"], -(x["valor"] or 0)))
+    """Junta os vencimentos da planilha aos eventos extraídos do texto. Para a data de fim de um contrato vale, nesta
+    ordem: o que a secretaria informou; a data conferida no PNCP/DOERJ; e só então o SIGA, que fica a confirmar.
+    - Evento de contrato informado pelo órgão que casa com um da planilha: a data da secretaria prevalece e o da
+      planilha fica com ela (guardando a do SIGA, se divergir).
+    - Evento de contrato de fonte pública que casa com um da planilha: sai, a planilha já foi conferida no PNCP.
+    - Evento de contrato de fonte pública sem casar: só vale se a fonte for PNCP ou diário oficial; senão, a confirmar.
+    - Um evento de contrato extraído na mesma data de um contrato da planilha é tido como repetido."""
+    planilha = [dict(e) for e in dos_contratos]
+    nomes = {}
+    for c in planilha:
+        nomes.setdefault(_nome_curto(c.get("fornecedor")), []).append(c)
+    por_nome = {n: cs[0] for n, cs in nomes.items() if n and len(cs) == 1}
+    resto = []
+    for e in sorted(extraidos, key=lambda x: x.get("origem") != "Informado pelo órgão"):
+        if e["tipo"] != "Contrato":
+            resto.append(e)
+            continue
+        c = _casar_contrato(e, planilha, por_nome)
+        if c is not None and e.get("origem") == "Informado pelo órgão":
+            if c.get("fonte_data") != "órgão":
+                if c["data"] != e["data"]:
+                    c["data_siga"] = c["data"]
+                c.update({"data": e["data"], "so_mes": e.get("so_mes", False), "dias": e["dias"],
+                          "criticidade": e["criticidade"], "data_confirmada": True, "fonte_data": "órgão",
+                          "trecho": e["trecho"], "consequencia": e.get("consequencia") or c.get("consequencia", ""),
+                          "decisao": e.get("decisao") or c.get("decisao", "")})
+            continue
+        if c is not None or e["data"] in {x["data"] for x in planilha}:
+            continue
+        if e.get("origem") != "Informado pelo órgão" and not _portal_oficial(e.get("fonte")):
+            e.update({"data_confirmada": False, "fonte_data": "portal público"})
+        resto.append(e)
+    return sorted(planilha + resto, key=lambda x: (x["data"], -(x["valor"] or 0)))
 
 
 # --- RISCO DE CADA VENCIMENTO: régua comum a todas as secretarias -----------------------------------
@@ -464,8 +563,8 @@ def contratos_da_planilha(eventos, limite=10):
     """Os contratos da planilha do SIGA/PNCP que entram na tabela de contratos críticos: prioridade máxima ou alta,
     emergenciais e com aditivo recente. Montado por código."""
     saida = []
-    for e in sorted([e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e["dias"] >= -30],
-                    key=ordem_de_prioridade)[:limite]:
+    for e in sorted([e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e["dias"] >= -30
+                     and confirmado(e)], key=ordem_de_prioridade)[:limite]:
         motivos = []
         if e.get("prioridade") in ("Máxima", "Alta"):
             motivos.append("vence em breve")
@@ -495,17 +594,20 @@ def _mi(valor):
 def ficha_contratos(eventos):
     """Os números da carteira de contratos que vence nos próximos meses, calculados por código a partir do
     calendário (planilha do SIGA/PNCP). Devolve linhas (indicador, valor) para a ficha do diagnóstico."""
-    contratos = [e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e["dias"] >= 0]
-    if not contratos:
+    todos = [e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e["dias"] >= 0]
+    contratos = [e for e in todos if confirmado(e)]
+    so_siga = [e for e in todos if not confirmado(e)]
+    if not todos:
         return []
 
     def linha(rotulo, grupo):
         total = sum(e.get("valor") or 0 for e in grupo)
         return (rotulo, f"{len(grupo)}" + (f" ({_mi(total)})" if total else ""))
-    return [linha("Contratos que vencem em até 180 dias", contratos),
+    return [linha("Contratos que vencem em até 180 dias (data da secretaria ou do PNCP/DOERJ)", contratos),
             linha("… em até 90 dias", [e for e in contratos if e["dias"] <= 90]),
             linha("… em até 30 dias", [e for e in contratos if e["dias"] <= 30]),
             linha("De serviço essencial, em até 180 dias", [e for e in contratos if e.get("essencial")]),
             linha("Emergenciais", [e for e in contratos if "emergencial" in e.get("evento", "")]),
             linha("Com aditivo publicado no PNCP nos últimos 120 dias", [e for e in contratos if e.get("aditivo_recente")]),
-            linha("De prioridade máxima ou alta", [e for e in contratos if e.get("prioridade") in ("Máxima", "Alta")])]
+            linha("De prioridade máxima ou alta", [e for e in contratos if e.get("prioridade") in ("Máxima", "Alta")]),
+            linha("Com data só no SIGA, a confirmar com a secretaria (fora das linhas acima)", so_siga)]

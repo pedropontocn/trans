@@ -103,15 +103,21 @@ def _firmeza(item):
 
 def _por_codigo(eventos):
     """O que a planilha de contratos (SIGA/PNCP) responde sozinha, sem o modelo."""
-    contratos = [e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e.get("dias", -1) >= 0]
-    if not contratos:
+    from .produtos import confirmado
+    todos = [e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e.get("dias", -1) >= 0]
+    contratos = [e for e in todos if confirmado(e)]
+    if not todos:
         return {}
     respostas = {}
     ate_180 = [e for e in contratos if e["dias"] <= 180]
-    if ate_180:
+    so_siga = [e for e in todos if not confirmado(e) and e["dias"] <= 180]
+    if ate_180 or so_siga:
         total = sum(e.get("valor") or 0 for e in ate_180)
-        respostas["C1"] = {"resposta": f"{len(ate_180)} contrato(s) da planilha do SIGA/PNCP vencem em até 180 dias"
-                                       + (f", somando R$ {total:,.0f}".replace(",", ".") if total else "") + ".",
+        respostas["C1"] = {"resposta": f"{len(ate_180)} contrato(s) vencem em até 180 dias, com a data informada pela "
+                                       "secretaria ou conferida no PNCP/DOERJ"
+                                       + (f", somando R$ {total:,.0f}".replace(",", ".") if total else "") + "."
+                                       + (f" Outros {len(so_siga)} têm a data só no SIGA, a confirmar com a secretaria."
+                                          if so_siga else ""),
                            "firmeza": "dado do SIGA/PNCP", "fatos": [], "origem": "planilha de contratos"}
     emergenciais = [e for e in contratos if "emergencial" in _norm(e.get("evento", "")) or "emergencial" in _norm(e.get("objeto", ""))]
     respostas["C2"] = ({"resposta": f"{len(emergenciais)} contrato(s) emergencial(is) na planilha do SIGA/PNCP.",

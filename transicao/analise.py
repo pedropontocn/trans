@@ -94,7 +94,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     progresso("Analisando riscos e decisões...")
     vencimentos = riscos.vencimentos_numerados(eventos)
     material = riscos.material(nome, diagnostico, vencimentos, conf.texto_confronto(confronto), cfg["data_corte"],
-                               checklist.texto_para_analise(cobertura))
+                               checklist.texto_para_analise(cobertura), produtos.resumo_so_no_siga(eventos))
     analise = riscos.analisar(principal, material, uso)
     if not analise.get("riscos"):
         falha = modelo.ultima_falha()

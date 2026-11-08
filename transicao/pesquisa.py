@@ -592,6 +592,10 @@ def itens_de_contratos(contratos, maximo=20):
             return int(c.get("dias_para_vencer") or 9999)
         except ValueError:
             return 9999
+    def confirmada(c):
+        return str(c.get("fonte_vigencia") or "").strip().upper().startswith(("PNCP", "DOERJ"))
+    so_siga = [c for c in contratos if not confirmada(c) and 0 <= dias(c) <= 180]
+    contratos = [c for c in contratos if confirmada(c)]
     escolhidos = sorted([c for c in contratos if dias(c) <= 90], key=valor, reverse=True)[:maximo]
     escolhidos += sorted([c for c in contratos if 90 < dias(c) <= 180], key=valor, reverse=True)[:max(0, maximo - len(escolhidos))]
     itens = []
@@ -610,6 +614,15 @@ def itens_de_contratos(contratos, maximo=20):
             "fonte": "Base de contratos do Estado (SIGA)" + (" e PNCP" if c.get("url_pncp") else ""),
             "data_fonte": "", "url": c.get("url_pncp") or "", "trecho": "", "tipo_fonte": "dado_oficial",
             "confianca": "alta", "conferido_pela_equipe": True})
+    if so_siga:
+        total = sum(valor(c) for c in so_siga)
+        itens.append({
+            "bloco": "contratos_convenios", "camada": "orgao",
+            "afirmacao": f"Outros {len(so_siga)} contrato(s), somando {_reais(total)}, aparecem no SIGA com fim em até "
+                         "180 dias, mas a data não foi confirmada no PNCP nem no DOERJ; o SIGA nem sempre registra os "
+                         "aditivos de prazo, e a data precisa ser confirmada com a secretaria.",
+            "fonte": "Base de contratos do Estado (SIGA)", "data_fonte": "", "url": "", "trecho": "",
+            "tipo_fonte": "dado_oficial", "confianca": "media", "conferido_pela_equipe": True})
     return itens
 
 
