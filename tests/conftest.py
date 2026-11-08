@@ -363,7 +363,7 @@ def llm(monkeypatch):
     return falso
 
 
-MODULOS = ["config", "modelo", "entrada", "pesquisa", "verificacao", "confronto", "produtos", "checklist", "riscos", "documentos",
+MODULOS = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist", "riscos", "documentos",
            "painel", "analise"]
 
 

@@ -29,6 +29,9 @@ Um `.zip` com:
    (contratos que vencem em 180 dias); os nomes por extenso vêm de `00_CONSOLIDACAO_ESTADUAL.md`. Para atualizar,
    troque o `.zip` da pasta (ou suba um pacote mais novo na tela: vale sobre o embutido para as secretarias que
    cobrir). Também aceita um arquivo por secretaria (Word, PDF ou Markdown) com fatos citados.
+   A **folha de pessoal** de cada órgão (Caderno de RH da SEPLAG, `bases_embutidas/`) também entra sozinha, como
+   dado oficial: vínculos ativos, folha do mês, efetivos e não efetivos (a parte da equipe que pode sair na troca
+   de governo).
    Para quem tiver dossiê, o app não pesquisa a web sobre o órgão:
    - cada fato da pesquisa tem o link aberto pelo código, e os números da afirmação precisam estar na página;
    - os números do SIGA/PNCP entram como dado oficial conferido pela equipe;

@@ -828,7 +828,18 @@ CAPITULOS = [("1. Contratos", ["Contratos"]), ("2. Pessoal", ["Pessoal"]),
              ("4. Orçamento, obras e estrutura", ["Orçamento e execução", "Obras e entregas", "Estrutura e dirigentes"])]
 
 
-def markdown_capitulos(diag, contratos_criticos=None, ficha=None):
+def _quadro_folha(q):
+    """A folha do órgão, por código, do Caderno de RH: o que não é efetivo é o que pode sair na troca de governo."""
+    return "\n".join([
+        f"**Folha de pessoal** ([Caderno de RH, SEPLAG, {q['competencia']}]({q['url']}))",
+        "| Vínculos ativos | Efetivos | Não efetivos (comissão, temporários, requisitados) | Folha do mês | Remuneração média |",
+        "|---|---|---|---|---|",
+        f"| {q['vinculos']} | {q['efetivos']} | {q['nao_efetivos']} ({q['pct_nao_efetivos']}) | {q['folha_mes']} | {q['remuneracao_media']} |"]
+        + ([f"_{q['pct_nao_efetivos']} dos vínculos não são de servidor efetivo: é a parte da equipe que pode sair na troca "
+            "de governo._"] if q["pct"] >= 50 else []))
+
+
+def markdown_capitulos(diag, contratos_criticos=None, ficha=None, folha=None):
     """Os capítulos de dados, na ordem do que mais pesa: contratos (com a tabela dos críticos), pessoal, passivos,
     e por fim orçamento, obras e estrutura. Cada afirmação traz a origem conferida."""
     por_titulo = {_norm(s["titulo"]): s for s in (diag or {}).get("secoes") or []}
@@ -837,6 +848,8 @@ def markdown_capitulos(diag, contratos_criticos=None, ficha=None):
         linhas.append(f"## {titulo}")
         if titulo.startswith("1.") and contratos_criticos:
             linhas += ["**Contratos críticos**", markdown_contratos_criticos(contratos_criticos)]
+        if titulo.startswith("2.") and folha:
+            linhas.append(_quadro_folha(folha))
         if titulo.startswith("1.") and ficha:
             linhas += ["| Carteira que vence (planilha SIGA/PNCP) | Contratos (valor) |", "|---|---|"]
             linhas += [f"| {a} | {b} |" for a, b in ficha]
@@ -912,7 +925,7 @@ def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobert
     venc = markdown_vencimentos(outros, limite=10)
     venc = ("## Anexo – Prazos de controle, convênios e outros vencimentos\n" + venc.split("\n", 1)[1]) if venc else ""
     partes = [resumo_do_dossie(resultado, cobertura, (diag or {}).get("indicadores")),
-              markdown_capitulos(diag, contratos_criticos, ficha),
+              markdown_capitulos(diag, contratos_criticos, ficha, (dossie or {}).get("folha")),
               markdown_confronto(dossie, confronto),
               markdown_fontes(dossie, None, ids_citados(diag, resultado, contratos_criticos), cobertura_md),
               venc, nota_md]

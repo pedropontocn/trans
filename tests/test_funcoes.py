@@ -687,3 +687,25 @@ def test_pacote_embutido_no_repositorio_cobre_as_31_secretarias(funcoes):
     assert {"pesquisa", "dossie", "contratos"} <= set(secid["partes"])
     textos = funcoes._texto_dossie(secid)
     assert "contratacao;" in textos["contratos"] and "Secretaria de Estado das Cidades" in textos["dossie"]
+
+
+def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
+    # base embutida do repositório (Caderno de RH de março de 2026)
+    secid = funcoes.itens("SECID")
+    assert len(secid) == 2 and all(i["bloco"] == "pessoal" and i["tipo_fonte"] == "dado_oficial" for i in secid)
+    assert "145 vínculos ativos" in secid[0]["afirmacao"] and "R$ 1,17 milhões" in secid[0]["afirmacao"]
+    assert "nenhum dos 145 vínculos ativos é de servidor efetivo" in secid[1]["afirmacao"]
+    sefaz = funcoes.itens("SEFAZ")[1]["afirmacao"]
+    assert "983 são de servidores efetivos" in sefaz and "509 (34,1%)" in sefaz
+    assert funcoes.quadro("SEAPA")["efetivos"] == "157"                      # SEAPA no dossiê, SEAPPA no Caderno
+    assert funcoes.itens("NAOEXISTE") == [] and funcoes.quadro("") is None
+    q = funcoes.quadro("SECID")
+    md = funcoes.markdown_capitulos({"secoes": []}, None, None, q)
+    assert "| 145 | 0 | 145 (100,0%) | R$ 1,17 mi | R$ 8.082,93 |" in md and "pode sair na troca de governo" in md
+    assert md.index("## 2. Pessoal") < md.index("**Folha de pessoal**") < md.index("## 3. Passivos")
+    # no dossiê: id novo, conferido, firmeza de fonte oficial; o checklist C9 sai por código
+    d = {"itens": [], "origem": "arquivo", "nao_encontrado": []}
+    funcoes.acrescentar_itens(d, secid)
+    assert [i["id"] for i in d["itens"]] == ["O1", "O2"] and d["itens"][0]["checagem"] == "conferido"
+    c9 = next(c for c in funcoes.conferir({}, d, "", []) if c["id"] == "C9")
+    assert c9["estado"] == "encontrado" and c9["fatos"] == ["O1", "O2"] and c9["firmeza"] == "confirmado em fonte oficial"

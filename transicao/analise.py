@@ -9,6 +9,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import threading
 import time
 import zipfile
@@ -16,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-from . import checklist, confronto as conf, documentos, entrada, modelo, painel, pesquisa, produtos, riscos, verificacao
+from . import checklist, confronto as conf, documentos, entrada, folha, modelo, painel, pesquisa, produtos, riscos, verificacao
 from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO, esquema_de_modelos
 
 JUNTAS = False          # no modo econômico, as etapas independentes vão juntas para a mesma fila da Batch API
@@ -51,6 +52,10 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
         progresso("Pesquisando o dossiê em fontes públicas...")
         dossie = pesquisa.montar_dossie(cfg["modelo_pesquisa"], nome, cfg["data_corte"], cfg.get("foco", ""),
                                         estado=estado)
+    # folha de pessoal da SEPLAG (Caderno de RH): dado oficial, entra por código
+    sigla_orgao = entrada.sigla(nome) or (nome.strip() if re.fullmatch(r"[A-Z][A-Z0-9]{1,14}", nome.strip()) else "")
+    pesquisa.acrescentar_itens(dossie, folha.itens(sigla_orgao))
+    dossie["folha"] = folha.quadro(sigla_orgao)
     resumo_dos = pesquisa.resumo_dossie(dossie)
     if resumo_dos["itens"] < MIN_ITENS_DOSSIE or resumo_dos["orgao"] < 3:
         raise ErroAnalise(f"dossiê insuficiente ({resumo_dos['orgao']} itens sobre o órgão"

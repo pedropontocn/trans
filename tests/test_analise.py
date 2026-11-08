@@ -513,3 +513,13 @@ def test_rodar_de_novo_na_mesma_pasta_pula_os_prontos(llm, tmp_path):
     dados = json.loads(caminho.read_text(encoding="utf-8"))
     caminho.write_text(json.dumps(dict(dados, versao="0.0")), encoding="utf-8")
     assert analise.resultado_pronto(tmp_path, "secretaria_de_exemplo_sex") is None
+
+
+def test_folha_da_seplag_entra_no_dossie_da_secretaria(llm):
+    from transicao import analise
+    r = analise.analisar_orgao("Secretaria de Estado das Cidades - SECID", RELATORIO, CFG)
+    itens = [i for i in r["registro"]["dossie"]["itens"] if i["fonte"].startswith("Caderno de RH")]
+    assert len(itens) == 2 and all(i["url"].startswith("https://www.rj.gov.br/gesperj/") for i in itens)
+    assert "| 145 | 0 | 145 (100,0%) | R$ 1,17 mi |" in r["dossie_md"]
+    c9 = next(c for c in r["registro"]["checklist"] if c["id"] == "C9")
+    assert c9["estado"] == "encontrado"

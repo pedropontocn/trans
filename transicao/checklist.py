@@ -153,6 +153,11 @@ def conferir(brutas, dossie, relatorio, eventos=None):
             saida.append(linha)
             continue
         r = (brutas or {}).get(cid) or {}
+        if cid == "C9" and not r.get("resposta"):
+            # pessoal: a folha da SEPLAG (Caderno de RH) responde por código, quando está no dossiê
+            da_folha = [i for i in por_id.values() if i.get("fonte", "").startswith("Caderno de RH")]
+            if da_folha:
+                r = {"resposta": " ".join(i["afirmacao"] for i in da_folha), "itens": [i["id"] for i in da_folha]}
         itens = [str(x).strip() for x in r.get("itens") or [] if str(x).strip() in por_id]
         trechos = [str(t).strip() for t in r.get("trechos") or [] if trecho_confere(str(t), comp_rel, sh_rel)]
         resposta = str(r.get("resposta") or "").strip()
