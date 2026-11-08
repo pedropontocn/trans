@@ -136,7 +136,7 @@ def responder(modelo, dossie, relatorio, orgao):
         modelo, mensagens_com_cache(modelo, PROMPT_CHECKLIST.replace("<<<PERGUNTAS>>>", _texto_perguntas()),
                                     _pesquisa().material_referencia(dossie, relatorio),
                                     f"Responda ao checklist sobre a secretaria {orgao}."),
-        6000, etapa="checklist obrigatório", uso_lista=uso, chave="respostas") or {}
+        16000, etapa="checklist obrigatório", uso_lista=uso, chave="respostas") or {}
     respostas = {str(r.get("id") or "").strip().upper(): r for r in dados.get("respostas") or [] if isinstance(r, dict)}
     return {"respostas": respostas, "uso": uso}
 

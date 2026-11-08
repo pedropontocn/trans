@@ -11,7 +11,8 @@ import json
 import re
 from datetime import date
 
-from .modelo import _comparavel, _em_paralelo, _norm, _shingles, chamar_json, chamar_modelo, extrair_json, trecho_confere
+from .modelo import (_comparavel, _em_paralelo, _norm, _shingles, chamar_json, chamar_modelo, em_lote, extrair_json,
+                     mensagens_compartilhadas, trecho_confere)
 from .produtos import IMPACTO_PONTOS, LIMITE_SIGA, _ler_data, confirmado, ordem_de_prioridade
 from .pesquisa import TIPOS_OFICIAIS, itens_incluidos
 
@@ -201,7 +202,7 @@ def material(orgao, diag, vencimentos, txt_confronto="", data_corte="", txt_chec
 def analisar(modelo, texto_material, uso):
     return chamar_json(modelo, [{"role": "system", "content": PROMPT_ANALISE},
                                 {"role": "user", "content": texto_material}],
-                       16000, etapa="análise de riscos", uso_lista=uso, chave="riscos") or {}
+                       24000, etapa="análise de riscos", uso_lista=uso, chave="riscos") or {}
 
 
 def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
@@ -214,9 +215,9 @@ def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
         _, nome, criterio = papel
         sistema = PROMPT_CONTRA if nome == PAPEL_CONTRA else PROMPT_AGENTE.format(
             papel=nome, criterio=criterio, esquema=ESQUEMA_RISCO)
-        mensagens = [{"role": "system", "content": sistema}, {"role": "user", "content": pedido}]
+        mensagens = mensagens_compartilhadas(modelo_agente, sistema, pedido)
         try:
-            r = chamar_json(modelo_agente, mensagens, 6000, etapa=f"agente: {nome}", uso_lista=uso)
+            r = chamar_json(modelo_agente, mensagens, 16000, etapa=f"agente: {nome}", uso_lista=uso)
             if not isinstance(r, dict):
                 raise ValueError("resposta ilegível")
             return {"papel": nome, "modelo": modelo_agente, **r}
@@ -227,7 +228,8 @@ def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
         # o modelo de outra família falhou (cota, instabilidade, saldo): o olhar não se perde, roda no principal, e
         # fica registrado que esta revisão não foi independente
         try:
-            r = chamar_json(modelo, mensagens, 6000, etapa=f"agente: {nome} (substituto)", uso_lista=uso)
+            r = chamar_json(modelo, mensagens_compartilhadas(modelo, sistema, pedido), 16000,
+                            etapa=f"agente: {nome} (substituto)", uso_lista=uso)
             if not isinstance(r, dict):
                 raise ValueError("resposta ilegível")
             return {"papel": nome, "modelo": modelo, "modelo_previsto": modelo_agente, "substituto": True,
@@ -235,7 +237,8 @@ def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
         except Exception as e:
             return {"papel": nome, "modelo": modelo, "modelo_previsto": modelo_agente,
                     "erro": f"{erro}; substituto: {type(e).__name__}: {e}"[:300]}
-    return _em_paralelo([lambda p=p, m=m: um(p, m) for p, m in zip(PAPEIS, modelos)])
+    # fora do lote, o primeiro roda sozinho e grava o material no cache; os outros cinco o leem
+    return _em_paralelo([lambda p=p, m=m: um(p, m) for p, m in zip(PAPEIS, modelos)], primeiro_sozinho=not em_lote())
 
 
 def _palavras(texto):
@@ -342,7 +345,7 @@ def consolidar(modelo, texto_material, analise, revisoes, uso):
     pedido = (texto_material + "\n\nANÁLISE:\n" + json.dumps(analise, ensure_ascii=False, indent=1)
               + "\n\nREVISÕES DOS AGENTES:\n" + json.dumps(validas, ensure_ascii=False, indent=1))
     final = chamar_json(modelo, [{"role": "system", "content": PROMPT_CONSOLIDACAO},
-                                 {"role": "user", "content": pedido}], 16000, etapa="consolidação dos riscos",
+                                 {"role": "user", "content": pedido}], 32000, etapa="consolidação dos riscos",
                         uso_lista=uso, chave="riscos")
     return final if isinstance(final, dict) and final.get("riscos") else analise
 
@@ -491,13 +494,12 @@ def votar_por_agentes(modelo, texto_material, resultado, uso, modelos=None):
 
     def um(papel, modelo_agente):
         _, nome, criterio = papel
-        mensagens = [{"role": "system", "content": PROMPT_VOTO.format(papel=nome, criterio=criterio)},
-                     {"role": "user", "content": pedido}]
+        instrucoes = PROMPT_VOTO.format(papel=nome, criterio=criterio)
         for m, substituto in ((modelo_agente, False), (modelo, True)):
             if substituto and m == modelo_agente:
                 break
             try:
-                r = chamar_json(m, mensagens, 8000, etapa=f"votação: {nome}" + (" (substituto)" if substituto else ""),
+                r = chamar_json(m, mensagens_compartilhadas(m, instrucoes, pedido), 16000, etapa=f"votação: {nome}" + (" (substituto)" if substituto else ""),
                                 uso_lista=uso, chave="votos")
                 if isinstance(r, dict) and isinstance(r.get("votos"), list):
                     return {"papel": nome, "modelo": m, "substituto": substituto, "votos": r["votos"]}
@@ -506,7 +508,8 @@ def votar_por_agentes(modelo, texto_material, resultado, uso, modelos=None):
                 continue
             erro = "resposta ilegível"
         return {"papel": nome, "modelo": modelo_agente, "erro": erro}
-    return _em_paralelo([lambda p=p, m=m: um(p, m) for p, m in zip(PAPEIS, modelos)])
+    # fora do lote, o primeiro roda sozinho e grava o material no cache; os outros cinco o leem
+    return _em_paralelo([lambda p=p, m=m: um(p, m) for p, m in zip(PAPEIS, modelos)], primeiro_sozinho=not em_lote())
 
 
 def _normaliza(valor, niveis):

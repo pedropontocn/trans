@@ -598,8 +598,12 @@ def test_agentes_podem_usar_modelos_diferentes(funcoes, llm):
     revisoes = funcoes.revisar_por_agentes("a", "MATERIAL", {"riscos": []}, [], modelos)
     assert [r["modelo"] for r in revisoes] == modelos and all(not r.get("erro") for r in revisoes)
     assert [r["papel"] for r in revisoes][-1] == "Advogado do diabo" and revisoes[-1]["contestados"]
-    chamadas = [c for c in llm.chamadas if "Você revisa a análise de riscos" in str(c["mensagens"][0]["content"])
-                or "ADVOGADO DO DIABO" in str(c["mensagens"][0]["content"])]
+    chamadas = [c for c in llm.chamadas if "Você revisa a análise de riscos" in str(c["mensagens"])
+                or "ADVOGADO DO DIABO" in str(c["mensagens"])]
+    # na Anthropic, o material vem primeiro e em cache, e as instruções de cada agente depois
+    anthropic = [c for c in chamadas if c["modelo"].startswith("anthropic/")]
+    assert all(c["mensagens"][1]["content"][0].get("cache_control") for c in anthropic)
+    assert all("<instrucoes>" in c["mensagens"][1]["content"][1]["text"] for c in anthropic)
     assert sorted(c["modelo"] for c in chamadas) == sorted(modelos)
     md = funcoes.markdown_metodo("x", {}, None, {"nivel": "alta", "motivos": []}, [], None, revisoes, {"riscos": []})
     assert "gemini/gemini-4-argon" in md and "provedores diferentes" in md

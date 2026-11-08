@@ -742,13 +742,14 @@ FRASE_CONFIANCA = {"alta": "Pode servir de base; confira os pontos marcados como
                    "baixa": "Use para saber o que perguntar à secretaria, não para afirmar."}
 
 
-def antes_de_ler(confianca, data_corte, cortes=None, contratos=True):
+def antes_de_ler(confianca, data_corte, cortes=None, contratos=True, so_secretaria=False):
     """O quadro de abertura do dossiê e do relatório de riscos: o que é o documento, a confiança (com o motivo em
     português e o que fazer com ela), material cortado, como ler a base de cada informação e as ressalvas."""
+    bases = ("do dossiê de fontes públicas e dos dados da SEPLAG" if so_secretaria
+             else "do dossiê de fontes públicas e dos dados do SIGA/PNCP e da SEPLAG")
     linhas = ["## Antes de ler",
-              f"- **O que é:** apoio à decisão gerado com IA a partir do que a secretaria enviou, do dossiê de fontes "
-              f"públicas e dos dados do SIGA/PNCP e da SEPLAG, com data de corte {data_corte or 'não informada'}. Expõe "
-              "riscos e opções; não recomenda decisões."]
+              f"- **O que é:** apoio à decisão gerado com IA a partir do que a secretaria enviou, {bases}, com data de "
+              f"corte {data_corte or 'não informada'}. Expõe riscos e opções; não recomenda decisões."]
     if confianca:
         nivel = confianca["nivel"]
         por_que = "; ".join(confianca.get("por_que") or [])
@@ -760,7 +761,11 @@ def antes_de_ler(confianca, data_corte, cortes=None, contratos=True):
         linhas.append(f"- **Material cortado:** {c}. O que estava no trecho cortado não entrou na análise.")
     linhas.append("- **Base de cada informação:** \"SIGA/PNCP\" e \"fonte oficial ✔\" são dados conferidos; \"órgão\" é o "
                   "que a secretaria declarou; \"sem comprovação\" precisa ser confirmado.")
-    if contratos:
+    if so_secretaria:
+        linhas.append("- **Contratos e calendário:** só o que a secretaria informou. Bases externas (SIGA, PNCP, "
+                      "portais) ficaram de fora por trazerem datas defasadas; contrato que a secretaria não citou não "
+                      "aparece aqui.")
+    elif contratos:
         linhas.append("- **Contratos:** o SIGA nem sempre registra aditivos de prazo. Confirme no PNCP ou no DOERJ antes "
                       "de cobrar.")
     linhas.append("- **Sem revisão da equipe:** confira antes de usar.")

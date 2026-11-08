@@ -104,7 +104,7 @@ def extrair_calendario(modelo, dossie, relatorio, orgao, data_corte=None):
     dados = chamar_json(
         modelo, mensagens_com_cache(modelo, PROMPT_CALENDARIO, material_referencia(dossie, relatorio),
                                     f"Monte o calendário do órgão {orgao}. Data de corte: {base_dia:%d/%m/%Y}."),
-        12000, etapa="calendário de vencimentos", uso_lista=uso, chave="eventos")
+        24000, etapa="calendário de vencimentos", uso_lista=uso, chave="eventos")
     comp_rel = _comparavel(relatorio or "")
     sh_rel = _shingles(comp_rel.split())
     por_id = {i["id"]: i for i in itens_incluidos(dossie)}
@@ -453,7 +453,7 @@ def extrair_diagnostico(modelo, dossie, relatorio, orgao):
     dados = chamar_json(
         modelo, mensagens_com_cache(modelo, PROMPT_DIAGNOSTICO_ORGAO, material_referencia(dossie, relatorio),
                                     f"Escreva o diagnóstico da secretaria {orgao}."),
-        12000, etapa="diagnóstico", uso_lista=uso, chave="secoes") or {}
+        24000, etapa="diagnóstico", uso_lista=uso, chave="secoes") or {}
     comp_rel = _comparavel(relatorio or "")
     sh_rel = _shingles(comp_rel.split())
     por_id = {i["id"]: i for i in itens_incluidos(dossie)}
@@ -524,7 +524,7 @@ def extrair_contratos_criticos(modelo, dossie, relatorio, orgao):
     dados = chamar_json(
         modelo, mensagens_com_cache(modelo, PROMPT_CONTRATOS, material_referencia(dossie, relatorio),
                                     f"Liste os contratos críticos da secretaria {orgao}."),
-        8000, etapa="contratos críticos", uso_lista=uso, chave="contratos") or {}
+        16000, etapa="contratos críticos", uso_lista=uso, chave="contratos") or {}
     comp_rel = _comparavel(relatorio or "")
     sh_rel = _shingles(comp_rel.split())
     por_id = {i["id"]: i for i in itens_incluidos(dossie)}

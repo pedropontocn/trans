@@ -1,4 +1,6 @@
 """Configuração: modelos, preços e limites."""
+import os
+
 VERSAO = "5.1"
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
 
@@ -9,6 +11,11 @@ MODELOS = [
     "anthropic/claude-sonnet-4-5-20250929",
 ]
 
+
+# Contratos: só o que a secretaria informou. As bases externas (SIGA, PNCP, painel da equipe, portais e notícias)
+# trazem datas e situações defasadas e poluíam o calendário e o relatório de riscos. CONTRATOS_SO_DA_SECRETARIA=0 nos
+# Secrets volta a usar as bases.
+CONTRATOS_SO_DA_SECRETARIA = os.getenv("CONTRATOS_SO_DA_SECRETARIA", "1").strip() != "0"
 
 LIMITE_CARACTERES = 400_000      # documentos brutos de uma pasta (Drive ou .zip), somados: o mesmo do relatório
 
