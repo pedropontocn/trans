@@ -103,7 +103,7 @@ def extrair_json(texto):
     if ini != -1 and fim > ini:
         texto = texto[ini + len(MARCA_JSON_INI):fim]
     texto = re.sub(r"```(?:json)?", "", texto)
-    decodificador = json.JSONDecoder()
+    decodificador = json.JSONDecoder(strict=False)   # aceita quebra de linha crua dentro dos textos
     pos = texto.find("{")
     while pos != -1:
         try:
@@ -187,13 +187,20 @@ def ultima_falha():
     return getattr(_FALHAS, "falha", None)
 
 
-def chamar_json(modelo, mensagens, max_tokens, etapa="", uso_lista=None, teto=32000):
-    """Chama o modelo e devolve o JSON da resposta. Se a resposta não trouxe JSON legível, repete uma vez: com o dobro
-    do limite, se foi cortada pelo limite de tokens; senão, mostrando ao modelo a resposta e pedindo só o JSON (aspas
-    sem escape, texto antes do JSON). Sem JSON nas duas, devolve None e guarda o motivo em ultima_falha()."""
+def _legivel(dados, chave):
+    """O JSON serve? Com chave, precisa ter essa chave no nível de cima: um pedaço solto (um risco só, achado dentro de
+    um JSON quebrado) não serve."""
+    return isinstance(dados, dict) and (not chave or chave in dados)
+
+
+def chamar_json(modelo, mensagens, max_tokens, etapa="", uso_lista=None, teto=32000, chave=None):
+    """Chama o modelo e devolve o JSON da resposta. Se a resposta não trouxe JSON legível (com `chave`, ele precisa ter
+    essa chave no nível de cima), repete uma vez: com o dobro do limite, se foi cortada pelo limite de tokens; senão,
+    mostrando ao modelo a resposta e pedindo só o JSON. Sem JSON nas duas, devolve None e guarda o motivo em
+    ultima_falha()."""
     texto, _, motivo = chamar_modelo(modelo, mensagens, max_tokens, etapa=etapa, uso_lista=uso_lista)
     dados = extrair_json(texto)
-    if dados is None:
+    if not _legivel(dados, chave):
         if motivo == "length" and max_tokens < teto:
             texto2, _, motivo2 = chamar_modelo(modelo, mensagens, min(teto, max_tokens * 2),
                                                etapa=f"{etapa} (de novo, com mais espaço)", uso_lista=uso_lista)
@@ -204,9 +211,11 @@ def chamar_json(modelo, mensagens, max_tokens, etapa="", uso_lista=None, teto=32
                                    "internas dos textos escapadas."}]
             texto2, _, motivo2 = chamar_modelo(modelo, pedido, min(teto, max(max_tokens, 8000)),
                                                etapa=f"{etapa} (de novo, pedindo só o JSON)", uso_lista=uso_lista)
-        dados = extrair_json(texto2)
-        if dados is None:
-            _FALHAS.falha = (etapa, f"{motivo} / {motivo2}", re.sub(r"\s+", " ", (texto2 or texto or ""))[:160])
+        dados2 = extrair_json(texto2)
+        if _legivel(dados2, chave):
+            return dados2
+        _FALHAS.falha = (etapa, f"{motivo} / {motivo2}", re.sub(r"\s+", " ", (texto2 or texto or ""))[:160])
+        return dados2 if isinstance(dados2, dict) and not chave else None
     return dados
 
 
