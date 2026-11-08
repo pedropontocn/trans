@@ -368,12 +368,12 @@ def test_pacote_de_dossies_e_lido_por_sigla(llm):
     from transicao import entrada
     dossies = entrada.dossies_do_envio(_pacote())
     assert [d["orgao"] for d in dossies] == ["Secretaria de Estado de Exemplo - SEX"]
-    assert sorted(dossies[0]["partes"]) == ["completo", "contratos", "dossie", "pesquisa"]
+    assert sorted(dossies[0]["partes"]) == ["pesquisa"]          # planilha do SIGA e painel do SIGA/PNCP: ignorados
     orgaos = [{"nome": "SEX - Exemplo"}, {"nome": "Secretaria de Estado de Exemplo"}, {"nome": "SEFAZ"}]
     assert entrada.casar_dossies(orgaos, dossies) == []
     assert [bool(o.get("ler_dossie")) for o in orgaos] == [True, False, False]       # cada dossiê casa uma vez
     textos = orgaos[0]["ler_dossie"]()
-    assert set(textos) == {"pesquisa", "dossie", "contratos"} and textos["pesquisa"].startswith("# Pesquisa")
+    assert set(textos) == {"pesquisa"} and textos["pesquisa"].startswith("# Pesquisa")
 
 
 def test_dossie_enviado_confere_links_e_numeros(llm):
@@ -386,80 +386,10 @@ def test_dossie_enviado_confere_links_e_numeros(llm):
     assert web["licitacoes"]["tipo_fonte"] == "documento_oficial"
     assert web["decisao-123"]["checagem"] == "sem_trecho"                         # parágrafo sem número: não conferido
     assert web["materia"]["checagem"] == "trecho_nao_encontrado"                  # o número não está na página
-    equipe = [i["afirmacao"] for i in d["itens"] if i.get("conferido_pela_equipe")]
-    assert any(a.startswith("Vencem em até 30 dias") for a in equipe)
-    assert not any(a.startswith("1 contrato(s) vencem") for a in equipe)          # alerta que repete a tabela
-    assert any("recuperação judicial" in a for a in equipe) and not any("Não consta" in a for a in equipe)
-    assert any("2025000001" in a and "data conferida em: PNCP" in a for a in equipe)
-    assert not any("2025000002" in a for a in equipe)                             # data só no SIGA: não vira fato
-    assert any(a.startswith("Outros 1 contrato(s)") and "confirmada com a secretaria" in a for a in equipe)
+    # o painel do SIGA/PNCP e a planilha de vencimentos não entram, mesmo se vierem
+    assert not any(i.get("conferido_pela_equipe") for i in d["itens"]) and "contratos" not in d
+    assert not any("2025000001" in i["afirmacao"] or "Vencem em até 30 dias" in i["afirmacao"] for i in d["itens"])
     assert {n["procurado"][:12] for n in d["nao_encontrado"]} == {"TCE-RJ: nada", "Número de te"}
-    assert len(d["contratos"]) == 2
-
-
-def test_vencimentos_da_planilha_vao_para_o_calendario(llm):
-    from transicao import pesquisa, produtos
-    contratos = pesquisa.ler_contratos(CONTRATOS)
-    eventos = produtos.eventos_de_contratos(contratos, "SEX", "06/11/2026")
-    assert [e["dias"] for e in eventos] == [14, 129] and eventos[0]["criticidade"].startswith("Crítico")
-    assert eventos[1]["evento"].endswith("(emergencial)") and eventos[0]["valor_texto"] == "R$ 10.000.000,00"
-    extraido = dict(eventos[0], origem="Informado pelo órgão")
-    assert len(produtos.juntar_eventos(eventos, [extraido])) == 2                 # repetido na mesma data sai
-    assert [e["fonte_data"] for e in eventos] == ["PNCP", "SIGA"]
-    assert [produtos.confirmado(e) for e in eventos] == [True, False]
-
-
-def test_data_informada_pela_secretaria_prevalece_sobre_o_siga(llm):
-    from datetime import date
-    from transicao import pesquisa, produtos
-    planilha = produtos.eventos_de_contratos(pesquisa.ler_contratos(CONTRATOS), "SEX", "06/11/2026")
-    base = {"so_mes": False, "orgao": "SEX", "tipo": "Contrato", "valor": None, "valor_texto": "",
-            "consequencia": "", "decisao": "", "fonte": "relatório do órgão"}
-    # a secretaria informa que o contrato da Limpeza Beta (só no SIGA) foi prorrogado até 30/06/2027
-    do_orgao = dict(base, data=date(2027, 6, 30), dias=236, criticidade="Acompanhar", origem="Informado pelo órgão",
-                    evento="Fim da vigência da limpeza", objeto="Contrato com a Limpeza Beta",
-                    trecho="contrato com a Limpeza Beta prorrogado até 30/06/2027")
-    # um portal público traz outra data para um contrato que não está na planilha, e um prazo legal
-    portal = dict(base, data=date(2026, 12, 1), dias=25, criticidade="Crítico (até 30 dias)",
-                  origem="Fonte pública (dossiê)", evento="Fim do contrato de vigilância", objeto="Vigilância Gama",
-                  trecho="vigência até 01/12/2026", fonte="https://transparencia.exemplo.gov.br/x")
-    prazo = dict(portal, tipo="Prazo legal", evento="Envio da LOA", objeto="LOA 2027")
-    juntos = produtos.juntar_eventos(planilha, [portal, prazo, do_orgao])
-    beta = next(e for e in juntos if e.get("contratacao") == "2025000002")
-    assert beta["data"] == date(2027, 6, 30) and beta["data_siga"] == date(2027, 3, 15)
-    assert beta["fonte_data"] == "órgão" and produtos.confirmado(beta)
-    assert not any(e.get("origem") == "Informado pelo órgão" and e["tipo"] == "Contrato" for e in juntos)  # não repete
-    gama = next(e for e in juntos if e["objeto"] == "Vigilância Gama")
-    assert not produtos.confirmado(gama) and gama["fonte_data"] == "portal público"
-    assert produtos.confirmado(next(e for e in juntos if e["tipo"] == "Prazo legal"))   # prazo não é contrato: fica
-    assert produtos.so_no_siga(juntos) == [gama]
-    assert "1 contrato(s) têm data de fim só no SIGA ou em portal público" in produtos.resumo_so_no_siga(juntos)
-
-
-def test_datas_so_do_siga_ficam_fora_do_calendario_e_do_painel(llm):
-    import io
-    import openpyxl
-    from transicao import checklist, documentos, painel, pesquisa, produtos, riscos
-    eventos = produtos.eventos_de_contratos(pesquisa.ler_contratos(CONTRATOS), "SEX", "06/11/2026")
-    produtos.avaliar_riscos(eventos, "06/11/2026")
-    assert [e["contratacao"] for e in riscos.vencimentos_numerados(eventos).values()] == ["2025000001"]
-    assert [c for c in produtos.contratos_da_planilha(eventos)] and all(
-        "2025000002" not in str(c) for c in produtos.contratos_da_planilha(eventos))
-    ficha = dict(produtos.ficha_contratos(eventos))
-    assert ficha["Contratos que vencem em até 180 dias (data da secretaria ou do PNCP/DOERJ)"].startswith("1")
-    assert ficha["Com data só no SIGA, a confirmar com a secretaria (fora das linhas acima)"].startswith("1")
-    c1 = checklist._por_codigo(eventos)["C1"]["resposta"]
-    assert c1.startswith("1 contrato(s)") and "Outros 1 têm a data só no SIGA" in c1
-    wb = openpyxl.load_workbook(io.BytesIO(documentos.calendario_xlsx(eventos)))
-    cal = [str(c.value) for linha in wb["Calendário"].iter_rows() for c in linha]
-    assert any("2025000001" in v for v in cal) and not any("2025000002" in v for v in cal)
-    assert "PNCP" in cal
-    assert any("2025000002" in str(c.value) for linha in wb["A confirmar (SIGA)"].iter_rows() for c in linha)
-    assert not any("2025000002" in str(c.value) for linha in wb["Prioridades"].iter_rows() for c in linha)
-    for e in eventos:
-        e["essencial"] = True
-    md = "\n".join(painel.markdown_apagao(eventos))
-    assert "1 contrato(s) de serviço essencial" in md and "Outros 1" in md and "A confirmar (SIGA)" in md
 
 
 def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
@@ -483,17 +413,6 @@ def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
     assert fora and all(i["bloco"] == "contratos_convenios" for i in fora)
     material = " ".join(json.dumps(c["mensagens"], ensure_ascii=False) for c in llm.chamadas)
     assert "2025000001" not in material                            # nem chega ao modelo
-
-
-def test_bases_de_contratos_podem_voltar(llm, tmp_path, monkeypatch):
-    import openpyxl
-    from transicao import analise, config
-    monkeypatch.setattr(config, "CONTRATOS_SO_DA_SECRETARIA", False)
-    partes = {"pesquisa": PESQUISA, "dossie": REDUZIDO, "contratos": CONTRATOS}
-    orgaos = [{"nome": "Secretaria de Exemplo", "texto": RELATORIO, "ler_dossie": lambda: partes}]
-    assert analise.rodar_orgaos(orgaos, CFG, tmp_path, log=lambda *_: None)[0]["situacao"] == "concluído"
-    planilha = openpyxl.load_workbook(next((tmp_path / "calendarios").glob("*_calendario.xlsx"))).active
-    assert any("2025000001" in str(c.value) for linha in planilha.iter_rows() for c in linha)
 
 
 def test_dossie_sem_fatos_avisa(llm, tmp_path):

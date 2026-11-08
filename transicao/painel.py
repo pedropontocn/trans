@@ -1,6 +1,6 @@
 """Painel estadual: todas as decisões com prazo antes da posse, nas primeiras 72 horas e nos primeiros 100 dias, e
 todas as de repercussão política alta, de todas as secretarias, em ordem de prazo; e os serviços essenciais que podem
-parar até o fim dos 100 dias (contratos do SIGA/PNCP, por código).
+parar até o fim dos 100 dias (contratos que a secretaria informou, por código).
 
 Quase tudo é calculado por código a partir dos riscos de cada secretaria (janela pela data-limite contada da posse,
 prioridade, ordem). O modelo entra uma vez, para apontar os temas que se repetem entre secretarias; o código confere
@@ -74,28 +74,23 @@ CABECALHO = ["| Agir até | Secretaria | Decisão a tomar (risco) | Quem decide 
 
 
 def markdown_apagao(eventos, limite_lista=25):
-    """Serviços essenciais que podem parar: contratos da planilha do SIGA/PNCP de serviço essencial que vencem até o fim
+    """Serviços essenciais que podem parar: contratos informados pela secretaria, de serviço essencial, que vencem até o fim
     dos 100 dias, por secretaria e janela (quantos e quanto), e a lista dos de prioridade máxima. Tudo por código."""
     from datetime import timedelta
     from .riscos import POSSE, horizonte
     limite = POSSE + timedelta(days=99)
-    from .produtos import confirmado
-    todos = [e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e.get("essencial")
-             and e["data"] <= limite and e["dias"] >= -30]
-    ess = [e for e in todos if confirmado(e)]
-    so_siga = [e for e in todos if not confirmado(e)]
-    if not todos:
+    ess = [e for e in eventos or [] if e.get("tipo") == "Contrato" and e.get("essencial")
+           and e["data"] <= limite and e["dias"] >= -30]
+    if not ess:
         return []
     janelas = ["Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias"]
     jan = lambda e: horizonte(e.get("agir_ate") or e["data"])
     total = sum(e.get("valor") or 0 for e in ess)
     md = [f"## Serviços essenciais que podem parar até {limite:%d/%m/%Y}",
           f"{len(ess)} contrato(s) de serviço essencial (saúde, alimentação, custódia, vigilância, combustível, sistemas "
-          f"e outros) vencem até o fim dos 100 dias, somando {_mi(total)}, com a data informada pela secretaria ou "
-          "conferida no PNCP/DOERJ. A janela é a da data-limite para agir (30 dias antes do fim). A lista completa, um a "
-          "um, está no calendário (filtre Janela)."
-          + (f" Outros {len(so_siga)} ({_mi(sum(e.get('valor') or 0 for e in so_siga))}) têm a data só no SIGA, que é "
-             "defasado: ficam fora desta conta e estão na aba \"A confirmar (SIGA)\" do calendário." if so_siga else ""),
+          f"e outros) vencem até o fim dos 100 dias" + (f", somando {_mi(total)}" if total else "")
+          + ", pelo que a secretaria informou. A janela é a da data-limite para agir (30 dias antes do fim). A lista "
+          "completa, um a um, está no calendário (filtre Janela).",
           "| Secretaria | " + " | ".join(janelas) + " | Total |", "|---|" + "---|" * (len(janelas) + 1)]
     por_sec = {}
     for e in ess:

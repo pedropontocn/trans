@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-from . import checklist, config, confronto as conf, documentos, entrada, folha, modelo, painel, pesquisa, produtos, riscos, verificacao
+from . import checklist, confronto as conf, documentos, entrada, folha, modelo, painel, pesquisa, produtos, riscos, verificacao
 from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO, esquema_de_modelos
 
 JUNTAS = False          # no modo econômico, as etapas independentes vão juntas para a mesma fila da Batch API
@@ -40,13 +40,11 @@ def _seguro(funcao, vazio):
 
 
 def _so_contratos_da_secretaria(dossie):
-    """Tira do material os contratos do órgão vindos de bases externas (SIGA, PNCP, painel da equipe, portais,
-    notícias): ficam no registro, marcados, mas não entram na análise, no calendário nem nos documentos."""
+    """Contratos: só vale o que a secretaria informou. Itens de contrato do órgão vindos da pesquisa em fontes
+    públicas ficam no registro, marcados, mas não entram na análise, no calendário nem nos documentos."""
     for i in dossie.get("itens") or []:
         if i.get("camada") == "orgao" and i.get("bloco") == "contratos_convenios" and i.get("incluir", True):
             i["incluir"], i["fora_por"] = False, "contrato de base externa: só vale o que a secretaria informou"
-    dossie["contratos_externos"] = len(dossie.get("contratos") or [])
-    dossie["contratos"] = []
 
 
 def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, manifesto=None):
@@ -74,8 +72,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
                           + (": confira se o arquivo traz fatos com link [título](https://...) ou a planilha de contratos)"
                              if dossie.get("origem") == "arquivo" else ")"))
 
-    if config.CONTRATOS_SO_DA_SECRETARIA:
-        _so_contratos_da_secretaria(dossie)
+    _so_contratos_da_secretaria(dossie)
 
     # confronto, calendário, diagnóstico e checklist leem o mesmo material (em cache): na Batch API vão juntos
     progresso("Diagnóstico, calendário, checklist e confronto com as fontes...")
@@ -95,18 +92,15 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         if parte.get("erro"):
             problemas.append(f"{rotulo}: {parte['erro']}")
     eventos = calendario.get("eventos") or []
-    if config.CONTRATOS_SO_DA_SECRETARIA:        # calendário: só as datas que a secretaria informou
-        calendario["descartados"] = (calendario.get("descartados") or []) + [
-            {"data": f"{e['data']:%d/%m/%Y}", "evento": e["evento"], "motivo": "não veio da secretaria"}
-            for e in eventos if e.get("origem") != "Informado pelo órgão"]
-        eventos = [e for e in eventos if e.get("origem") == "Informado pelo órgão"]
-        criticos["contratos"] = [c for c in criticos.get("contratos") or [] if c.get("rotulo") == "informado pelo órgão"]
-        for sec in diagnostico.get("secoes") or []:
-            if sec["titulo"] == "Contratos":
-                sec["itens"] = [i for i in sec["itens"] if i["rotulo"] == "informado pelo órgão"]
-    if dossie.get("contratos"):               # vencimentos da planilha de contratos: entram por código, sem o modelo
-        eventos = produtos.juntar_eventos(produtos.eventos_de_contratos(dossie["contratos"], nome, cfg["data_corte"]),
-                                          eventos)
+    # calendário e contratos: só o que a secretaria informou
+    calendario["descartados"] = (calendario.get("descartados") or []) + [
+        {"data": f"{e['data']:%d/%m/%Y}", "evento": e["evento"], "motivo": "não veio da secretaria"}
+        for e in eventos if e.get("origem") != "Informado pelo órgão"]
+    eventos = [e for e in eventos if e.get("origem") == "Informado pelo órgão"]
+    criticos["contratos"] = [c for c in criticos.get("contratos") or [] if c.get("rotulo") == "informado pelo órgão"]
+    for sec in diagnostico.get("secoes") or []:
+        if sec["titulo"] == "Contratos":
+            sec["itens"] = [i for i in sec["itens"] if i["rotulo"] == "informado pelo órgão"]
     produtos.avaliar_riscos(eventos, cfg["data_corte"])
     if not any(s["itens"] for s in diagnostico.get("secoes") or []):
         raise ErroAnalise("o diagnóstico não trouxe nenhuma afirmação conferida"
@@ -117,7 +111,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     progresso("Analisando riscos e decisões...")
     vencimentos = riscos.vencimentos_numerados(eventos)
     material = riscos.material(nome, diagnostico, vencimentos, conf.texto_confronto(confronto), cfg["data_corte"],
-                               checklist.texto_para_analise(cobertura), produtos.resumo_so_no_siga(eventos))
+                               checklist.texto_para_analise(cobertura))
     analise = riscos.analisar(principal, material, uso)
     if not analise.get("riscos"):
         falha = modelo.ultima_falha()
@@ -139,11 +133,9 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     riscos.visoes_por_codigo(resultado["decisoes"], analise, revisoes)   # o que cada agente teme e valoriza, do bruto
     confianca = riscos.confianca(resumo_dos, resultado["riscos"], cobertura)
 
-    ficha = produtos.ficha_contratos(eventos)
-    # contratos críticos: os da planilha do SIGA/PNCP (código) primeiro, depois os apontados no material e conferidos
-    contratos_criticos = produtos.contratos_da_planilha(eventos) + (criticos.get("contratos") or [])
+    contratos_criticos = criticos.get("contratos") or []          # os que a secretaria informou, conferidos
     corpo = "\n\n".join([documentos.em_uma_pagina(resultado, cobertura, diagnostico.get("indicadores")),
-                          documentos.markdown_capitulos(diagnostico, contratos_criticos, ficha),
+                          documentos.markdown_capitulos(diagnostico, contratos_criticos),
                           documentos.markdown_riscos(resultado)])
     base = "\n".join([pesquisa.texto_dossie(dossie), relatorio, material])
     numeros = verificacao.verificar_numeros(corpo, base)
@@ -163,10 +155,9 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
                "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes)),
                "neutralidade": esquema["neutralidade"], "familias_de_fora": esquema["familias"]}
     nota = documentos.nota_final(registro_id, modelos, confianca, cfg["data_corte"], neutralidade, revisoes)
-    antes = documentos.antes_de_ler(confianca, cfg["data_corte"], documentos.cortes_de_leitura(manifesto, avisos),
-                                    so_secretaria=config.CONTRATOS_SO_DA_SECRETARIA)
+    antes = documentos.antes_de_ler(confianca, cfg["data_corte"], documentos.cortes_de_leitura(manifesto, avisos))
     texto_dossie = documentos.dossie_secretaria(
-        resultado, diagnostico, ficha, eventos, dossie, confronto, checklist.markdown(cobertura), nota,
+        resultado, diagnostico, None, eventos, dossie, confronto, checklist.markdown(cobertura), nota,
         cobertura=cobertura, contratos_criticos=contratos_criticos, antes_md=antes)
     texto_riscos = documentos.relatorio_riscos(resultado, cobertura, nota, antes_md=antes)
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
@@ -229,8 +220,8 @@ def _gravar_resumo(saida, linhas, custo_estado):
         "  checklist; fontes).\n"
         "- riscos/: o relatório de riscos de cada secretaria, em até 3 páginas (riscos com prazo, janela,\n"
         "  prioridade, sensibilidade política e revisão dos agentes; decisões em aberto; o que pedir).\n"
-        "- calendarios/: o calendário de vencimentos de cada secretaria em Excel; a aba Prioridades vem primeiro, e as\n"
-        "  datas só do SIGA ficam na aba \"A confirmar (SIGA)\".\n"
+        "- calendarios/: o calendário de vencimentos de cada secretaria em Excel, só com as datas que ela informou; a\n"
+        "  aba Prioridades vem primeiro.\n"
         "- resumo.csv: situação, números e custo de cada órgão.\n"
         "- auditoria/: o registro completo de cada análise em JSON (dossiê e conferências, revisões dos seis agentes,\n"
         "  objeções risco a risco, método, descartes, custo).\n\n"

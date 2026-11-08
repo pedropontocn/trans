@@ -5,9 +5,8 @@ pontos que a transição não pode deixar passar e diz, para cada um, se foi ENC
 conferidos por código), PROCURADO E NÃO ENCONTRADO (a pesquisa registrou a busca sem resultado, ou o órgão informou
 que não há) ou NÃO PROCURADO (nem o dossiê nem o relatório tocam no ponto). O silêncio do documento vira informação.
 
-Onde o código consegue responder sozinho (contratos a vencer e emergenciais, a partir da planilha do SIGA/PNCP), o
-modelo não participa. Nos demais pontos, o modelo aponta no material o que responde à pergunta e o código confere
-cada referência: item do dossiê existente ou trecho literal do relatório.
+O modelo aponta no material o que responde à pergunta e o código confere cada referência: item do dossiê existente
+ou trecho literal do relatório. Contratos: só o que a secretaria informou.
 """
 import re
 
@@ -17,9 +16,9 @@ from .modelo import _comparavel, _norm, _shingles, chamar_json, mensagens_com_ca
 # (id, tema, pergunta, blocos do dossiê onde a resposta costuma estar, fonte onde procurar se faltar)
 PERGUNTAS = [
     ("C1", "Contratos a vencer", "Contratos que vencem em até 180 dias, com valor e objeto",
-     ["contratos_convenios", "riscos_continuidade"], "SIGA e PNCP"),
+     ["contratos_convenios", "riscos_continuidade"], "relação de contratos da secretaria"),
     ("C2", "Contratos emergenciais", "Contratos emergenciais ou por dispensa em vigor",
-     ["contratos_convenios"], "PNCP e Diário Oficial"),
+     ["contratos_convenios"], "relação de contratos da secretaria"),
     ("C3", "Execução orçamentária", "Dotação, empenhado, liquidado e pago no exercício corrente",
      ["orcamento_execucao"], "Portal da Transparência e SIAFE-Rio"),
     ("C4", "Restos a pagar", "Restos a pagar processados e não processados do órgão",
@@ -31,7 +30,7 @@ PERGUNTAS = [
     ("C7", "Convênios federais", "Convênios e transferências federais com prestação de contas aberta ou vencida",
      ["contratos_convenios"], "Transferegov"),
     ("C8", "Obras", "Obras paradas, atrasadas ou com aditivo acima de 25% do valor original",
-     ["contratos_convenios", "entregas_indicadores"], "PNCP, Diário Oficial e TCE-RJ"),
+     ["contratos_convenios", "entregas_indicadores"], "secretaria, Diário Oficial e TCE-RJ"),
     ("C9", "Pessoal", "Cargos comissionados e terceirizados: quantos e quantos vagam na troca de governo",
      ["pessoal"], "Portal da Transparência e contratos de terceirização"),
     ("C10", "Sistemas críticos", "Sistemas e serviços de TI de que a operação depende, com os contratos que os sustentam",
@@ -93,38 +92,10 @@ def _texto_perguntas():
 
 
 def _firmeza(item):
-    if item.get("conferido_pela_equipe"):
-        return "dado do SIGA/PNCP"
     if item.get("checagem") == "conferido":
         return ("confirmado em fonte oficial" if item.get("tipo_fonte") in _pesquisa().TIPOS_OFICIAIS
                 else "fonte pública conferida")
     return "fonte pública não conferida"
-
-
-def _por_codigo(eventos):
-    """O que a planilha de contratos (SIGA/PNCP) responde sozinha, sem o modelo."""
-    from .produtos import confirmado
-    todos = [e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e.get("dias", -1) >= 0]
-    contratos = [e for e in todos if confirmado(e)]
-    if not todos:
-        return {}
-    respostas = {}
-    ate_180 = [e for e in contratos if e["dias"] <= 180]
-    so_siga = [e for e in todos if not confirmado(e) and e["dias"] <= 180]
-    if ate_180 or so_siga:
-        total = sum(e.get("valor") or 0 for e in ate_180)
-        respostas["C1"] = {"resposta": f"{len(ate_180)} contrato(s) vencem em até 180 dias, com a data informada pela "
-                                       "secretaria ou conferida no PNCP/DOERJ"
-                                       + (f", somando R$ {total:,.0f}".replace(",", ".") if total else "") + "."
-                                       + (f" Outros {len(so_siga)} têm a data só no SIGA, a confirmar com a secretaria."
-                                          if so_siga else ""),
-                           "firmeza": "dado do SIGA/PNCP", "fatos": [], "origem": "planilha de contratos"}
-    emergenciais = [e for e in contratos if "emergencial" in _norm(e.get("evento", "")) or "emergencial" in _norm(e.get("objeto", ""))]
-    respostas["C2"] = ({"resposta": f"{len(emergenciais)} contrato(s) emergencial(is) na planilha do SIGA/PNCP.",
-                        "firmeza": "dado do SIGA/PNCP", "fatos": [], "origem": "planilha de contratos"} if emergenciais
-                       else {"nega": True, "resposta": "Nenhum contrato emergencial na planilha do SIGA/PNCP.",
-                             "origem": "planilha de contratos"})
-    return respostas
 
 
 def responder(modelo, dossie, relatorio, orgao):
@@ -147,17 +118,10 @@ def conferir(brutas, dossie, relatorio, eventos=None):
     nao_encontrado = (dossie or {}).get("nao_encontrado") or []
     comp_rel = _comparavel(relatorio or "")
     sh_rel = _shingles(comp_rel.split())
-    codigo = _por_codigo(eventos)
     saida = []
     for cid, tema, pergunta, blocos, onde in PERGUNTAS:
         linha = {"id": cid, "tema": tema, "pergunta": pergunta, "estado": "não procurado", "resposta": "",
                  "fatos": [], "firmeza": "", "onde_procurar": onde}
-        if cid in codigo:
-            r = codigo[cid]
-            linha.update(resposta=r["resposta"], estado="procurado e não encontrado" if r.get("nega") else "encontrado",
-                         firmeza=r.get("firmeza", ""), origem=r["origem"])
-            saida.append(linha)
-            continue
         r = (brutas or {}).get(cid) or {}
         if cid == "C9" and not r.get("resposta"):
             # pessoal: a folha da SEPLAG (Caderno de RH) responde por código, quando está no dossiê
@@ -169,7 +133,7 @@ def conferir(brutas, dossie, relatorio, eventos=None):
         resposta = str(r.get("resposta") or "").strip()
         if resposta and (itens or trechos):
             firmezas = [_firmeza(por_id[i]) for i in itens] + (["informado pelo órgão"] if trechos else [])
-            ordem = ["dado do SIGA/PNCP", "confirmado em fonte oficial", "fonte pública conferida",
+            ordem = ["confirmado em fonte oficial", "fonte pública conferida",
                      "informado pelo órgão", "fonte pública não conferida"]
             linha.update(resposta=resposta, fatos=itens, trechos=trechos,
                          firmeza=min(firmezas, key=ordem.index),

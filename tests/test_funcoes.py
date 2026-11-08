@@ -334,24 +334,23 @@ def test_regua_de_risco_igual_para_todos(funcoes):
     corte = date(2026, 11, 6)
     def ev(dias, valor, objeto, termos=None, tipo="Contrato"):
         return {"data": corte + timedelta(days=dias), "dias": dias, "valor": valor, "evento": "Fim do contrato",
-                "objeto": objeto, "tipo": tipo, "valor_texto": "", "origem": "Contratos do Estado (SIGA/PNCP)",
+                "objeto": objeto, "tipo": tipo, "valor_texto": "", "origem": "Informado pelo órgão",
                 "termos": termos if termos is not None else ""}
     eventos = funcoes.avaliar_riscos([
         ev(40, 300e6, "PAVIMENTAÇÃO DE VIAS"),                                     # obra grande
         ev(40, 2e6, "FORNECIMENTO DE ALIMENTAÇÃO PARA PRESOS"),                    # essencial pequeno
-        ev(40, 2e6, "ALIMENTAÇÃO HOSPITALAR", "Termo Aditivo Termo 1 (2026-10-20)"),  # essencial com aditivo
+        ev(40, 2e6, "ALIMENTAÇÃO HOSPITALAR"),                                     # essencial
         ev(200, 1e6, "MATERIAL DE ESCRITÓRIO"),
     ], "06/11/2026")
     obra, presos, hospital, escritorio = eventos
     assert presos["essencial"] and presos["impacto"] == "Alto" and presos["categoria"].startswith("Continuidade")
     assert obra["categoria"] == "Obra" and obra["impacto"] == "Alto"
     assert presos["agir_ate"] == corte + timedelta(days=10) and presos["sem_tempo_licitar"]
-    assert presos["prioridade"] == "Máxima" and hospital["prioridade_nota"] < presos["prioridade_nota"]
-    assert "aditivo publicado em 20/10/2026" in hospital["situacao_pncp"]
+    assert presos["prioridade"] == "Máxima" and hospital["prioridade_nota"] == presos["prioridade_nota"]
     assert escritorio["prioridade"] == "Baixa" and not escritorio["sem_tempo_licitar"]
     md = funcoes.markdown_vencimentos(eventos)
     assert md.index("ALIMENTAÇÃO PARA PRESOS") < md.index("ALIMENTAÇÃO HOSPITALAR") and "serviço essencial" in md
-    assert "contratos de gestão com OS" in md
+    assert "SIGA" not in md and "PNCP" not in md
     import io
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(funcoes.calendario_xlsx([dict(e, orgao="SEX", criticidade="x", so_mes=False,
@@ -438,7 +437,7 @@ def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):
     d = dossie_exemplo(funcoes)
     diag = funcoes.extrair_diagnostico("m", d, rel, "Secretaria de Exemplo")
     ev = {"data": date(2026, 11, 20), "dias": 16, "valor": 2e6, "evento": "Fim do contrato 1", "objeto": "ALIMENTAÇÃO DE PRESOS",
-          "tipo": "Contrato", "origem": "Contratos do Estado (SIGA/PNCP)", "termos": "", "valor_texto": "R$ 2 mi"}
+          "tipo": "Contrato", "origem": "Informado pelo órgão", "termos": "", "valor_texto": "R$ 2 mi"}
     funcoes.avaliar_riscos([ev], "04/11/2026")
     venc = funcoes.vencimentos_numerados([ev])
     bruto = {"situacao": ["s"], "riscos": [
@@ -454,7 +453,7 @@ def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):
     r = funcoes.conferir_e_ordenar(bruto, diag, venc, d, "04/11/2026")
     titulos = [x["titulo"] for x in r["riscos"]]
     assert titulos[0] == "Alimentação de presos" and r["riscos"][0]["id"] == "R1"     # renumerados pela prioridade
-    assert r["riscos"][0]["firmeza"] == "dado do SIGA/PNCP" and r["riscos"][0]["prioridade"] == "Máxima"
+    assert r["riscos"][0]["firmeza"] == "informado pelo órgão" and r["riscos"][0]["prioridade"] == "Máxima"
     sem_base = next(x for x in r["riscos"] if x["titulo"] == "Sem base")
     assert sem_base["firmeza"] == "sem comprovação" and sem_base["nota"] <= 5 and sem_base["categoria"] == "Continuidade de serviço"
     assert sem_base["agir_ate"] == date(2026, 12, 31) and sem_base["horizonte"] == "Antes da posse"   # "antes da posse"
@@ -473,11 +472,11 @@ def test_material_dos_riscos_tem_ids_e_limite_da_base(funcoes, llm):
     d = dossie_exemplo(funcoes)
     diag = funcoes.extrair_diagnostico("m", d, rel, "Secretaria de Exemplo")
     ev = {"data": date(2026, 12, 20), "dias": 46, "valor": 9e6, "evento": "Fim do contrato 7", "objeto": "LIMPEZA",
-          "tipo": "Contrato", "origem": "Contratos do Estado (SIGA/PNCP)", "termos": "", "valor_texto": "R$ 9 mi"}
+          "tipo": "Contrato", "origem": "Informado pelo órgão", "termos": "", "valor_texto": "R$ 9 mi"}
     funcoes.avaliar_riscos([ev], "04/11/2026")
     texto = funcoes.material("SEX", diag, funcoes.vencimentos_numerados([ev]), "DIVERGÊNCIAS: x", "04/11/2026")
     assert "[F1]" in texto and "[V1] vence 20/12/2026" in texto and "agir até 20/11/2026" in texto
-    assert "contratos de gestão com OS" in texto and "DIVERGÊNCIAS: x" in texto
+    assert "DIVERGÊNCIAS: x" in texto and "SIGA" not in texto
 
 
 # --- CHECKLIST OBRIGATÓRIO -----------------------------------------------------------------------
@@ -520,21 +519,6 @@ def test_checklist_da_o_estado_de_cada_ponto(funcoes, llm):
     md = funcoes.markdown(funcoes.conferir(brutas, d2, rel, []))
     assert "SEM INFORMAÇÃO" in md and "procurar em: PGE e TJRJ" in md and "O4" in md
     assert "ficaram sem informação" in funcoes.linha_essencial(funcoes.conferir(brutas, d2, rel, []))
-
-
-def test_checklist_responde_contratos_por_codigo(funcoes):
-    from datetime import date
-    eventos = [{"data": date(2026, 12, 1), "dias": 27, "evento": "Vencimento do contrato 1/2026 (emergencial)", "objeto": "limpeza",
-                "valor": 1_000_000.0, "origem": "Contratos (SIGA/PNCP)"},
-               {"data": date(2027, 1, 20), "dias": 77, "evento": "Vencimento do contrato 2/2026", "objeto": "vigilância",
-                "valor": 2_500_000.0, "origem": "Contratos (SIGA/PNCP)"}]
-    cob = {c["id"]: c for c in funcoes.conferir({}, {"itens": [], "origem": "arquivo"}, "", eventos)}
-    assert cob["C1"]["estado"] == "encontrado" and "2 contrato(s)" in cob["C1"]["resposta"] and "3.500.000" in cob["C1"]["resposta"]
-    assert cob["C1"]["firmeza"] == "dado do SIGA/PNCP"
-    assert cob["C2"]["estado"] == "encontrado" and "1 contrato(s) emergencial" in cob["C2"]["resposta"]
-    sem = {c["id"]: c for c in funcoes.conferir({}, {"itens": [], "origem": "arquivo"}, "",
-                                                  [dict(eventos[1], evento="Vencimento do contrato 2/2026")])}
-    assert sem["C2"]["estado"] == "procurado e não encontrado"           # a planilha existe e não tem emergencial
 
 
 def test_confianca_cai_com_ponto_nao_procurado(funcoes):
@@ -666,35 +650,36 @@ def test_dossies_embutidos_sao_lidos_e_o_enviado_vale_sobre_eles(funcoes, tmp_pa
     pacote = io.BytesIO()
     with zipfile.ZipFile(pacote, "w") as z:
         z.writestr("dossies/00_CONSOLIDACAO_ESTADUAL.md", "| Sigla | Secretaria |\n|---|---|\n| SETUR | Secretaria de Turismo |\n| SEFAZ | Secretaria de Fazenda |\n")
-        z.writestr("dossies/SETUR.md", "# Dossiê reduzido SETUR\n- fato")
-        z.writestr("dossies/SEFAZ.md", "# Dossiê reduzido SEFAZ\n- fato")
+        z.writestr("dossies/SETUR.md", "# Dossiê reduzido SETUR (painel do SIGA): ignorado\n- fato")
+        z.writestr("pesquisa/SETUR_pesquisa.md", "# Pesquisa SETUR\n- fato")
+        z.writestr("pesquisa/SEFAZ_pesquisa.md", "# Pesquisa SEFAZ\n- fato")
         z.writestr("dossies_automaticos/dados_vencimentos/SETUR_vencimentos_180d.csv", "contratacao;fim\n1;01/12/2026\n")
         z.writestr("referencia/REVISAO.md", "ignorar")
     (tmp_path / "Transicao_RJ_dossies_06-11-2026.zip").write_bytes(pacote.getvalue())
     (tmp_path / "LEIA-ME.md").write_text("como atualizar", encoding="utf-8")
     dossies, data = funcoes.dossies_embutidos(tmp_path)
     assert data == "06/11/2026" and [d["orgao"] for d in dossies] == ["Secretaria de Fazenda - SEFAZ", "Secretaria de Turismo - SETUR"]
-    assert all(d["embutido"] for d in dossies) and "contratos" in next(d for d in dossies if "SETUR" in d["orgao"])["partes"]
+    assert all(d["embutido"] for d in dossies) and next(d for d in dossies if "SETUR" in d["orgao"])["partes"].keys() == {"pesquisa"}
     # pasta vazia ou inexistente: nada
     assert funcoes.dossies_embutidos(tmp_path / "nada") == ([], "")
     # a variável PASTA_DOSSIES aponta para outra pasta
     monkeypatch.setenv("PASTA_DOSSIES", str(tmp_path))
     assert len(funcoes.dossies_embutidos()[0]) == 2
     # o enviado vale sobre o embutido da mesma secretaria; as demais continuam
-    enviado = funcoes.dossies_do_envio([("SETUR.md", b"# Dossie novo SETUR")])
+    enviado = funcoes.dossies_do_envio([("SETUR_pesquisa.md", b"# Dossie novo SETUR")])
     juntos = {d["orgao"]: d for d in funcoes.juntar_dossies(dossies, enviado)}
     assert set(juntos) == {"Secretaria de Fazenda - SEFAZ", "Secretaria de Turismo - SETUR"}   # casa pela sigla
     assert not juntos["Secretaria de Turismo - SETUR"].get("embutido") and juntos["Secretaria de Fazenda - SEFAZ"]["embutido"]
-    assert b"novo" in juntos["Secretaria de Turismo - SETUR"]["partes"]["dossie"]
+    assert b"novo" in juntos["Secretaria de Turismo - SETUR"]["partes"]["pesquisa"]
 
 
 def test_pacote_embutido_no_repositorio_cobre_as_31_secretarias(funcoes):
     dossies, data = funcoes.dossies_embutidos()
     assert data == "06/11/2026" and len(dossies) >= 31
     secid = next(d for d in dossies if d["orgao"].endswith("- SECID"))
-    assert {"pesquisa", "dossie", "contratos"} <= set(secid["partes"])
+    assert set(secid["partes"]) == {"pesquisa"}                 # sem a planilha do SIGA nem o painel do SIGA/PNCP
     textos = funcoes._texto_dossie(secid)
-    assert "contratacao;" in textos["contratos"] and "Secretaria de Estado das Cidades" in textos["dossie"]
+    assert "SIGA" not in textos["pesquisa"][:2000] and "contratacao;" not in textos["pesquisa"]
 
 
 def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
@@ -721,7 +706,7 @@ def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
 
 def test_painel_mostra_servicos_essenciais_que_podem_parar(funcoes):
     from datetime import date
-    base = {"origem": "Contratos do Estado (SIGA/PNCP)", "dias": 30, "valor_texto": "", "evento": "Fim do contrato"}
+    base = {"origem": "Informado pelo órgão", "tipo": "Contrato", "dias": 30, "valor_texto": "", "evento": "Fim do contrato"}
     eventos = [dict(base, orgao="Secretaria de Saúde - SES", essencial=True, data=date(2026, 12, 20),
                     agir_ate=date(2026, 11, 20), valor=2_000_000.0, prioridade="Máxima", contratacao="2026000001",
                     objeto="Aquisição de medicamentos", fornecedor="FARMA LTDA"),
@@ -757,6 +742,6 @@ def test_quadro_antes_de_ler_diz_o_que_e_a_confianca_e_os_cortes(funcoes):
     assert "**Confiança desta análise: MÉDIA**, porque dos 4 temas básicos" in md
     assert "Silêncio do documento sobre esses temas não quer dizer que não haja risco." in md
     assert "Confirme os pontos marcados" in md and md.count("**Material cortado:**") == 2
-    assert "SIGA nem sempre registra aditivos" in md and md.rstrip().endswith("confira antes de usar.")
+    assert "só o que a secretaria informou" in md and md.rstrip().endswith("confira antes de usar.")
     baixa = funcoes.confianca(None, [], None)
     assert "não houve dossiê" in funcoes.antes_de_ler(baixa, "", []) and "não para afirmar" in funcoes.antes_de_ler(baixa, "", [])
