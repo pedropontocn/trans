@@ -20,8 +20,40 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from transicao import VERSAO, analise, entrada, modelo
-from transicao.config import FAMILIAS, MODELOS, esquema_de_modelos, familias_disponiveis
+
+def _recarregar_se_mudou():
+    """Depois de um merge, o Streamlit roda o app.py novo mas mantém na memória os módulos de transicao/ da versão
+    antiga, e o app quebra chamando o que ainda não existe. Se algum arquivo da pasta mudou desde a última carga,
+    recarrega todos, na ordem das dependências. Com uma análise rodando, não recarrega (ela usa os módulos em memória)."""
+    import importlib
+    import sys
+    pasta = Path(__file__).resolve().parent / "transicao"
+    marca = max(a.stat().st_mtime for a in pasta.glob("*.py"))
+    pacote = sys.modules.get("transicao")
+    if pacote is None or getattr(pacote, "_marca_carga", None) == marca:
+        if pacote is not None:
+            return
+        import transicao
+        transicao._marca_carga = marca
+        return
+    rodando = any(t.get("situacao") == "rodando" for t in (getattr(pacote, "_trabalhos_vivos", None) or {}).values())
+    if rodando:
+        return
+    ordem = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist",
+             "riscos", "documentos", "painel", "lote_api", "analise"]
+    for nome in ordem + sorted(n.split(".", 1)[1] for n in list(sys.modules) if n.startswith("transicao.")
+                              and n.split(".", 1)[1] not in ordem):
+        modulo = sys.modules.get(f"transicao.{nome}")
+        if modulo is not None:
+            importlib.reload(modulo)
+    importlib.reload(pacote)
+    sys.modules["transicao"]._marca_carga = marca
+
+
+_recarregar_se_mudou()
+
+from transicao import VERSAO, analise, entrada, modelo  # noqa: E402
+from transicao.config import FAMILIAS, MODELOS, esquema_de_modelos, familias_disponiveis  # noqa: E402
 
 load_dotenv()
 
@@ -41,7 +73,9 @@ REGISTROS = Path(os.getenv("PASTA_REGISTROS") or "registros")
 @st.cache_resource(show_spinner=False)
 def _trabalhos():
     """A análise roda num fio à parte e fica na memória do app (todas as abas veem) até ele reiniciar."""
-    return {}
+    import transicao
+    transicao._trabalhos_vivos = {}          # o recarregamento de módulos consulta: não recarrega com análise rodando
+    return transicao._trabalhos_vivos
 
 
 def trabalho_atual():

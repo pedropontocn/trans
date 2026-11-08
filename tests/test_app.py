@@ -147,3 +147,27 @@ def test_dossies_embutidos_entram_sozinhos_na_tabela(llm, monkeypatch):
     # a SECID casou com o dossiê embutido; a secretaria desconhecida ficou sem; as 30 só com dossiê ficam escondidas
     assert any(b.label.startswith("▶️ Analisar 2") for b in at.button)
     assert any("secretarias que têm dossiê mas nenhum documento enviado" in c.label for c in at.checkbox)
+
+
+def test_codigo_novo_e_recarregado_sem_reiniciar_o_app(llm, monkeypatch):
+    """Depois de um merge, o app.py novo não pode encontrar módulos velhos na memória."""
+    import os
+    import streamlit
+    import transicao
+    from transicao import entrada
+    from streamlit.testing.v1 import AppTest
+    streamlit.cache_resource.clear()
+    monkeypatch.setattr(streamlit, "file_uploader", lambda *a, **k: [])
+    at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=60)
+    at.run()
+    assert not at.exception
+    # simula a versão velha em memória: a função some do módulo e a marca de carga fica para trás
+    original = entrada.dossies_embutidos
+    del entrada.dossies_embutidos
+    transicao._marca_carga = 0
+    try:
+        at.run()
+        assert not at.exception and hasattr(entrada, "dossies_embutidos")
+    finally:
+        if not hasattr(entrada, "dossies_embutidos"):
+            entrada.dossies_embutidos = original
