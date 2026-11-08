@@ -12,11 +12,11 @@ Um `.zip` com:
 
 | Arquivo | O que é |
 |---|---|
-| `painel_estadual.docx` | **1. Painel estadual:** As urgências de todas as secretarias na mesma régua: ranking, temas que se repetem, mapa de calor por categoria e cronograma de quando agir |
+| `painel_estadual.docx` | **1. Painel estadual:** todas as decisões de todas as secretarias com prazo antes da posse, nas primeiras 72 horas e nos primeiros 100 dias, e todas as de repercussão política alta. Em ordem de prazo; cada linha com a decisão a tomar, quem decide, a repercussão política votada pelos seis agentes (e quem reage), a prioridade e a base |
 | `dossies/<secretaria>_dossie.docx` | **2. Dossiê da secretaria, atualizado com o que ela informou**: em resumo (situação, números-chave, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. O que a secretaria informou e o que as fontes mostram; 6. Cobertura do checklist; anexo de fontes citadas e prazos que não são contratos |
-| `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**: resumo executivo (riscos mais urgentes, decisões em aberto, lacunas); riscos por prioridade, cada um com quem objetou e a contestação do advogado do diabo; decisões em aberto com opções de mesmo peso; o que pedir à secretaria; anexo com o que cada olhar de gestão teme e valoriza |
-| `auditoria/<secretaria>_auditoria.docx` e `.json` | **5. Auditoria**: as objeções dos agentes risco a risco com a resposta da consolidação, todas as fontes do dossiê com as conferências, o método; e o registro completo em JSON |
-| `calendario_consolidado.xlsx` | **4. Calendário:** Os vencimentos de todas as secretarias; a aba Prioridades vem primeiro |
+| `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, até 3 páginas e sem anexo: situação; as decisões urgentes em ordem de prazo, com janela, impacto e repercussão política votados item a item pelos seis agentes (contagem dos votos e divergências), prioridade e base; decisões em aberto com opções de mesmo peso; o que pedir à secretaria |
+| `auditoria/<secretaria>.json` | **5. Auditoria**: o registro completo de cada análise: dossiê e conferências, análise inicial, revisões e votos dos seis agentes, consolidação, objeções risco a risco, método, descartes, custo |
+| `calendario_consolidado.xlsx` | **4. Calendário:** os vencimentos de todas as secretarias, com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
 
 ## Como usar
@@ -96,7 +96,12 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    trocado nos Secrets (`GEMINI_MODELO = "gemini/gemini-3.8-flash"` fica na cota gratuita do Google, por exemplo).
 7. **Consolidação e conferência.** Uma consolidação junta as revisões; o código confere os fatos citados por cada
    risco, dá a firmeza da informação e calcula a prioridade. Um segundo modelo revisa a neutralidade.
-8. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
+8. **Votação item a item.** Depois da consolidação, os seis agentes votam, em cada risco, sem ver uns aos outros:
+   **impacto** (alto, médio, baixo), **janela** (antes da posse, primeiras 72 horas, primeiros 100 dias, depois) e
+   **repercussão política** (alta, média, baixa, dizendo quem reage e como). O código apura: maioria, com empate indo
+   para o nível mais grave (janela: o mais urgente); data que está no documento prevalece sobre o voto de janela; a
+   divergência entre agentes fica registrada e aparece no relatório.
+9. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
    riscos de todas as secretarias; o modelo só aponta os temas que se repetem.
 
 ## Código

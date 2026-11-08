@@ -99,6 +99,10 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     progresso("Consolidando...")
     final = riscos.consolidar(principal, material, analise, revisoes, uso)
     resultado = riscos.conferir_e_ordenar(final, diagnostico, vencimentos, dossie, cfg["data_corte"])
+    # os seis agentes votam cada risco final: impacto, janela e sensibilidade política; o código apura
+    progresso("Seis agentes votando, item a item, impacto, janela e sensibilidade política...")
+    votacoes = riscos.votar_por_agentes(principal, material, resultado, uso, modelos_agentes)
+    riscos.apurar_votos(resultado, votacoes, cfg["data_corte"])
     riscos.proveniencia(resultado["riscos"], revisoes, analise, final)   # quem apontou e quem contestou cada risco
     riscos.visoes_por_codigo(resultado["decisoes"], analise, revisoes)   # o que cada agente teme e valoriza, do bruto
     confianca = riscos.confianca(resumo_dos, resultado["riscos"], cobertura)
@@ -121,7 +125,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     versao_prompt = hashlib.md5((pesquisa.PROMPT_PESQUISA + conf.PROMPT_CONFRONTO + produtos.PROMPT_CALENDARIO
                                  + produtos.PROMPT_DIAGNOSTICO_ORGAO + produtos.PROMPT_CONTRATOS
                                  + checklist.PROMPT_CHECKLIST + riscos.PROMPT_ANALISE
-                                 + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO).encode()).hexdigest()[:8]
+                                 + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO + riscos.PROMPT_VOTO).encode()).hexdigest()[:8]
     registro_id = f"{versao_prompt}-{hashlib.md5((material + relatorio).encode()).hexdigest()[:8]}"
     modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal,
                "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes)),
@@ -142,6 +146,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
         "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "confronto": confronto, "diagnostico": diagnostico,
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
+        "votacao_dos_agentes": votacoes,
         "riscos": para_json(resultado), "checklist": cobertura, "contratos_criticos": contratos_criticos,
         "metodo_md": documentos.markdown_metodo(registro_id, modelos, resumo_dos, confianca, numeros, neutralidade,
                                                revisoes, resultado),
@@ -155,7 +160,6 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     return {"dossie_docx": documentos.gerar_docx(texto_dossie, meta), "dossie_md": texto_dossie,
             "riscos_docx": documentos.gerar_docx(texto_riscos, dict(meta, tipo="Relatório de riscos e decisões urgentes")),
             "riscos_md": texto_riscos,
-            "auditoria_docx": documentos.gerar_docx(texto_auditoria, dict(meta, tipo="Auditoria da análise")),
             "auditoria_md": texto_auditoria, "eventos": eventos,
             "descartados": [dict(d, orgao=nome) for d in calendario.get("descartados") or []],
             "riscos": [dict(r, orgao=nome) for r in resultado["riscos"]], "situacao": resultado["situacao"],
@@ -188,12 +192,12 @@ def _gravar_resumo(saida, linhas, custo_estado):
         "- dossies/: o dossiê de cada secretaria, atualizado com o que ela informou (resumo e números-chave; contratos,\n"
         "  pessoal, passivos, orçamento e obras; o que a secretaria informou x o que as fontes mostram; cobertura do\n"
         "  checklist; fontes).\n"
-        "- riscos/: o relatório de riscos de cada secretaria (riscos por prioridade com a revisão dos agentes,\n"
-        "  decisões em aberto, o que pedir à secretaria, o que cada olhar de gestão teme e valoriza).\n"
+        "- riscos/: o relatório de riscos de cada secretaria, em até 3 páginas (riscos com prazo, janela,\n"
+        "  prioridade, sensibilidade política e revisão dos agentes; decisões em aberto; o que pedir).\n"
         "- calendario_consolidado.xlsx: os vencimentos de todas as secretarias; a aba Prioridades vem primeiro.\n"
         "- resumo.csv: situação, números e custo de cada órgão.\n"
-        "- auditoria/: por secretaria, a auditoria legível (<secretaria>_auditoria.docx: objeções dos agentes risco a\n"
-        "  risco, todas as fontes com as conferências, método) e o registro completo em JSON.\n\n"
+        "- auditoria/: o registro completo de cada análise em JSON (dossiê e conferências, revisões dos seis agentes,\n"
+        "  objeções risco a risco, método, descartes, custo).\n\n"
         f"Órgãos concluídos: {sum(l['situacao'] == 'concluído' for l in linhas)} de {len(linhas)}. "
         f"Custo estimado: US$ {total:.2f} (inclui US$ {custo_estado:.2f} da pesquisa sobre o Estado e do painel estadual).\n"
         "Documentos gerados com apoio de IA, sem revisão da equipe: confira antes de usar.\n", encoding="utf-8")
@@ -322,7 +326,6 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                                    progresso=lambda t: log(f"[{k}] {t}"))
                 (saida / "dossies" / f"{pasta}_dossie.docx").write_bytes(r["dossie_docx"])
                 (saida / "riscos" / f"{pasta}_riscos.docx").write_bytes(r["riscos_docx"])
-                (saida / "auditoria" / f"{pasta}_auditoria.docx").write_bytes(r["auditoria_docx"])
                 (saida / "auditoria" / f"{pasta}.json").write_text(
                     json.dumps(r["registro"], ensure_ascii=False, indent=2, default=str), encoding="utf-8")
                 linha.update(situacao="concluído", dossie=r["dossie"], itens_dossie=r["itens_dossie"], conferidos=r["conferidos"],

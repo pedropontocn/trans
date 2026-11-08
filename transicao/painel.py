@@ -1,16 +1,14 @@
-"""Painel estadual: as urgências de todas as secretarias, na mesma régua, em poucas páginas.
+"""Painel estadual: todas as decisões com prazo antes da posse, nas primeiras 72 horas e nos primeiros 100 dias, e
+todas as de repercussão política alta, de todas as secretarias, em ordem de prazo.
 
-Quase tudo é calculado por código a partir dos riscos e vencimentos de cada secretaria (ranking, mapa de calor,
-cronograma). O modelo entra uma vez, para apontar os temas que se repetem entre secretarias; o código confere que
-as secretarias e os riscos citados existem.
+Quase tudo é calculado por código a partir dos riscos de cada secretaria (janela pela data-limite contada da posse,
+prioridade, ordem). O modelo entra uma vez, para apontar os temas que se repetem entre secretarias; o código confere
+que as secretarias e os riscos citados existem.
 """
-from collections import Counter, defaultdict
 from datetime import date
 
 from . import documentos
 from .modelo import chamar_json
-from .produtos import _ler_data, _mi, ordem_de_prioridade
-from .riscos import CATEGORIAS
 
 PROMPT_TEMAS = """Você lê os riscos da transição de várias secretarias do Estado do Rio de Janeiro, já ordenados por
 prioridade, e aponta os TEMAS TRANSVERSAIS: problemas que se repetem em várias secretarias ou que dependem de uma
@@ -53,80 +51,78 @@ def _mes(d):
     return f"{meses[d.month - 1]}/{d.year}"
 
 
-def markdown_painel(riscos, situacoes, eventos, temas, data_corte, linhas=None):
-    hoje = (_ler_data(data_corte) or (date.today(), False))[0] if data_corte else date.today()
-    ordenados = sorted(riscos, key=lambda r: (-r["nota"], r.get("agir_ate") or date.max))
-    secretarias = sorted({r["orgao"] for r in riscos})
-    maximas = [r for r in riscos if r["prioridade"] == "Máxima"]
-    contratos = [e for e in eventos if e.get("origem", "").startswith("Contratos") and 0 <= e["dias"] <= 90]
-    md = ["## O essencial",
-          f"- {len(maximas)} risco(s) de prioridade máxima e "
-          f"{sum(r['prioridade'] == 'Alta' for r in riscos)} de prioridade alta em {len(secretarias)} secretaria(s).",
-          f"- {sum(1 for r in riscos if r.get('agir_ate') and r['agir_ate'] <= hoje)} risco(s) já passaram da data para agir."]
-    if contratos:
-        md.append(f"- {len(contratos)} contrato(s) vencem em até 90 dias ({_mi(sum(e.get('valor') or 0 for e in contratos))}); "
-                  f"{sum(e.get('essencial') for e in contratos)} são de serviço essencial.")
-    if temas:
-        md.append(f"- Temas que se repetem: " + "; ".join(t["titulo"] for t in temas[:4]) + ".")
+SENS_ORDEM = {"Alta": 0, "Média": 1, "Baixa": 2}
 
-    md += ["## As urgências do Estado",
-           "| # | Secretaria | Risco | Categoria | Prioridade | Agir até | Base |", "|---|---|---|---|---|---|---|"]
-    for k, r in enumerate(ordenados[:20], 1):
-        agir = f"{r['agir_ate']:%d/%m/%Y}" if r.get("agir_ate") else "–"
-        md.append(f"| {k} | {_sigla(r['orgao'])} | {r['id']}. {r['titulo']} | {r['categoria']} | {r['prioridade']} | "
-                  f"{agir} | {r['firmeza']} |")
+
+def _linha_demanda(r):
+    """Uma decisão na tabela do painel: a decisão a tomar, o risco que a motiva, prazo, quem decide, repercussão
+    política (intensidade e quem reage), prioridade e base."""
+    agir = f"{r['agir_ate']:%d/%m/%Y}" if r.get("agir_ate") else "–"
+    decisao = f"**{r.get('decisao') or r['titulo']}**" + (f" _({r['titulo']})_" if r.get("decisao") else "")
+    rep = documentos._voto(r, "sensibilidade", r.get("sensibilidade"))
+    if r.get("motivo_sensibilidade"):
+        rep += f": {documentos._curto(r['motivo_sensibilidade'], 120)}"
+    quem = r.get("quem_decide") or "–"
+    return (f"| {agir} | {_sigla(r['orgao'])} | {decisao} | {quem} | {rep} | {r['prioridade']} | "
+            f"{documentos.BASE_CURTA.get(r['firmeza'], r['firmeza'])} |")
+
+
+CABECALHO = ["| Agir até | Secretaria | Decisão a tomar (risco) | Quem decide | Repercussão política | Prioridade | Base |",
+             "|---|---|---|---|---|---|---|"]
+
+
+def markdown_painel(riscos, situacoes, eventos, temas, data_corte, linhas=None):
+    """O painel estadual: todas as demandas que vencem antes da posse, nas primeiras 72 horas e nos primeiros 100 dias,
+    e todas as de sensibilidade política alta, de todas as secretarias, na mesma régua. Montado por código."""
+    from .riscos import POSSE, horizonte
+    for r in riscos:
+        r.setdefault("horizonte", horizonte(r.get("agir_ate")))
+        r.setdefault("sensibilidade", "Baixa")
+    ordem = lambda r: (r.get("agir_ate") or date.max, -r["nota"], SENS_ORDEM.get(r["sensibilidade"], 3))
+    secretarias = sorted({r["orgao"] for r in riscos})
+    janelas = [("Antes da posse", f"Até {POSSE - __import__('datetime').timedelta(days=1):%d/%m/%Y}: decisões da equipe de "
+                "transição e da gestão atual que não podem esperar a posse."),
+               ("Primeiras 72 horas", "De 01/01 a 03/01/2027: o que o governo eleito precisa decidir nos três primeiros dias."),
+               ("Primeiros 100 dias", "Até 10/04/2027.")]
+    por_janela = {h: sorted([r for r in riscos if r["horizonte"] == h], key=ordem) for h, _ in janelas}
+    sensiveis_fora = sorted([r for r in riscos if r["sensibilidade"] == "Alta" and r["horizonte"] not in por_janela],
+                            key=ordem)
+    altas = [r for r in riscos if r["sensibilidade"] == "Alta"]
+
+    md = ["## O essencial",
+          f"- {len(secretarias)} secretaria(s) analisada(s), {len(riscos)} decisão(ões) no total.",
+          f"- {len(por_janela['Antes da posse'])} com prazo antes da posse; {len(por_janela['Primeiras 72 horas'])} nas "
+          f"primeiras 72 horas; {len(por_janela['Primeiros 100 dias'])} nos primeiros 100 dias.",
+          f"- {len(altas)} de repercussão política alta"
+          + (f" ({sum(r['horizonte'] in por_janela for r in altas)} delas com prazo até os 100 dias)" if altas else "") + "."]
+    if temas:
+        md.append("- Temas que se repetem entre secretarias: " + "; ".join(t["titulo"] for t in temas[:4]) + ".")
+    md.append("_Cada tabela está em ordem de prazo (agir até); no mesmo dia, a prioridade (impacto × urgência, mesma "
+              "régua para todas as secretarias). Repercussão política: a intensidade votada pelos seis agentes e quem "
+              "reage._")
+
+    for h, explicacao in janelas:
+        md += [f"## {h}", explicacao]
+        md += (CABECALHO + [_linha_demanda(r) for r in por_janela[h]]) if por_janela[h] else ["_Nenhuma decisão._"]
+    if sensiveis_fora:
+        md += ["## Repercussão política alta, com prazo depois dos 100 dias ou sem prazo"] + CABECALHO
+        md += [_linha_demanda(r) for r in sensiveis_fora]
 
     if temas:
         md.append("## Temas que se repetem entre secretarias")
         for t in temas:
-            md.append(f"### {t['titulo']}")
-            md.append(t["descricao"])
-            md.append(f"_Secretarias: {', '.join(t['secretarias'])}. Riscos: {', '.join(t['riscos'])}._")
-
-    md += ["## Mapa de calor",
-           "Riscos de prioridade máxima ou alta por secretaria e categoria (entre parênteses, os de prioridade máxima).",
-           "| Secretaria | " + " | ".join(CATEGORIAS) + " | Total |", "|---|" + "---|" * (len(CATEGORIAS) + 1)]
-    por_sec = defaultdict(Counter)
-    for r in riscos:
-        if r["prioridade"] in ("Máxima", "Alta"):
-            por_sec[r["orgao"]][r["categoria"]] += 1
-            if r["prioridade"] == "Máxima":
-                por_sec[r["orgao"]][r["categoria"] + "*"] += 1
-    for sec in sorted(secretarias, key=lambda s: (-sum(por_sec[s][c] for c in CATEGORIAS), s)):
-        celulas = [(f"{por_sec[sec][c]}" + (f" ({por_sec[sec][c + '*']})" if por_sec[sec][c + "*"] else ""))
-                   if por_sec[sec][c] else "–" for c in CATEGORIAS]
-        md.append(f"| {_sigla(sec)} | " + " | ".join(celulas) + f" | {sum(por_sec[sec][c] for c in CATEGORIAS)} |")
-
-    md.append("## Cronograma: quando agir")
-    faixas = defaultdict(list)
-    for r in ordenados:
-        if r.get("agir_ate"):
-            faixas["Já passou da data" if r["agir_ate"] <= hoje else _mes(r["agir_ate"])].append(r)
-    chaves = (["Já passou da data"] if "Já passou da data" in faixas else []) + sorted(
-        [k for k in faixas if k != "Já passou da data"],
-        key=lambda k: min(r["agir_ate"] for r in faixas[k]))
-    md += ["| Quando | Riscos | Os mais prioritários |", "|---|---|---|"]
-    for k in chaves[:8]:
-        destaque = "; ".join(f"{_sigla(r['orgao'])}: {r['titulo']}" for r in faixas[k][:3])
-        md.append(f"| {k} | {len(faixas[k])} | {destaque} |")
-
-    if contratos:
-        md += ["## Contratos de maior prioridade que vencem em até 90 dias",
-               "| Secretaria | Contrato | Valor | Agir até | Situação |", "|---|---|---|---|---|"]
-        for e in sorted(contratos, key=ordem_de_prioridade)[:12]:
-            md.append(f"| {_sigla(e['orgao'])} | {e['evento']}" + (" – serviço essencial" if e.get("essencial") else "")
-                      + f" | {e.get('valor_texto') or '–'} | {e['agir_ate']:%d/%m/%Y} | {e.get('situacao_pncp') or e['criticidade']} |")
+            md.append(f"**{t['titulo']}.** {t['descricao']} _({', '.join(t['secretarias'])}: {', '.join(t['riscos'])})_")
 
     if linhas:
         erros = [l for l in linhas if l.get("situacao") != "concluído"]
         if erros:
             md.append("## Secretarias não analisadas")
             md += [f"- {l['orgao']}: {l.get('observacao') or 'erro'}" for l in erros]
-    md.append(f"_Consolida os riscos de {len(secretarias)} secretaria(s), com data de corte {data_corte}, com a mesma "
-              "régua de prioridade (impacto × urgência) calculada por código. A base de contratos do Estado (SIGA) não "
-              "traz contratos de gestão com OS, convênios nem concessões. Riscos com base \"informado pelo órgão\" ou "
-              "\"sem comprovação\" dependem de confirmação. O detalhe de cada risco está no relatório de riscos da "
-              "secretaria, e a base, no dossiê dela. Gerado com apoio de IA, sem revisão da equipe; não recomenda decisões._")
+    md.append(f"_Data de corte {data_corte}; posse em {POSSE:%d/%m/%Y}. Prazos e prioridade calculados por código; a "
+              "repercussão política é votada pelos seis agentes e só fica alta com quem reage dito. Os contratos que vencem, "
+              "um a um, estão no calendário (Excel). O detalhe de cada demanda está no relatório de riscos da secretaria, "
+              "e a base, no dossiê dela. Base \"órgão\" ou \"sem comprovação\" depende de confirmação. Gerado com apoio "
+              "de IA, sem revisão da equipe; não recomenda decisões._")
     return "\n".join(md)
 
 

@@ -249,6 +249,20 @@ class LLMFalso:
         if "Você é analista de riscos" in sistema:
             self.material_riscos = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.analise_riscos) + "[FIM DO JSON]")
+        if "Você vota, item a item" in sistema:
+            papel = re.search(r"VOCÊ É: ([^.]+)\.", sistema).group(1)
+            with self.trava:
+                self.votantes = getattr(self, "votantes", []) + [papel]
+            if papel in self.agentes_que_falham:
+                raise RuntimeError("agente fora do ar")
+            ids = re.findall(r'"id": "(R\d+)"', ultimo)
+            votos = [{"risco": i, "impacto": "Alto" if i == "R1" else "Médio", "por_que_impacto": "serviço para (F1)",
+                      "janela": "Primeiras 72 horas", "por_que_janela": "vence na posse",
+                      "sensibilidade": ("Alta" if i == "R1" and not papel.startswith("Fazenda") else
+                                        "Baixa" if i == "R1" else "Média"),
+                      "por_que_sensibilidade": "TCE apontou (F4)" if i == "R1" else "gestão interna",
+                      "fatos": ["F1"]} for i in ids]
+            return self._resp("[INÍCIO DO JSON]" + json.dumps({"votos": votos}) + "[FIM DO JSON]")
         if "Você é o ADVOGADO DO DIABO" in sistema:
             with self.trava:
                 self.agentes_vistos = getattr(self, "agentes_vistos", []) + ["Advogado do diabo"]

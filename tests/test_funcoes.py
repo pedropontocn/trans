@@ -300,9 +300,13 @@ def test_calendario_em_excel(funcoes):
     wb = load_workbook(io.BytesIO(funcoes.calendario_xlsx(eventos, [{"orgao": "SECID", "data": "x", "evento": "y",
                                                                      "motivo": "z"}])))
     ws = wb["Calendário"]
-    assert ws["A2"].value.date() == date(2026, 11, 11) and ws["D3"].value == "SECID"     # ordenado por data
-    assert ws["M2"].hyperlink.target == "https://alerj.exemplo/emendas" and ws.auto_filter.ref
-    assert ws["A3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Prioridades", "Calendário", "Como ler", "Descartados"}
+    # as três primeiras colunas são para filtrar: secretaria (sigla), janela contada da posse e mês
+    assert [ws.cell(1, j).value for j in (1, 2, 3)] == ["Secretaria", "Janela", "Mês"]
+    assert ws["D2"].value.date() == date(2026, 11, 11) and ws["G3"].value == "SECID" and ws["A3"].value == "SECID"
+    assert ws["B2"].value == "Antes da posse" and ws["B3"].value == "Primeiros 100 dias" and ws["C2"].value == "2026-11"
+    assert ws["P2"].hyperlink.target == "https://alerj.exemplo/emendas" and ws.auto_filter.ref == ws.dimensions
+    assert ws["D3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Prioridades", "Calendário", "Como ler", "Descartados"}
+    assert wb["Prioridades"].auto_filter.ref and wb["Prioridades"]["B1"].value == "Janela"
 
 
 def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
@@ -352,7 +356,7 @@ def test_regua_de_risco_igual_para_todos(funcoes):
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(funcoes.calendario_xlsx([dict(e, orgao="SEX", criticidade="x", so_mes=False,
                                 consequencia="", decisao="", fonte="", trecho="") for e in eventos])))
-    assert wb.sheetnames[0] == "Prioridades" and wb["Prioridades"]["A2"].value == "Máxima"
+    assert wb.sheetnames[0] == "Prioridades" and wb["Prioridades"]["C2"].value == "Máxima" and wb["Prioridades"]["A2"].value == "SEX"
 
 
 
@@ -408,17 +412,18 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     assert "_Não se sabe:_ Organograma atualizado" in texto
     for fora in ("Riscos por prioridade", "### R1.", "Sobre este documento", "Como este documento foi feito", "teme aditivo"):
         assert fora not in texto, fora                                            # riscos e método ficam em outros produtos
-    # produto 3: o relatório de riscos
+    # produto 3: o relatório de riscos, em ordem de prazo e sem anexo
     riscos = funcoes.relatorio_riscos(resultado, cobertura, nota)
-    ordem = [riscos.index(t) for t in ["## Resumo executivo", "**Riscos mais urgentes**", "**Decisões em aberto**",
-                                       "**Lacunas: 1 de 10", "## Riscos por prioridade", "### R1. Risco 1",
-                                       "### Outros riscos a acompanhar", "## Decisões em aberto", "## Pedir à secretaria",
-                                       "## Anexo – O que cada olhar de gestão teme e valoriza",
-                                       "| Controle e jurídico (TCE-RJ, PGE, MPRJ) | aditivo irregular | legalidade |",
-                                       "_Apoio à decisão gerado com IA (registro abc"]]
+    ordem = [riscos.index(t) for t in ["## Situação", "**Lacunas: 1 de 10", "## Decisões urgentes, em ordem de prazo",
+                                       "| # | Decisão (risco) | Agir até |", "**R1. ", "## Decisões em aberto",
+                                       "## Pedir à secretaria", "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
-    assert len(re.findall(r"^### R\d", riscos, re.M)) == 5 and "| R6. Risco 6 |" in riscos          # 5 em detalhe, o resto na tabela
-    assert "**Em curso:** aditivo publicado" in riscos and "1. Contratos" not in riscos
+    assert len(re.findall(r"^\| R\d ", riscos, re.M)) == len(resultado["riscos"][:8])   # todos na tabela, até 8
+    assert "Anexo" not in riscos and "aditivo irregular" not in riscos and "1. Contratos" not in riscos
+    datas = [d for d in re.findall(r"^\| R\d+ \| [^|]+ \| (\d\d/\d\d/\d{4}|–) \|", riscos, re.M)]
+    from datetime import datetime
+    assert [datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "–"] == sorted(
+        datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "–")                 # em ordem de prazo
     # produto 5: a auditoria legível
     auditoria = funcoes.auditoria_secretaria(resultado, d, None, "## Anexo 3 – Como este documento foi feito\nx")
     assert "## Todas as fontes do dossiê" in auditoria and auditoria.rstrip().endswith("x")
@@ -452,7 +457,8 @@ def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):
     assert r["riscos"][0]["firmeza"] == "dado do SIGA/PNCP" and r["riscos"][0]["prioridade"] == "Máxima"
     sem_base = next(x for x in r["riscos"] if x["titulo"] == "Sem base")
     assert sem_base["firmeza"] == "sem comprovação" and sem_base["nota"] <= 5 and sem_base["categoria"] == "Continuidade de serviço"
-    assert sem_base["agir_ate"] == date(2027, 1, 1)
+    assert sem_base["agir_ate"] == date(2026, 12, 31) and sem_base["horizonte"] == "Antes da posse"   # "antes da posse"
+    assert not sem_base["prazo_de_fato"] and r["riscos"][0]["prazo_de_fato"]          # vencimento é fato; janela é opinião
     assert len(r["decisoes"]) == 1 and r["decisoes"][0]["riscos"] == ["R1"]         # decisão com uma opção só sai
     assert r["pedir"][0]["serve_a"].startswith("R1 e R")
     c = funcoes.confianca(funcoes.resumo_dossie(d), r["riscos"])

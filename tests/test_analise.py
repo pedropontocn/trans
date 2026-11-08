@@ -112,16 +112,15 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
                    "6. Cobertura do checklist obrigatório", "Anexo – Fontes"]:
         assert titulo in textos, titulo
     assert not any(t.startswith(("Riscos por prioridade", "Sobre este documento", "Anexo 3")) for t in textos)
-    # produto 3: o relatório de riscos
+    # produto 3: o relatório de riscos, focado nas decisões urgentes, sem anexo
     riscos_txt = [p.text for p in docx.Document(io.BytesIO(r["riscos_docx"])).paragraphs]
-    for titulo in ["Resumo executivo", "Riscos por prioridade", "Decisões em aberto", "Pedir à secretaria",
-                   "Anexo – O que cada olhar de gestão teme e valoriza"]:
+    for titulo in ["Situação", "Decisões urgentes, em ordem de prazo", "Decisões em aberto", "Pedir à secretaria"]:
         assert titulo in riscos_txt, titulo
-    assert not any(t.startswith("1. Contratos") for t in riscos_txt)
-    # produto 5: a auditoria legível
-    auditoria = [p.text for p in docx.Document(io.BytesIO(r["auditoria_docx"])).paragraphs]
+    assert not any(t.startswith(("1. Contratos", "Anexo")) for t in riscos_txt)
+    # produto 5: a auditoria é só o registro JSON, com a versão legível dentro dele
+    assert "auditoria_docx" not in r
     for titulo in ["Revisão dos agentes, risco a risco", "Todas as fontes do dossiê", "Anexo 3 – Como este documento foi feito"]:
-        assert titulo in auditoria, titulo
+        assert titulo in r["registro"]["auditoria_md"], titulo
     md = r["dossie_md"]
     assert md.index("## Em resumo") < md.index("## 1. Contratos") < md.index("## 5. O que a secretaria") < md.index("## 6. Cobertura")
     assert "| LOA 2026 | R$ 412 mi |" in md and "| Empenhado | R$ 398,75 mi |" in md and "Inventado" not in md
@@ -140,11 +139,19 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert inventado["revisao"]["contestado"] and inventado["revisao"]["sem_objecao"] == 0     # 5 exageros + 1 contestação
     assert riscos[0]["revisao"] == {"origem": "análise", "objecoes": [], "agentes": 6, "sem_objecao": 6, "contestado": False}
     assert reg["modelos"]["neutralidade"] == CFG["modelo_auxiliar"] and len(reg["modelos"]["agentes"]) == 6
-    # o olhar de cada agente, no anexo do relatório de riscos, montado do que o agente disse (não da paráfrase)
-    assert "| Fazenda e orçamento | **Retomar:** custo | **Retomar:** rapidez |" in r["riscos_md"]
-    assert "| Advogado do diabo | **Retomar:** licitar sem caixa | – |" in r["riscos_md"]
-    assert "Advogado do diabo contesta: o risco inventado não tem fato no material (F1) → consolidação: sem resposta registrada" in r["riscos_md"]
-    assert "(5 veem exagero)" in r["riscos_md"] and "- Fazenda e orçamento vê exagero: sem base" in r["auditoria_md"]
+    # o olhar de cada agente fica no registro (visões montadas do que o agente disse, não da paráfrase)
+    q1 = reg["riscos"]["decisoes"][0]
+    assert {"papel": "Fazenda e orçamento", "teme": "**Retomar:** custo", "valoriza": "**Retomar:** rapidez"} in q1["visoes"]
+    assert "Advogado do diabo contesta: o risco inventado não tem fato no material" in r["riscos_md"]
+    assert "- Fazenda e orçamento vê exagero: sem base" in r["auditoria_md"]
+    # votação item a item: seis votantes; o código apurou impacto, janela e repercussão de cada risco
+    assert sorted(llm.votantes) == sorted(p[1] for p in __import__("transicao.riscos", fromlist=["x"]).PAPEIS)
+    r1 = next(x for x in riscos if x["titulo"] == "Licitações adiadas")
+    assert r1["votos"]["impacto"]["nivel"] == "Alto" and r1["votos"]["impacto"]["votos"] == 6
+    assert r1["votos"]["sensibilidade"]["nivel"] == "Alta" and r1["votos"]["sensibilidade"]["votos"] == 5
+    assert r1["votos"]["sensibilidade"]["divergencia"][0]["papel"] == "Fazenda e orçamento"   # votou Baixa: 2 níveis longe
+    assert "Alta 5/6 ⚠" in r["riscos_md"] and "Divergência: Fazenda e orçamento vê sensibilidade baixa" in r["riscos_md"]
+    assert reg["votacao_dos_agentes"] and len(reg["votacao_dos_agentes"]) == 6
     # a consolidação falsa não informa id_anterior: o casamento é pelo título
     assert all(x["revisao"]["agentes"] == 6 for x in riscos)
     assert "[F" in llm.material_riscos and "DIAGNÓSTICO:" in llm.material_riscos
@@ -221,7 +228,7 @@ def test_varios_orgaos_gravam_documentos_calendario_e_resumo(llm, tmp_path):
     assert [l["situacao"] for l in linhas] == ["concluído", "concluído"]
     assert len(list((tmp_path / "dossies").glob("*_dossie.docx"))) == 2
     assert len(list((tmp_path / "riscos").glob("*_riscos.docx"))) == 2
-    assert len(list((tmp_path / "auditoria").glob("*_auditoria.docx"))) == 2
+    assert not list((tmp_path / "auditoria").glob("*.docx"))                        # auditoria só em JSON
     assert (tmp_path / "calendario_consolidado.xlsx").exists() and (tmp_path / "LEIA-ME.txt").exists()
     assert len(list((tmp_path / "auditoria").glob("*_arquivos_lidos.json"))) == 2
     assert [r["situacao"] for r in _resumo(tmp_path)] == ["concluído", "concluído"]
@@ -426,13 +433,23 @@ def test_painel_estadual_consolida_as_secretarias(llm, tmp_path):
     assert [l["situacao"] for l in linhas] == ["concluído", "concluído"] and linhas[0]["riscos"] == 2
     doc = docx.Document(tmp_path / "painel_estadual.docx")
     textos = [p.text for p in doc.paragraphs] + [c.text.split("\n")[0] for t in doc.tables for c in t._cells]
-    for titulo in ["O ESSENCIAL", "As urgências do Estado", "Temas que se repetem entre secretarias", "Mapa de calor",
-                   "Cronograma: quando agir"]:
+    for titulo in ["O ESSENCIAL", "Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias",
+                   "Temas que se repetem entre secretarias"]:
         assert titulo in textos, titulo
-    assert "Limites" not in textos and "Sobre este painel" not in textos and any("Consolida os riscos de 2" in t for t in textos)
-    assert "Contratos vencendo" in textos and "Tema de uma só" not in textos   # tema de uma secretaria só sai
+    assert "Mapa de calor" not in textos and "Cronograma: quando agir" not in textos
+    texto = "\n".join(p.text for p in doc.paragraphs)
+    assert "Contratos vencendo" in texto and "Tema de uma só" not in texto   # tema de uma secretaria só sai
     celulas = [c.text for t in doc.tables for c in t._cells]
-    assert "SEX" in celulas and "SEY" in celulas and "Obras e projetos" in celulas
+    k = celulas.index("Agir até")
+    assert celulas[k:k + 7] == ["Agir até", "Secretaria", "Decisão a tomar (risco)", "Quem decide", "Repercussão política",
+                                "Prioridade", "Base"]
+    assert "SEX" in celulas and "SEY" in celulas
+    # a repercussão política vem da votação dos seis agentes: R1 teve 5 votos "Alta" (Fazenda votou Baixa)
+    assert any(c.startswith("Alta 5/6") and "TCE apontou" in c for c in celulas)
+    # as decisões das primeiras 72 horas, votadas, estão na janela certa; em ordem de prazo
+    datas = [c for c in celulas if c[:2].isdigit() and c[2:3] == "/"]
+    from datetime import datetime
+    assert datas and all(datetime.strptime(d, "%d/%m/%Y") for d in datas)
     assert "SEX:R1" in llm.pedido_temas
     assert "painel estadual" in (tmp_path / "LEIA-ME.txt").read_text(encoding="utf-8")
 
@@ -482,7 +499,8 @@ def test_rodar_de_novo_na_mesma_pasta_pula_os_prontos(llm, tmp_path):
     assert (tmp_path / "painel_estadual.docx").exists()
     doc = docx.Document(tmp_path / "painel_estadual.docx")
     texto = "\n".join(p.text for p in doc.paragraphs) + "\n".join(c.text for t in doc.tables for c in t._cells)
-    assert "SEX: Licitações adiadas" in texto and "SEY: Licitações adiadas" in texto
+    celulas = [c.text for t in doc.tables for c in t._cells]
+    assert "SEX" in celulas and "SEY" in celulas and sum("(Licitações adiadas)" in c for c in celulas) == 2
     import openpyxl
     planilha = openpyxl.load_workbook(tmp_path / "calendario_consolidado.xlsx")
     orgaos_na_planilha = {str(c.value) for ws in planilha.worksheets for linha in ws.iter_rows() for c in linha if c.value}

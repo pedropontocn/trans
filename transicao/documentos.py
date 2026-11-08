@@ -1,6 +1,7 @@
 """Documentos: Word (a partir de Markdown, com tabelas, quadros e links) e Excel do calendário."""
 import io
 import re
+from datetime import date
 
 import docx
 from docx.enum.text import WD_TAB_ALIGNMENT
@@ -436,12 +437,18 @@ def markdown_dossie(dossie, confronto=None):
     return "\n".join(linhas)
 
 
+def _sigla_orgao(nome):
+    partes = [p.strip() for p in str(nome).rsplit(" - ", 1)]
+    return partes[-1] if len(partes) == 2 and partes[-1].isupper() else nome
+
+
 def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimentos críticos", data_corte=""):
     """Planilha do calendário: uma linha por evento, ordenada por data, com filtro, criticidade colorida e as
     instruções de leitura numa aba própria. Serve para um órgão ou para o consolidado do lote."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
+    from .riscos import horizonte
     wb = Workbook()
     ws = wb.active
     ws.title = "Calendário"
@@ -451,31 +458,35 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
                ("Prioridade", 11), ("Nota (impacto × urgência)", 10), ("Impacto", 9), ("Categoria", 24),
                ("Serviço essencial", 10), ("Agir até", 12), ("Sem tempo para nova licitação", 12),
                ("Situação no PNCP", 40)]
+    # as três primeiras colunas são para filtrar: secretaria (sigla), janela contada da posse e mês
+    colunas = [("Secretaria", 12), ("Janela", 18), ("Mês", 10)] + colunas
     ws.append([c for c, _ in colunas])
     cores_prioridade = {"Máxima": "C00000", "Alta": "F4B183", "Média": "FFE699", "Baixa": "E2EFDA"}
     cores = {"Vencido": "C00000", "Crítico (até 30 dias)": "F4B183", "Atenção (31 a 90 dias)": "FFE699",
              "Acompanhar": "E2EFDA"}
+    o = 3                                                   # deslocamento das colunas originais
     for e in sorted(eventos, key=lambda x: (x["data"], -(x["valor"] or 0))):
-        ws.append([e["data"], e["dias"], e["criticidade"], e["orgao"], e["tipo"], e["evento"], e["objeto"], e["valor"],
+        ws.append([_sigla_orgao(e["orgao"]), horizonte(e.get("agir_ate") or e["data"]), f"{e['data']:%Y-%m}",
+                   e["data"], e["dias"], e["criticidade"], e["orgao"], e["tipo"], e["evento"], e["objeto"], e["valor"],
                    e["valor_texto"], e["consequencia"], e["decisao"], e["origem"], e["fonte"], e["trecho"],
                    e.get("prioridade", ""), e.get("prioridade_nota"), e.get("impacto", ""), e.get("categoria", ""),
                    "sim" if e.get("essencial") else "não", e.get("agir_ate"),
                    "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", "")])
         linha = ws.max_row
-        ws.cell(linha, 20).number_format = "dd/mm/yyyy"
+        ws.cell(linha, o + 20).number_format = "dd/mm/yyyy"
         if e.get("prioridade") in cores_prioridade:
-            ws.cell(linha, 15).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
+            ws.cell(linha, o + 15).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
             if e["prioridade"] == "Máxima":
-                ws.cell(linha, 15).font = Font(color="FFFFFF", bold=True)
-        ws.cell(linha, 1).number_format = "mm/yyyy" if e["so_mes"] else "dd/mm/yyyy"
-        ws.cell(linha, 8).number_format = '#,##0.00'
+                ws.cell(linha, o + 15).font = Font(color="FFFFFF", bold=True)
+        ws.cell(linha, o + 1).number_format = "mm/yyyy" if e["so_mes"] else "dd/mm/yyyy"
+        ws.cell(linha, o + 8).number_format = '#,##0.00'
         if e["criticidade"] in cores:
-            ws.cell(linha, 3).fill = PatternFill("solid", fgColor=cores[e["criticidade"]])
+            ws.cell(linha, o + 3).fill = PatternFill("solid", fgColor=cores[e["criticidade"]])
             if e["criticidade"] == "Vencido":
-                ws.cell(linha, 3).font = Font(color="FFFFFF", bold=True)
+                ws.cell(linha, o + 3).font = Font(color="FFFFFF", bold=True)
         if str(e["fonte"]).startswith("http"):
-            ws.cell(linha, 13).hyperlink = e["fonte"]
-            ws.cell(linha, 13).font = Font(color="2E5FA8", underline="single")
+            ws.cell(linha, o + 13).hyperlink = e["fonte"]
+            ws.cell(linha, o + 13).font = Font(color="2E5FA8", underline="single")
     for j, (_, largura) in enumerate(colunas, 1):
         ws.column_dimensions[get_column_letter(j)].width = largura
         ws.cell(1, j).font = Font(bold=True, color="FFFFFF")
@@ -484,24 +495,25 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
     for linha in ws.iter_rows(min_row=2):
         for c in linha:
             c.alignment = Alignment(wrap_text=True, vertical="top")
-    ws.freeze_panes = "B2"
+    ws.freeze_panes = "D2"
     ws.auto_filter.ref = ws.dimensions
     prioridades = wb.create_sheet("Prioridades", 0)        # a primeira aba: o que tratar primeiro, em todos os órgãos
-    cab = ["Prioridade", "Agir até", "Vence em", "Órgão", "Categoria", "Serviço essencial", "Evento", "Valor (R$)",
-           "Sem tempo para nova licitação", "Situação no PNCP", "Fonte"]
+    cab = ["Secretaria", "Janela", "Prioridade", "Agir até", "Vence em", "Órgão", "Categoria", "Serviço essencial", "Evento",
+           "Valor (R$)", "Sem tempo para nova licitação", "Situação no PNCP", "Fonte"]
     prioridades.append(cab)
     from .produtos import ordem_de_prioridade
-    for e in sorted([e for e in eventos if e["dias"] >= -30], key=ordem_de_prioridade)[:200]:
-        prioridades.append([e.get("prioridade", ""), e.get("agir_ate"), e["data"], e["orgao"], e.get("categoria", ""),
+    for e in sorted([e for e in eventos if e["dias"] >= -30], key=ordem_de_prioridade)[:500]:
+        prioridades.append([_sigla_orgao(e["orgao"]), horizonte(e.get("agir_ate") or e["data"]), e.get("prioridade", ""),
+                            e.get("agir_ate"), e["data"], e["orgao"], e.get("categoria", ""),
                             "sim" if e.get("essencial") else "não", e["evento"], e["valor"],
                             "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", ""), e["fonte"]])
         linha = prioridades.max_row
-        for col in (2, 3):
+        for col in (4, 5):
             prioridades.cell(linha, col).number_format = "dd/mm/yyyy"
-        prioridades.cell(linha, 8).number_format = '#,##0.00'
+        prioridades.cell(linha, 10).number_format = '#,##0.00'
         if e.get("prioridade") in cores_prioridade:
-            prioridades.cell(linha, 1).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
-    for j, largura in enumerate([11, 12, 12, 30, 24, 10, 50, 16, 12, 40, 40], 1):
+            prioridades.cell(linha, 3).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
+    for j, largura in enumerate([12, 18, 11, 12, 12, 30, 24, 10, 50, 16, 12, 40, 40], 1):
         prioridades.column_dimensions[get_column_letter(j)].width = largura
         prioridades.cell(1, j).font = Font(bold=True, color="FFFFFF")
         prioridades.cell(1, j).fill = PatternFill("solid", fgColor="1B2A41")
@@ -527,7 +539,10 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
                   "Alta: 6 a 8; Média: 3 a 5; Baixa: 1 ou 2.",
                   "Agir até: para contratos, 30 dias antes do fim (tempo de assinar uma prorrogação). Sem tempo para "
                   "nova licitação: o contrato vence em menos de 120 dias.",
-                  "A aba Prioridades mostra os 200 eventos de maior prioridade de todos os órgãos. Limite: "
+                  "Filtros: as setas no cabeçalho filtram qualquer coluna. As três primeiras servem para isso: "
+                  "Secretaria (sigla), Janela (antes da posse, primeiras 72 horas, primeiros 100 dias ou depois, pela "
+                  "data-limite para agir contada da posse em 01/01/2027) e Mês.",
+                  "A aba Prioridades mostra os 500 eventos de maior prioridade de todos os órgãos. Limite: "
                   "contratos de gestão com OS, convênios e concessões não estão na base de contratos (SIGA).",
                   "Datas só com mês e ano aparecem como mm/aaaa.",
                   "Limite: só entram datas que estão escritas nos documentos. Se um relatório não traz a vigência dos "
@@ -904,11 +919,86 @@ def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobert
     return "\n\n".join(p for p in partes if p)
 
 
-def relatorio_riscos(resultado, cobertura, nota_md):
-    """Produto 3, o relatório de riscos: resumo executivo, riscos por prioridade (com a revisão dos agentes), decisões
-    em aberto, o que pedir à secretaria e, em anexo, o que cada olhar de gestão teme e valoriza."""
-    partes = [resumo_dos_riscos(resultado, cobertura), markdown_riscos(resultado), markdown_visoes(resultado), nota_md]
-    return "\n\n".join(p for p in partes if p)
+def _contestacao_curta(r):
+    """A contestação do advogado do diabo, se houver, em até 140 caracteres."""
+    from .riscos import PAPEL_CONTRA
+    rev = r.get("revisao") or {}
+    contra = next((o for o in rev.get("objecoes") or [] if o["papel"] == PAPEL_CONTRA), None)
+    return _curto(contra["motivo"], 140) if contra else ""
+
+
+def _voto(r, eixo, valor):
+    """O resultado de um eixo com a contagem de votos ("Alto 5/6"); sem votação, só o valor."""
+    v = (r.get("votos") or {}).get(eixo)
+    if not v:
+        return valor or "–"
+    return f"{v['nivel']} {v['votos']}/{v['total']}" + (" ⚠" if v.get("divergencia") else "")
+
+
+def _divergencias(r):
+    """As divergências entre agentes, em uma frase por eixo: quem votou diferente e por quê."""
+    partes = []
+    nomes = {"impacto": "impacto", "janela": "janela", "sensibilidade": "sensibilidade"}
+    for eixo, rotulo in nomes.items():
+        v = (r.get("votos") or {}).get(eixo) or {}
+        for d in (v.get("divergencia") or [])[:1]:
+            papel = d["papel"].split(":")[0].split(" (")[0]
+            partes.append(f"{papel} vê {rotulo} {d['voto'].lower()}" + (f" ({_curto(d['por_que'], 110)})" if d.get("por_que") else ""))
+    return "; ".join(partes)
+
+
+def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedir=5):
+    """Produto 3, o relatório de riscos, em até 3 páginas: situação; tabela de todos os riscos (prazo, janela,
+    prioridade, sensibilidade política, base, revisão); cada risco em três linhas; decisões em aberto com as opções numa
+    linha; o que pedir à secretaria. Sem anexo: as visões e objeções completas ficam no registro de auditoria."""
+    from .checklist import linha_essencial
+    riscos = sorted((resultado.get("riscos") or [])[:limite_riscos], key=lambda r: (r.get("agir_ate") or date.max, -r["nota"]))
+    md = ["## Situação"] + [f"- {_curto(x, 260)}" for x in (resultado.get("situacao") or [])[:4]]
+    lacunas = linha_essencial(cobertura) if cobertura else ""
+    if lacunas and "não foram procurados" in lacunas:
+        md.append(lacunas.replace(" Ver a tabela de cobertura no Capítulo 1.", " Ver o dossiê da secretaria."))
+    if riscos:
+        votado = any(r.get("votos") for r in riscos)
+        md += ["## Decisões urgentes, em ordem de prazo",
+               ("_Impacto, janela e repercussão política foram votados, item a item, pelos seis agentes independentes "
+                "(a contagem diz quantos votaram no resultado; ⚠ marca divergência). Data que está no documento prevalece "
+                "sobre o voto de janela. Prioridade: impacto × urgência, por código._" if votado else ""),
+               "| # | Decisão (risco) | Agir até | Janela | Impacto | Repercussão política | Prioridade | Base |",
+               "|---|---|---|---|---|---|---|---|"]
+        for r in riscos:
+            agir = f"{r['agir_ate']:%d/%m/%Y}" if r.get("agir_ate") else "–"
+            md.append(f"| {r['id']} | {_curto(r.get('decisao') or r['titulo'], 90)} _({_curto(r['titulo'], 50)})_ | {agir} | "
+                      f"{_voto(r, 'janela', r.get('horizonte'))} | {_voto(r, 'impacto', r.get('impacto'))} | "
+                      f"{_voto(r, 'sensibilidade', r.get('sensibilidade'))} | {r['prioridade']} | "
+                      f"{BASE_CURTA.get(r['firmeza'], r['firmeza'])} |")
+        for r in riscos:
+            md.append(f"**{r['id']}. {_curto(r.get('decisao') or r['titulo'], 180)}**"
+                      + (f" — {_curto(r['quem_decide'], 60)}" if r.get("quem_decide") else ""))
+            linha = f"Risco: {r['titulo']}. {_curto(r['causa'], 180)} → {_curto(r['consequencia'], 180)}"
+            if r.get("motivo_sensibilidade"):
+                linha += f". Repercussão: {_curto(r['motivo_sensibilidade'], 130)}"
+            div = _divergencias(r)
+            if div:
+                linha += f". Divergência: {div}"
+            contra = _contestacao_curta(r)
+            if contra:
+                linha += f". Advogado do diabo contesta: {contra}"
+            md.append(f"- {linha}.")
+    decisoes = resultado.get("decisoes") or []
+    if decisoes:
+        md += ["## Decisões em aberto", "_As opções têm o mesmo peso._"]
+        for q in decisoes:
+            opcoes = "; ".join(f"**{o['nome']}**" + (f" ({_curto(o.get('o_que_e'), 110)})" if o.get("o_que_e") else "")
+                               for o in q["opcoes"])
+            md.append(f"- **{q['id']}. {_curto(q['pergunta'], 160)}** {opcoes}."
+                      + (f" _Falta saber: {_curto(q['o_que_falta_saber'], 140)}_" if q.get("o_que_falta_saber") else ""))
+    pedir = (resultado.get("pedir") or [])[:limite_pedir]
+    if pedir:
+        md.append("## Pedir à secretaria")
+        md += [f"{k}. {_curto(p['o_que'], 170)}" + (f" _({p['serve_a']})_" if p.get("serve_a") else "")
+               for k, p in enumerate(pedir, 1)]
+    md.append(nota_md)
+    return "\n".join(m for m in md if m)
 
 
 def auditoria_secretaria(resultado, dossie, confronto, metodo_md):
