@@ -553,6 +553,11 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
             desc.append([d.get("orgao", ""), d.get("data"), d.get("evento"), d.get("motivo")])
         for j, largura in enumerate([30, 14, 60, 40], 1):
             desc.column_dimensions[get_column_letter(j)].width = largura
+    if not eventos:                                # sem data informada: o calendário sai mesmo assim, e diz por quê
+        aviso = ("A secretaria não informou nenhuma data de vencimento ou prazo no material enviado. Peça a relação "
+                 "de contratos com a vigência atualizada.")
+        for aba in ("Prioridades", "Calendário"):
+            wb[aba].cell(2, 1, aviso).font = Font(bold=True, color="C00000")
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
