@@ -251,9 +251,11 @@ def test_fontes_no_anexo_com_links_e_selos(funcoes):
     assert "✔ conferido na fonte" in md and "⚠" in md
     confronto = {"divergencias": [{"item": d["itens"][-1]["id"], "situacao": "contradiz", "o_orgao_declara": "100 obras",
                                    "trecho_relatorio": "100 obras", "as_fontes_mostram": "80 obras"}]}
-    anexo = funcoes.markdown_fontes(d, confronto, citados={"O1", "E1"}, cobertura_md="## Cobertura\n| tabela |")
-    assert anexo.startswith("## Anexo A – Cobertura e fontes\n| tabela |") and "\n# " not in anexo
-    assert "**As fontes mostram:** 80 obras" in anexo and " — O1" in anexo and "O2" not in anexo.split("**O que o órgão")[0]
+    anexo = funcoes.markdown_fontes(d, None, citados={"O1", "E1"}, cobertura_md="## Cobertura\n| tabela |")
+    assert anexo.startswith("## 6. Cobertura do checklist obrigatório\n| tabela |\n## Anexo – Fontes") and "\n# " not in anexo
+    assert " — O1" in anexo and "O2" not in anexo
+    confronto_md = funcoes.markdown_confronto(d, confronto)
+    assert confronto_md.startswith("## 5. O que a secretaria informou") and "**As fontes mostram:** 80 obras" in confronto_md
     # uma linha por página, com os ids dos fatos que ela sustenta
     todos = funcoes.markdown_fontes(d, None)
     assert todos.count("\n- ") < len(funcoes.itens_incluidos(d))
@@ -391,30 +393,38 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
                  "motivos": ["valor alto"], "observacao": "", "rotulo": "informado pelo órgão", "url": ""}]
     cobertura = [{"id": "C1", "tema": "Contratos a vencer", "estado": "não procurado"}] + \
                 [{"id": f"C{k}", "tema": "x", "estado": "encontrado"} for k in range(2, 11)]
-    texto = funcoes.documento_secretaria(resultado, diag, [("Contratos que vencem em até 180 dias", "3")], [], d, None,
-                                         "## Cobertura – o que foi procurado\n| tabela |",
-                                         funcoes.nota_final("abc", {"auxiliar": "m1", "debate": "m2"},
-                                                            {"nivel": "média", "motivos": ["x"]}, "04/11/2026"),
-                                         cobertura=cobertura, contratos_criticos=criticos)
-    ordem = [texto.index(t) for t in ["## Resumo executivo", "**Números-chave**", "**Riscos mais urgentes**",
-                                      "**Decisões em aberto**", "**Lacunas: 1 de 10", "## 1. Contratos",
+    nota = funcoes.nota_final("abc", {"auxiliar": "m1", "debate": "m2"}, {"nivel": "média", "motivos": ["x"]}, "04/11/2026")
+    # produto 2: o dossiê
+    texto = funcoes.dossie_secretaria(resultado, diag, [("Contratos que vencem em até 180 dias", "3")], [], d, None,
+                                      "## Cobertura – o que foi procurado\n| tabela |", nota,
+                                      cobertura=cobertura, contratos_criticos=criticos)
+    ordem = [texto.index(t) for t in ["## Em resumo", "**Números-chave**", "**Lacunas: 1 de 10", "## 1. Contratos",
                                       "**Contratos críticos**", "| Contrato 1/2026 |", "## 2. Pessoal", "## 3. Passivos",
                                       "## 4. Orçamento, obras e estrutura", "### Estrutura e dirigentes",
-                                      "## 5. Riscos e decisões urgentes", "### R1. Risco 1", "### Outros riscos a acompanhar",
-                                      "### Decisões em aberto", "### Pedir à secretaria", "## Anexo A", "| tabela |",
+                                      "## 6. Cobertura do checklist obrigatório", "| tabela |", "## Anexo – Fontes",
                                       "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
     assert texto.count("| Contrato 1/2026 |") == 1                                  # o repetido da planilha não entra duas vezes
-    assert len(re.findall(r"^### R\d", texto, re.M)) == 5 and "| R6. Risco 6 |" in texto            # 5 em detalhe, o resto na tabela
-    assert "**Em curso:** aditivo publicado" in texto and "_Não se sabe:_ Organograma atualizado" in texto
-    assert "Sobre este documento" not in texto and "Como este documento foi feito" not in texto
-    assert "teme aditivo irregular" not in texto and "Anexo B" not in texto      # os olhares só no arquivo de anexos
-    anexos = funcoes.anexos_secretaria(resultado, d, None, "## Anexo 3 – Como este documento foi feito\nx")
-    assert "| Controle e jurídico (TCE-RJ, PGE, MPRJ) | aditivo irregular | legalidade |" in anexos
-    assert "## Todas as fontes do dossiê" in anexos and anexos.rstrip().endswith("x")
+    assert "_Não se sabe:_ Organograma atualizado" in texto
+    for fora in ("Riscos por prioridade", "### R1.", "Sobre este documento", "Como este documento foi feito", "teme aditivo"):
+        assert fora not in texto, fora                                            # riscos e método ficam em outros produtos
+    # produto 3: o relatório de riscos
+    riscos = funcoes.relatorio_riscos(resultado, cobertura, nota)
+    ordem = [riscos.index(t) for t in ["## Resumo executivo", "**Riscos mais urgentes**", "**Decisões em aberto**",
+                                       "**Lacunas: 1 de 10", "## Riscos por prioridade", "### R1. Risco 1",
+                                       "### Outros riscos a acompanhar", "## Decisões em aberto", "## Pedir à secretaria",
+                                       "## Anexo – O que cada olhar de gestão teme e valoriza",
+                                       "| Controle e jurídico (TCE-RJ, PGE, MPRJ) | aditivo irregular | legalidade |",
+                                       "_Apoio à decisão gerado com IA (registro abc"]]
+    assert ordem == sorted(ordem)
+    assert len(re.findall(r"^### R\d", riscos, re.M)) == 5 and "| R6. Risco 6 |" in riscos          # 5 em detalhe, o resto na tabela
+    assert "**Em curso:** aditivo publicado" in riscos and "1. Contratos" not in riscos
+    # produto 5: a auditoria legível
+    auditoria = funcoes.auditoria_secretaria(resultado, d, None, "## Anexo 3 – Como este documento foi feito\nx")
+    assert "## Todas as fontes do dossiê" in auditoria and auditoria.rstrip().endswith("x")
     doc = docx.Document(io.BytesIO(funcoes.gerar_docx(texto, {"orgao": "Equipe", "assunto": "Secretaria de Exemplo"})))
     quebras = sum('w:br w:type="page"' in p._p.xml for p in doc.paragraphs)
-    assert quebras == 1                                                           # só o anexo em página nova
+    assert quebras == 1                                                           # só o anexo de fontes em página nova
 
 
 def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):

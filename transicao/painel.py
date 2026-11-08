@@ -125,8 +125,8 @@ def markdown_painel(riscos, situacoes, eventos, temas, data_corte, linhas=None):
     md.append(f"_Consolida os riscos de {len(secretarias)} secretaria(s), com data de corte {data_corte}, com a mesma "
               "régua de prioridade (impacto × urgência) calculada por código. A base de contratos do Estado (SIGA) não "
               "traz contratos de gestão com OS, convênios nem concessões. Riscos com base \"informado pelo órgão\" ou "
-              "\"sem comprovação\" dependem de confirmação. O detalhe e a base de cada risco estão no documento de "
-              "cada secretaria. Gerado com apoio de IA, sem revisão da equipe; não recomenda decisões._")
+              "\"sem comprovação\" dependem de confirmação. O detalhe de cada risco está no relatório de riscos da "
+              "secretaria, e a base, no dossiê dela. Gerado com apoio de IA, sem revisão da equipe; não recomenda decisões._")
     return "\n".join(md)
 
 

@@ -12,12 +12,12 @@ Um `.zip` com:
 
 | Arquivo | O que é |
 |---|---|
-| `painel_estadual.docx` | As urgências de todas as secretarias na mesma régua: ranking, temas que se repetem, mapa de calor por categoria e cronograma de quando agir |
-| `documentos/<secretaria>.docx` | **O memorando executivo de cada secretaria, só com dados**: resumo executivo (situação, números-chave, riscos mais urgentes, decisões em aberto, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. Riscos e decisões (cada risco com quem objetou e a contestação do advogado do diabo); Anexo A com cobertura do checklist e fontes citadas; Anexo C com prazos que não são contratos |
-| `documentos/<secretaria>_anexos.docx` | Para quem quer aprofundar: o que cada agente temeu e valorizou em cada decisão, as objeções risco a risco com a resposta da consolidação, todas as fontes do dossiê e o método |
-| `calendario_consolidado.xlsx` | Os vencimentos de todas as secretarias; a aba Prioridades vem primeiro |
+| `painel_estadual.docx` | **1. Painel estadual:** As urgências de todas as secretarias na mesma régua: ranking, temas que se repetem, mapa de calor por categoria e cronograma de quando agir |
+| `dossies/<secretaria>_dossie.docx` | **2. Dossiê da secretaria, atualizado com o que ela informou**: em resumo (situação, números-chave, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. O que a secretaria informou e o que as fontes mostram; 6. Cobertura do checklist; anexo de fontes citadas e prazos que não são contratos |
+| `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**: resumo executivo (riscos mais urgentes, decisões em aberto, lacunas); riscos por prioridade, cada um com quem objetou e a contestação do advogado do diabo; decisões em aberto com opções de mesmo peso; o que pedir à secretaria; anexo com o que cada olhar de gestão teme e valoriza |
+| `auditoria/<secretaria>_auditoria.docx` e `.json` | **5. Auditoria**: as objeções dos agentes risco a risco com a resposta da consolidação, todas as fontes do dossiê com as conferências, o método; e o registro completo em JSON |
+| `calendario_consolidado.xlsx` | **4. Calendário:** Os vencimentos de todas as secretarias; a aba Prioridades vem primeiro |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
-| `auditoria/` | O registro completo de cada análise (inclusive a revisão de cada agente), para conferência técnica |
 
 ## Como usar
 

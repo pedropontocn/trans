@@ -607,9 +607,10 @@ def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
     """Capítulo 5: riscos por prioridade (os primeiros em detalhe), decisões em aberto com as opções e o que pedir à
     secretaria. O que cada agente teme e valoriza fica no Anexo B."""
     riscos, decisoes = resultado.get("riscos") or [], resultado.get("decisoes") or []
-    linhas = ["## 5. Riscos e decisões urgentes",
+    linhas = ["## Riscos por prioridade",
               "Ordem por prioridade (impacto × urgência), com a mesma régua em todas as secretarias. \"Base\" diz quão "
-              "firme é a informação que sustenta o risco."]
+              "firme é a informação que sustenta o risco; \"Revisão\" diz quantos dos seis agentes independentes não fizeram "
+              "objeção e o que o advogado do diabo contestou."]
     for r in riscos[:limite_detalhe]:
         linhas.append(f"### {r['id']}. {r['titulo']} – {_agir(r)} · {r['prioridade'].lower()}")
         linhas.append(f"- {r['causa']} → {r['consequencia']}")
@@ -625,15 +626,15 @@ def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
         linhas += [f"| {r['id']}. {r['titulo']} | {r['categoria']} | {r['prioridade']} | {_agir(r)} | {r['firmeza']} |"
                    for r in riscos[limite_detalhe:]]
     if decisoes:
-        linhas += ["### Decisões em aberto", "As opções têm o mesmo peso. O que cada olhar de gestão teme e valoriza em "
-                   "cada opção está no arquivo de anexos da secretaria."]
+        linhas += ["## Decisões em aberto", "As opções têm o mesmo peso. O que cada olhar de gestão teme e valoriza em "
+                   "cada opção está no Anexo."]
         for q in decisoes:
             linhas.append(f"**{q['id']}. {q['pergunta']}**" + (f" _(ligada a {', '.join(q['riscos'])})_" if q["riscos"] else ""))
             linhas += [f"- **{o['nome']}:** {o.get('o_que_e', '')}" for o in q["opcoes"]]
             if q.get("o_que_falta_saber"):
                 linhas.append(f"- _Falta saber:_ {q['o_que_falta_saber']}")
     if resultado.get("pedir"):
-        linhas.append("### Pedir à secretaria")
+        linhas.append("## Pedir à secretaria")
         linhas += [f"{k}. {p['o_que']}" + (f" _(serve a {p['serve_a']})_" if p.get("serve_a") else "")
                    for k, p in enumerate(resultado["pedir"], 1)]
     return "\n".join(linhas)
@@ -680,7 +681,7 @@ def markdown_visoes(resultado):
     decisoes = [q for q in resultado.get("decisoes") or [] if q.get("visoes")]
     if not decisoes:
         return ""
-    linhas = ["## O que cada olhar de gestão teme e valoriza",
+    linhas = ["## Anexo – O que cada olhar de gestão teme e valoriza",
               "Seis agentes independentes, cada um com um olhar (Fazenda; controle e jurídico; área-fim; operação; nova "
               "gestão; advogado do diabo), leram a análise sem ver uns aos outros. Nenhum escolhe uma opção."]
     for q in decisoes:
@@ -689,14 +690,23 @@ def markdown_visoes(resultado):
     return "\n".join(linhas)
 
 
-def em_uma_pagina(resultado, cobertura=None, indicadores=None, limite_riscos=5):
-    """O resumo executivo: situação, números-chave, os riscos mais urgentes, as decisões em aberto e as lacunas.
-    Tudo o que quem decide precisa, em uma página; o resto do documento é a base disso."""
+def resumo_do_dossie(resultado, cobertura=None, indicadores=None):
+    """A abertura do dossiê: a situação da secretaria em poucas frases, os números-chave e as lacunas do checklist."""
     from .checklist import linha_essencial
-    linhas = ["## Resumo executivo"] + [f"- {x}" for x in resultado.get("situacao") or []]
+    linhas = ["## Em resumo"] + [f"- {x}" for x in resultado.get("situacao") or []]
     if indicadores:
         linhas += ["**Números-chave**", "| Indicador | Valor | Base |", "|---|---|---|"]
         linhas += [f"| {i['nome']} | {i['valor']} | {_base_curta(i)} |" for i in indicadores]
+    lacunas = linha_essencial(cobertura) if cobertura else ""
+    if lacunas:
+        linhas.append(lacunas.replace("Ver a tabela de cobertura no Capítulo 1.", "Tabela no capítulo 6."))
+    return "\n".join(linhas)
+
+
+def resumo_dos_riscos(resultado, cobertura=None, limite_riscos=5):
+    """A abertura do relatório de riscos: os riscos mais urgentes, as decisões em aberto e as lacunas."""
+    from .checklist import linha_essencial
+    linhas = ["## Resumo executivo"]
     riscos = resultado.get("riscos") or []
     if riscos:
         linhas.append("**Riscos mais urgentes**")
@@ -707,8 +717,16 @@ def em_uma_pagina(resultado, cobertura=None, indicadores=None, limite_riscos=5):
         linhas += [f"- {q['pergunta']}" for q in resultado["decisoes"]]
     lacunas = linha_essencial(cobertura) if cobertura else ""
     if lacunas:
-        linhas.append(lacunas.replace("Ver a tabela de cobertura no Capítulo 1.", "Tabela no Anexo A."))
+        linhas.append(lacunas.replace("Ver a tabela de cobertura no Capítulo 1.", "Tabela no dossiê da secretaria."))
+    linhas.append("_A base de cada risco (contratos, pessoal, passivos, orçamento, fontes e o que a secretaria informou) "
+                  "está no dossiê da secretaria, que acompanha este relatório._")
     return "\n".join(linhas)
+
+
+def em_uma_pagina(resultado, cobertura=None, indicadores=None, limite_riscos=5):
+    """Resumo em uma página com tudo (situação, números, riscos, decisões, lacunas): usado na revisão de neutralidade."""
+    return "\n".join([resumo_do_dossie(resultado, cobertura, indicadores),
+                       resumo_dos_riscos(resultado, cobertura, limite_riscos).split("\n", 1)[1]])
 
 
 def _chave_contrato(c):
@@ -869,30 +887,43 @@ def _papeis():
     return PAPEIS
 
 
-def documento_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
-                         contratos_criticos=None):
-    """O documento de cada secretaria, em Markdown: resumo executivo; capítulos de dados (contratos, pessoal, passivos,
-    orçamento e obras); riscos e decisões; anexos com cobertura e fontes, vencimentos e os olhares dos agentes. Sem
-    anexos de método: uma linha de proveniência no fim."""
+def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
+                      contratos_criticos=None):
+    """Produto 2, o dossiê da secretaria atualizado com o que ela informou: resumo e números-chave; 1. Contratos (com
+    a tabela dos críticos); 2. Pessoal; 3. Passivos; 4. Orçamento, obras e estrutura; 5. o confronto entre o que a
+    secretaria informou e o que as fontes mostram; 6. a cobertura do checklist; anexos com fontes citadas e prazos que
+    não são contratos. Só dados, cada um com a origem conferida."""
     outros = [e for e in eventos or [] if not e.get("origem", "").startswith("Contratos")]
     venc = markdown_vencimentos(outros, limite=10)
-    venc = ("## Anexo C – Prazos de controle, convênios e outros vencimentos\n" + venc.split("\n", 1)[1]) if venc else ""
-    cobre_siga = any(e.get("origem", "").startswith("Contratos") for e in eventos or [])
-    partes = [em_uma_pagina(resultado, cobertura, (diag or {}).get("indicadores")),
+    venc = ("## Anexo – Prazos de controle, convênios e outros vencimentos\n" + venc.split("\n", 1)[1]) if venc else ""
+    partes = [resumo_do_dossie(resultado, cobertura, (diag or {}).get("indicadores")),
               markdown_capitulos(diag, contratos_criticos, ficha),
-              markdown_riscos(resultado, cobre_siga=cobre_siga),
-              markdown_fontes(dossie, confronto, ids_citados(diag, resultado, contratos_criticos), cobertura_md),
+              markdown_confronto(dossie, confronto),
+              markdown_fontes(dossie, None, ids_citados(diag, resultado, contratos_criticos), cobertura_md),
               venc, nota_md]
     return "\n\n".join(p for p in partes if p)
 
 
-def anexos_secretaria(resultado, dossie, confronto, metodo_md):
-    """O segundo arquivo de cada secretaria, para quem quer aprofundar: as visões de cada agente sobre cada decisão,
-    as objeções risco a risco, todas as fontes do dossiê e o método. O documento principal fica só com os dados."""
-    partes = [markdown_visoes(resultado), markdown_objecoes(resultado),
+def relatorio_riscos(resultado, cobertura, nota_md):
+    """Produto 3, o relatório de riscos: resumo executivo, riscos por prioridade (com a revisão dos agentes), decisões
+    em aberto, o que pedir à secretaria e, em anexo, o que cada olhar de gestão teme e valoriza."""
+    partes = [resumo_dos_riscos(resultado, cobertura), markdown_riscos(resultado), markdown_visoes(resultado), nota_md]
+    return "\n\n".join(p for p in partes if p)
+
+
+def auditoria_secretaria(resultado, dossie, confronto, metodo_md):
+    """Produto 5, a auditoria legível: as objeções de cada agente risco a risco com a resposta da consolidação, todas as
+    fontes do dossiê com as conferências, e o método (modelos, confiança, números conferidos, neutralidade). O registro
+    completo, em JSON, fica ao lado."""
+    partes = [markdown_objecoes(resultado),
               "## Todas as fontes do dossiê\n" + markdown_fontes(dossie, confronto).split("\n", 1)[1],
               metodo_md]
     return "\n\n".join(p for p in partes if p)
+
+
+def documento_secretaria(*args, **kwargs):
+    """Compatibilidade: o antigo documento único é o dossiê."""
+    return dossie_secretaria(*args, **kwargs)
 
 
 def markdown_vencimentos(eventos, limite=12, dias_passados=30):
@@ -926,9 +957,9 @@ def markdown_fontes(dossie, confronto=None, citados=None, cobertura_md=""):
     """Anexo A: a cobertura do checklist, as fontes citadas no documento (uma linha cada, com link e selo) e o que o
     órgão informou contra o que as fontes mostram. Sem explicação de método: isso fica no arquivo de auditoria."""
     itens = itens_incluidos(dossie)
-    linhas = ["## Anexo A – Cobertura e fontes"]
-    if cobertura_md:
-        linhas.append(cobertura_md.split("\n", 1)[1] if cobertura_md.startswith("## ") else cobertura_md)
+    linhas = ["## Anexo – Fontes"] if not cobertura_md else ["## 6. Cobertura do checklist obrigatório",
+                                                             cobertura_md.split("\n", 1)[1] if cobertura_md.startswith("## ") else cobertura_md,
+                                                             "## Anexo – Fontes"]
     usados = [i for i in itens if (not citados or i["id"] in citados)
               and not (i.get("conferido_pela_equipe") and i["fonte"].startswith("Base de contratos"))]
     if usados:
@@ -943,18 +974,27 @@ def markdown_fontes(dossie, confronto=None, citados=None, cobertura_md=""):
             fonte = (i["fonte"] or "fonte") + (f", {i['data_fonte']}" if i["data_fonte"] else "")
             fonte = f"[{fonte}]({i['url']})" if i["url"] else fonte
             linhas.append(f"- {fonte} · {selo} — {', '.join(g['itens'])}")
+    return "\n".join(linhas)
+
+
+def markdown_confronto(dossie, confronto):
+    """Capítulo 5 do dossiê: o que a secretaria informou contra o que as fontes públicas e o SIGA mostram, e o que as
+    fontes trazem e a secretaria não mencionou."""
     divs = (confronto or {}).get("divergencias") or []
-    if divs:
-        linhas.append("**O que o órgão informou e o que as fontes mostram**")
-        por_id = {i["id"]: i for i in itens}
-        for d in divs:
-            item = por_id.get(d["item"], {})
-            fonte = f" ([fonte]({item['url']}))" if item.get("url") else ""
-            if d["situacao"] == "contradiz":
-                linhas.append(f"- **O órgão informa:** {d['o_orgao_declara'] or d['trecho_relatorio']} "
-                              f"**As fontes mostram:** {d['as_fontes_mostram']}{fonte}")
-            else:
-                linhas.append(f"- **Não mencionado pelo órgão:** {d['as_fontes_mostram']}{fonte}")
+    if not divs:
+        return ""
+    por_id = {i["id"]: i for i in itens_incluidos(dossie)}
+    linhas = ["## 5. O que a secretaria informou e o que as fontes mostram",
+              "Confronto feito pelo modelo e conferido por código: cada trecho da secretaria é literal e cada fato das "
+              "fontes tem o link. Divergência não é erro de ninguém até ser apurada; é o que perguntar primeiro."]
+    for d in divs:
+        item = por_id.get(d["item"], {})
+        fonte = f" ([fonte]({item['url']}))" if item.get("url") else ""
+        if d["situacao"] == "contradiz":
+            linhas.append(f"- **A secretaria informa:** {d['o_orgao_declara'] or d['trecho_relatorio']} "
+                          f"**As fontes mostram:** {d['as_fontes_mostram']}{fonte}")
+        else:
+            linhas.append(f"- **Não mencionado pela secretaria:** {d['as_fontes_mostram']}{fonte}")
     return "\n".join(linhas)
 
 

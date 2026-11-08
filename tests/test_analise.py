@@ -105,20 +105,28 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     import docx
     from transicao import analise
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
-    textos = [p.text for p in docx.Document(io.BytesIO(r["documento"])).paragraphs]
-    for titulo in ["Resumo executivo", "1. Contratos", "2. Pessoal", "3. Passivos jurídicos e de controle",
-                   "4. Orçamento, obras e estrutura", "5. Riscos e decisões urgentes", "Anexo A – Cobertura e fontes"]:
+    # produto 2: o dossiê da secretaria, atualizado com o que ela informou
+    textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
+    for titulo in ["Em resumo", "1. Contratos", "2. Pessoal", "3. Passivos jurídicos e de controle",
+                   "4. Orçamento, obras e estrutura", "5. O que a secretaria informou e o que as fontes mostram",
+                   "6. Cobertura do checklist obrigatório", "Anexo – Fontes"]:
         assert titulo in textos, titulo
-    assert not any("Anexo B" in t for t in textos)                                     # os olhares vão para o arquivo de anexos
-    anexos = [p.text for p in docx.Document(io.BytesIO(r["anexos"])).paragraphs]
-    for titulo in ["O que cada olhar de gestão teme e valoriza", "Revisão dos agentes, risco a risco", "Todas as fontes do dossiê",
-                   "Anexo 3 – Como este documento foi feito"]:
-        assert titulo in anexos, titulo
-    assert not any(t.startswith(("Sobre este documento", "Anexo 3", "Como este documento foi feito")) for t in textos)
-    md = r["documento_md"]
-    assert md.index("## Resumo executivo") < md.index("## 1. Contratos") < md.index("## 5. Riscos") < md.index("## Anexo A")
+    assert not any(t.startswith(("Riscos por prioridade", "Sobre este documento", "Anexo 3")) for t in textos)
+    # produto 3: o relatório de riscos
+    riscos_txt = [p.text for p in docx.Document(io.BytesIO(r["riscos_docx"])).paragraphs]
+    for titulo in ["Resumo executivo", "Riscos por prioridade", "Decisões em aberto", "Pedir à secretaria",
+                   "Anexo – O que cada olhar de gestão teme e valoriza"]:
+        assert titulo in riscos_txt, titulo
+    assert not any(t.startswith("1. Contratos") for t in riscos_txt)
+    # produto 5: a auditoria legível
+    auditoria = [p.text for p in docx.Document(io.BytesIO(r["auditoria_docx"])).paragraphs]
+    for titulo in ["Revisão dos agentes, risco a risco", "Todas as fontes do dossiê", "Anexo 3 – Como este documento foi feito"]:
+        assert titulo in auditoria, titulo
+    md = r["dossie_md"]
+    assert md.index("## Em resumo") < md.index("## 1. Contratos") < md.index("## 5. O que a secretaria") < md.index("## 6. Cobertura")
     assert "| LOA 2026 | R$ 412 mi |" in md and "| Empenhado | R$ 398,75 mi |" in md and "Inventado" not in md
     assert "| Contrato 99/2026 |" in md and "Contrato 7/2025" not in md and "Contrato sem origem" not in md
+    assert "**As fontes mostram:**" in md or "Não mencionado pela secretaria" in md
     assert "Anexo 3 – Como este documento foi feito" in r["registro"]["metodo_md"]       # o método fica na auditoria
     reg = r["registro"]
     assert len(reg["revisoes_dos_agentes"]) == 6 and r["agentes"] == 6                 # cinco olhares e o advogado do diabo
@@ -132,11 +140,11 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert inventado["revisao"]["contestado"] and inventado["revisao"]["sem_objecao"] == 0     # 5 exageros + 1 contestação
     assert riscos[0]["revisao"] == {"origem": "análise", "objecoes": [], "agentes": 6, "sem_objecao": 6, "contestado": False}
     assert reg["modelos"]["neutralidade"] == CFG["modelo_auxiliar"] and len(reg["modelos"]["agentes"]) == 6
-    # o olhar de cada agente, no arquivo de anexos, montado do que o agente disse (não da paráfrase da consolidação)
-    assert "| Fazenda e orçamento | **Retomar:** custo | **Retomar:** rapidez |" in r["anexos_md"]
-    assert "| Advogado do diabo | **Retomar:** licitar sem caixa | – |" in r["anexos_md"]
-    assert "Advogado do diabo contesta: o risco inventado não tem fato no material (F1) → consolidação: sem resposta registrada" in md
-    assert "(5 veem exagero)" in md and "- Fazenda e orçamento vê exagero: sem base" in r["anexos_md"]
+    # o olhar de cada agente, no anexo do relatório de riscos, montado do que o agente disse (não da paráfrase)
+    assert "| Fazenda e orçamento | **Retomar:** custo | **Retomar:** rapidez |" in r["riscos_md"]
+    assert "| Advogado do diabo | **Retomar:** licitar sem caixa | – |" in r["riscos_md"]
+    assert "Advogado do diabo contesta: o risco inventado não tem fato no material (F1) → consolidação: sem resposta registrada" in r["riscos_md"]
+    assert "(5 veem exagero)" in r["riscos_md"] and "- Fazenda e orçamento vê exagero: sem base" in r["auditoria_md"]
     # a consolidação falsa não informa id_anterior: o casamento é pelo título
     assert all(x["revisao"]["agentes"] == 6 for x in riscos)
     assert "[F" in llm.material_riscos and "DIAGNÓSTICO:" in llm.material_riscos
@@ -171,14 +179,14 @@ def test_etapa_complementar_com_erro_nao_derruba_a_analise(llm, monkeypatch):
         raise RuntimeError("fora do ar")
     monkeypatch.setattr(produtos, "extrair_calendario", quebra)
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
-    assert r["eventos"] == [] and "fora do ar" in r["registro"]["verificacao"]["problemas"][0] or r["documento"]
+    assert r["eventos"] == [] and "fora do ar" in r["registro"]["verificacao"]["problemas"][0] or r["dossie_docx"]
 
 
 def test_agente_fora_do_ar_nao_derruba_a_analise(llm):
     from transicao import analise
     llm.agentes_que_falham = {"Operação e servidores"}
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
-    assert r["agentes"] == 5 and "5 agente(s) independente(s)" in r["documento_md"]
+    assert r["agentes"] == 5 and "5 agente(s) independente(s)" in r["riscos_md"]
     assert "sem resposta: Operação e servidores" in r["registro"]["metodo_md"]
 
 
@@ -211,7 +219,9 @@ def test_varios_orgaos_gravam_documentos_calendario_e_resumo(llm, tmp_path):
     envio = [("resumos.zip", _zip({"SETUR - Turismo.docx": b"a", "SEFAZ - Fazenda.pdf": b"b"}))]
     linhas = analise.rodar_orgaos(entrada.orgaos_do_envio(envio), CFG, tmp_path, log=lambda *_: None)
     assert [l["situacao"] for l in linhas] == ["concluído", "concluído"]
-    assert len(list((tmp_path / "documentos").glob("*[!s].docx"))) == 2
+    assert len(list((tmp_path / "dossies").glob("*_dossie.docx"))) == 2
+    assert len(list((tmp_path / "riscos").glob("*_riscos.docx"))) == 2
+    assert len(list((tmp_path / "auditoria").glob("*_auditoria.docx"))) == 2
     assert (tmp_path / "calendario_consolidado.xlsx").exists() and (tmp_path / "LEIA-ME.txt").exists()
     assert len(list((tmp_path / "auditoria").glob("*_arquivos_lidos.json"))) == 2
     assert [r["situacao"] for r in _resumo(tmp_path)] == ["concluído", "concluído"]
@@ -394,8 +404,8 @@ def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
     assert linhas[0]["situacao"] == "concluído" and linhas[0]["dossie"] == "enviado"
     pedidos = [json.dumps(c["mensagens"][0]["content"], ensure_ascii=False) for c in llm.chamadas]
     assert not any("Monte a camada" in p and 'camada\\n\\"Estado\\"' not in p for p in pedidos)   # só o Estado
-    texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "documentos").glob("*[!s].docx"))).paragraphs)
-    assert "Anexo A – Cobertura e fontes" in texto and "Contratos críticos" in texto
+    texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "dossies").glob("*_dossie.docx"))).paragraphs)
+    assert "Cobertura do checklist obrigatório" in texto and "Contratos críticos" in texto
     import openpyxl
     planilha = openpyxl.load_workbook(tmp_path / "calendario_consolidado.xlsx").active
     assert any("2025000001" in str(c.value) for linha in planilha.iter_rows() for c in linha)
