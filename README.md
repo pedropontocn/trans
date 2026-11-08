@@ -12,12 +12,12 @@ Um `.zip` com:
 
 | Arquivo | O que é |
 |---|---|
-| `painel_estadual.docx` | As urgências de todas as secretarias na mesma régua: ranking, temas que se repetem, mapa de calor por categoria e cronograma de quando agir |
-| `documentos/<secretaria>.docx` | **O memorando executivo de cada secretaria, só com dados**: resumo executivo (situação, números-chave, riscos mais urgentes, decisões em aberto, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. Riscos e decisões (cada risco com quem objetou e a contestação do advogado do diabo); Anexo A com cobertura do checklist e fontes citadas; Anexo C com prazos que não são contratos |
-| `documentos/<secretaria>_anexos.docx` | Para quem quer aprofundar: o que cada agente temeu e valorizou em cada decisão, as objeções risco a risco com a resposta da consolidação, todas as fontes do dossiê e o método |
-| `calendario_consolidado.xlsx` | Os vencimentos de todas as secretarias; a aba Prioridades vem primeiro |
+| `painel_estadual.docx` | **1. Painel estadual:** todas as decisões de todas as secretarias com prazo antes da posse, nas primeiras 72 horas e nos primeiros 100 dias, e todas as de repercussão política alta. Em ordem de prazo; cada linha com a decisão a tomar, quem decide, a repercussão política votada pelos seis agentes (e quem reage), a prioridade e a base |
+| `dossies/<secretaria>_dossie.docx` | **2. Dossiê da secretaria, atualizado com o que ela informou**: em resumo (situação, números-chave, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. O que a secretaria informou e o que as fontes mostram; 6. Cobertura do checklist; anexo de fontes citadas e prazos que não são contratos |
+| `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, até 3 páginas e sem anexo: situação; as decisões urgentes em ordem de prazo, com janela, impacto e repercussão política votados item a item pelos seis agentes (contagem dos votos e divergências), prioridade e base; decisões em aberto com opções de mesmo peso; o que pedir à secretaria |
+| `auditoria/<secretaria>.json` | **5. Auditoria**: o registro completo de cada análise: dossiê e conferências, análise inicial, revisões e votos dos seis agentes, consolidação, objeções risco a risco, método, descartes, custo |
+| `calendario_consolidado.xlsx` | **4. Calendário:** os vencimentos de todas as secretarias, com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
-| `auditoria/` | O registro completo de cada análise (inclusive a revisão de cada agente), para conferência técnica |
 
 ## Como usar
 
@@ -29,6 +29,9 @@ Um `.zip` com:
    (contratos que vencem em 180 dias); os nomes por extenso vêm de `00_CONSOLIDACAO_ESTADUAL.md`. Para atualizar,
    troque o `.zip` da pasta (ou suba um pacote mais novo na tela: vale sobre o embutido para as secretarias que
    cobrir). Também aceita um arquivo por secretaria (Word, PDF ou Markdown) com fatos citados.
+   A **folha de pessoal** de cada órgão (Caderno de RH da SEPLAG, `bases_embutidas/`) também entra sozinha, como
+   dado oficial: vínculos ativos, folha do mês, efetivos e não efetivos (a parte da equipe que pode sair na troca
+   de governo).
    Para quem tiver dossiê, o app não pesquisa a web sobre o órgão:
    - cada fato da pesquisa tem o link aberto pelo código, e os números da afirmação precisam estar na página;
    - os números do SIGA/PNCP entram como dado oficial conferido pela equipe;
@@ -96,7 +99,12 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    trocado nos Secrets (`GEMINI_MODELO = "gemini/gemini-3.8-flash"` fica na cota gratuita do Google, por exemplo).
 7. **Consolidação e conferência.** Uma consolidação junta as revisões; o código confere os fatos citados por cada
    risco, dá a firmeza da informação e calcula a prioridade. Um segundo modelo revisa a neutralidade.
-8. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
+8. **Votação item a item.** Depois da consolidação, os seis agentes votam, em cada risco, sem ver uns aos outros:
+   **impacto** (alto, médio, baixo), **janela** (antes da posse, primeiras 72 horas, primeiros 100 dias, depois) e
+   **repercussão política** (alta, média, baixa, dizendo quem reage e como). O código apura: maioria, com empate indo
+   para o nível mais grave (janela: o mais urgente); data que está no documento prevalece sobre o voto de janela; a
+   divergência entre agentes fica registrada e aparece no relatório.
+9. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
    riscos de todas as secretarias; o modelo só aponta os temas que se repetem.
 
 ## Código

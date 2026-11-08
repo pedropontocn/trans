@@ -9,6 +9,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import threading
 import time
 import zipfile
@@ -16,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-from . import checklist, confronto as conf, documentos, entrada, modelo, painel, pesquisa, produtos, riscos, verificacao
+from . import checklist, confronto as conf, documentos, entrada, folha, modelo, painel, pesquisa, produtos, riscos, verificacao
 from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO, esquema_de_modelos
 
 JUNTAS = False          # no modo econômico, as etapas independentes vão juntas para a mesma fila da Batch API
@@ -51,6 +52,10 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
         progresso("Pesquisando o dossiê em fontes públicas...")
         dossie = pesquisa.montar_dossie(cfg["modelo_pesquisa"], nome, cfg["data_corte"], cfg.get("foco", ""),
                                         estado=estado)
+    # folha de pessoal da SEPLAG (Caderno de RH): dado oficial, entra por código
+    sigla_orgao = entrada.sigla(nome) or (nome.strip() if re.fullmatch(r"[A-Z][A-Z0-9]{1,14}", nome.strip()) else "")
+    pesquisa.acrescentar_itens(dossie, folha.itens(sigla_orgao))
+    dossie["folha"] = folha.quadro(sigla_orgao)
     resumo_dos = pesquisa.resumo_dossie(dossie)
     if resumo_dos["itens"] < MIN_ITENS_DOSSIE or resumo_dos["orgao"] < 3:
         raise ErroAnalise(f"dossiê insuficiente ({resumo_dos['orgao']} itens sobre o órgão"
@@ -99,6 +104,10 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     progresso("Consolidando...")
     final = riscos.consolidar(principal, material, analise, revisoes, uso)
     resultado = riscos.conferir_e_ordenar(final, diagnostico, vencimentos, dossie, cfg["data_corte"])
+    # os seis agentes votam cada risco final: impacto, janela e sensibilidade política; o código apura
+    progresso("Seis agentes votando, item a item, impacto, janela e sensibilidade política...")
+    votacoes = riscos.votar_por_agentes(principal, material, resultado, uso, modelos_agentes)
+    riscos.apurar_votos(resultado, votacoes, cfg["data_corte"])
     riscos.proveniencia(resultado["riscos"], revisoes, analise, final)   # quem apontou e quem contestou cada risco
     riscos.visoes_por_codigo(resultado["decisoes"], analise, revisoes)   # o que cada agente teme e valoriza, do bruto
     confianca = riscos.confianca(resumo_dos, resultado["riscos"], cobertura)
@@ -121,17 +130,18 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     versao_prompt = hashlib.md5((pesquisa.PROMPT_PESQUISA + conf.PROMPT_CONFRONTO + produtos.PROMPT_CALENDARIO
                                  + produtos.PROMPT_DIAGNOSTICO_ORGAO + produtos.PROMPT_CONTRATOS
                                  + checklist.PROMPT_CHECKLIST + riscos.PROMPT_ANALISE
-                                 + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO).encode()).hexdigest()[:8]
+                                 + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO + riscos.PROMPT_VOTO).encode()).hexdigest()[:8]
     registro_id = f"{versao_prompt}-{hashlib.md5((material + relatorio).encode()).hexdigest()[:8]}"
     modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal,
                "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes)),
                "neutralidade": esquema["neutralidade"], "familias_de_fora": esquema["familias"]}
-    texto_doc = documentos.documento_secretaria(
-        resultado, diagnostico, ficha, eventos, dossie, confronto, checklist.markdown(cobertura),
-        documentos.nota_final(registro_id, modelos, confianca, cfg["data_corte"], neutralidade, revisoes),
+    nota = documentos.nota_final(registro_id, modelos, confianca, cfg["data_corte"], neutralidade, revisoes)
+    texto_dossie = documentos.dossie_secretaria(
+        resultado, diagnostico, ficha, eventos, dossie, confronto, checklist.markdown(cobertura), nota,
         cobertura=cobertura, contratos_criticos=contratos_criticos)
+    texto_riscos = documentos.relatorio_riscos(resultado, cobertura, nota)
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
-            "assunto": nome, "tipo": "Diagnóstico, riscos e decisões urgentes da transição",
+            "assunto": nome, "tipo": "Dossiê da secretaria, atualizado com o que ela informou",
             "data": documentos._data_extenso(date.today()),
             "rodape_extra": f"apoio de IA, processamento automático, reg. {registro_id}"}
     para_json = lambda x: json.loads(json.dumps(x, ensure_ascii=False, default=str))
@@ -141,18 +151,21 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
         "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "confronto": confronto, "diagnostico": diagnostico,
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
+        "votacao_dos_agentes": votacoes,
         "riscos": para_json(resultado), "checklist": cobertura, "contratos_criticos": contratos_criticos,
         "metodo_md": documentos.markdown_metodo(registro_id, modelos, resumo_dos, confianca, numeros, neutralidade,
                                                revisoes, resultado),
-        "documento_md": texto_doc,
+        "dossie_md": texto_dossie, "riscos_md": texto_riscos,
         "verificacao": {"numeros": numeros, "problemas": problemas, "neutralidade": neutralidade,
                         "confianca": confianca},
         "uso_tokens": uso_total, "custo_estimado_usd": round(custo, 4), "custo_parcial": parcial,
     }
-    texto_anexos = documentos.anexos_secretaria(resultado, dossie, confronto, registro["metodo_md"])
-    meta_anexos = dict(meta, assunto=f"{nome} – anexos", tipo="Anexos do memorando executivo")
-    return {"documento": documentos.gerar_docx(texto_doc, meta), "documento_md": texto_doc,
-            "anexos": documentos.gerar_docx(texto_anexos, meta_anexos), "anexos_md": texto_anexos, "eventos": eventos,
+    texto_auditoria = documentos.auditoria_secretaria(resultado, dossie, confronto, registro["metodo_md"])
+    registro["auditoria_md"] = texto_auditoria
+    return {"dossie_docx": documentos.gerar_docx(texto_dossie, meta), "dossie_md": texto_dossie,
+            "riscos_docx": documentos.gerar_docx(texto_riscos, dict(meta, tipo="Relatório de riscos e decisões urgentes")),
+            "riscos_md": texto_riscos,
+            "auditoria_md": texto_auditoria, "eventos": eventos,
             "descartados": [dict(d, orgao=nome) for d in calendario.get("descartados") or []],
             "riscos": [dict(r, orgao=nome) for r in resultado["riscos"]], "situacao": resultado["situacao"],
             "registro": registro, "custo": custo, "confianca": confianca["nivel"],
@@ -181,12 +194,15 @@ def _gravar_resumo(saida, linhas, custo_estado):
     (saida / "LEIA-ME.txt").write_text(
         "Resultados da análise das secretarias\n\n"
         "- painel_estadual.docx: as urgências de todas as secretarias, com a mesma régua, num documento só.\n"
-        "- documentos/: dois Word por secretaria. <secretaria>.docx é o memorando executivo (resumo, contratos, pessoal,\n"
-        "  passivos, orçamento e obras, riscos e decisões); <secretaria>_anexos.docx traz o que cada agente temeu e\n"
-        "  valorizou, as objeções risco a risco, todas as fontes e o método.\n"
+        "- dossies/: o dossiê de cada secretaria, atualizado com o que ela informou (resumo e números-chave; contratos,\n"
+        "  pessoal, passivos, orçamento e obras; o que a secretaria informou x o que as fontes mostram; cobertura do\n"
+        "  checklist; fontes).\n"
+        "- riscos/: o relatório de riscos de cada secretaria, em até 3 páginas (riscos com prazo, janela,\n"
+        "  prioridade, sensibilidade política e revisão dos agentes; decisões em aberto; o que pedir).\n"
         "- calendario_consolidado.xlsx: os vencimentos de todas as secretarias; a aba Prioridades vem primeiro.\n"
         "- resumo.csv: situação, números e custo de cada órgão.\n"
-        "- auditoria/: o registro completo de cada análise (para conferência técnica).\n\n"
+        "- auditoria/: o registro completo de cada análise em JSON (dossiê e conferências, revisões dos seis agentes,\n"
+        "  objeções risco a risco, método, descartes, custo).\n\n"
         f"Órgãos concluídos: {sum(l['situacao'] == 'concluído' for l in linhas)} de {len(linhas)}. "
         f"Custo estimado: US$ {total:.2f} (inclui US$ {custo_estado:.2f} da pesquisa sobre o Estado e do painel estadual).\n"
         "Documentos gerados com apoio de IA, sem revisão da equipe: confira antes de usar.\n", encoding="utf-8")
@@ -219,7 +235,7 @@ def resultado_pronto(saida, pasta):
     """O resultado gravado de um órgão já concluído nesta pasta, ou None. Exige o documento junto."""
     saida = Path(saida)
     caminho = saida / "auditoria" / f"{pasta}_resultado.json"
-    if not caminho.exists() or not (saida / "documentos" / f"{pasta}.docx").exists():
+    if not caminho.exists() or not (saida / "riscos" / f"{pasta}_riscos.docx").exists():
         return None
     try:
         dados = json.loads(caminho.read_text(encoding="utf-8"), object_hook=_de_json)
@@ -257,8 +273,8 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
     analisado de novo: o lote reaproveita o resultado e só refaz o que faltou."""
     global JUNTAS
     saida = Path(saida)
-    (saida / "documentos").mkdir(parents=True, exist_ok=True)
-    (saida / "auditoria").mkdir(exist_ok=True)
+    for sub in ("dossies", "riscos", "auditoria"):
+        (saida / sub).mkdir(parents=True, exist_ok=True)
     fila = None
     if economico:
         from .lote_api import FilaBatch
@@ -313,8 +329,8 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                     dossie = pesquisa.dossie_enviado(orgao["ler_dossie"](), nome, cfg["data_corte"], estado=estado)
                 r = analisar_orgao(nome, texto, cfg, estado=estado, dossie=dossie,
                                    progresso=lambda t: log(f"[{k}] {t}"))
-                (saida / "documentos" / f"{pasta}.docx").write_bytes(r["documento"])
-                (saida / "documentos" / f"{pasta}_anexos.docx").write_bytes(r["anexos"])
+                (saida / "dossies" / f"{pasta}_dossie.docx").write_bytes(r["dossie_docx"])
+                (saida / "riscos" / f"{pasta}_riscos.docx").write_bytes(r["riscos_docx"])
                 (saida / "auditoria" / f"{pasta}.json").write_text(
                     json.dumps(r["registro"], ensure_ascii=False, indent=2, default=str), encoding="utf-8")
                 linha.update(situacao="concluído", dossie=r["dossie"], itens_dossie=r["itens_dossie"], conferidos=r["conferidos"],

@@ -251,9 +251,11 @@ def test_fontes_no_anexo_com_links_e_selos(funcoes):
     assert "✔ conferido na fonte" in md and "⚠" in md
     confronto = {"divergencias": [{"item": d["itens"][-1]["id"], "situacao": "contradiz", "o_orgao_declara": "100 obras",
                                    "trecho_relatorio": "100 obras", "as_fontes_mostram": "80 obras"}]}
-    anexo = funcoes.markdown_fontes(d, confronto, citados={"O1", "E1"}, cobertura_md="## Cobertura\n| tabela |")
-    assert anexo.startswith("## Anexo A – Cobertura e fontes\n| tabela |") and "\n# " not in anexo
-    assert "**As fontes mostram:** 80 obras" in anexo and " — O1" in anexo and "O2" not in anexo.split("**O que o órgão")[0]
+    anexo = funcoes.markdown_fontes(d, None, citados={"O1", "E1"}, cobertura_md="## Cobertura\n| tabela |")
+    assert anexo.startswith("## 6. Cobertura do checklist obrigatório\n| tabela |\n## Anexo – Fontes") and "\n# " not in anexo
+    assert " — O1" in anexo and "O2" not in anexo
+    confronto_md = funcoes.markdown_confronto(d, confronto)
+    assert confronto_md.startswith("## 5. O que a secretaria informou") and "**As fontes mostram:** 80 obras" in confronto_md
     # uma linha por página, com os ids dos fatos que ela sustenta
     todos = funcoes.markdown_fontes(d, None)
     assert todos.count("\n- ") < len(funcoes.itens_incluidos(d))
@@ -298,9 +300,13 @@ def test_calendario_em_excel(funcoes):
     wb = load_workbook(io.BytesIO(funcoes.calendario_xlsx(eventos, [{"orgao": "SECID", "data": "x", "evento": "y",
                                                                      "motivo": "z"}])))
     ws = wb["Calendário"]
-    assert ws["A2"].value.date() == date(2026, 11, 11) and ws["D3"].value == "SECID"     # ordenado por data
-    assert ws["M2"].hyperlink.target == "https://alerj.exemplo/emendas" and ws.auto_filter.ref
-    assert ws["A3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Prioridades", "Calendário", "Como ler", "Descartados"}
+    # as três primeiras colunas são para filtrar: secretaria (sigla), janela contada da posse e mês
+    assert [ws.cell(1, j).value for j in (1, 2, 3)] == ["Secretaria", "Janela", "Mês"]
+    assert ws["D2"].value.date() == date(2026, 11, 11) and ws["G3"].value == "SECID" and ws["A3"].value == "SECID"
+    assert ws["B2"].value == "Antes da posse" and ws["B3"].value == "Primeiros 100 dias" and ws["C2"].value == "2026-11"
+    assert ws["P2"].hyperlink.target == "https://alerj.exemplo/emendas" and ws.auto_filter.ref == ws.dimensions
+    assert ws["D3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Prioridades", "Calendário", "Como ler", "Descartados"}
+    assert wb["Prioridades"].auto_filter.ref and wb["Prioridades"]["B1"].value == "Janela"
 
 
 def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
@@ -350,7 +356,7 @@ def test_regua_de_risco_igual_para_todos(funcoes):
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(funcoes.calendario_xlsx([dict(e, orgao="SEX", criticidade="x", so_mes=False,
                                 consequencia="", decisao="", fonte="", trecho="") for e in eventos])))
-    assert wb.sheetnames[0] == "Prioridades" and wb["Prioridades"]["A2"].value == "Máxima"
+    assert wb.sheetnames[0] == "Prioridades" and wb["Prioridades"]["C2"].value == "Máxima" and wb["Prioridades"]["A2"].value == "SEX"
 
 
 
@@ -391,30 +397,39 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
                  "motivos": ["valor alto"], "observacao": "", "rotulo": "informado pelo órgão", "url": ""}]
     cobertura = [{"id": "C1", "tema": "Contratos a vencer", "estado": "não procurado"}] + \
                 [{"id": f"C{k}", "tema": "x", "estado": "encontrado"} for k in range(2, 11)]
-    texto = funcoes.documento_secretaria(resultado, diag, [("Contratos que vencem em até 180 dias", "3")], [], d, None,
-                                         "## Cobertura – o que foi procurado\n| tabela |",
-                                         funcoes.nota_final("abc", {"auxiliar": "m1", "debate": "m2"},
-                                                            {"nivel": "média", "motivos": ["x"]}, "04/11/2026"),
-                                         cobertura=cobertura, contratos_criticos=criticos)
-    ordem = [texto.index(t) for t in ["## Resumo executivo", "**Números-chave**", "**Riscos mais urgentes**",
-                                      "**Decisões em aberto**", "**Lacunas: 1 de 10", "## 1. Contratos",
+    nota = funcoes.nota_final("abc", {"auxiliar": "m1", "debate": "m2"}, {"nivel": "média", "motivos": ["x"]}, "04/11/2026")
+    # produto 2: o dossiê
+    texto = funcoes.dossie_secretaria(resultado, diag, [("Contratos que vencem em até 180 dias", "3")], [], d, None,
+                                      "## Cobertura – o que foi procurado\n| tabela |", nota,
+                                      cobertura=cobertura, contratos_criticos=criticos)
+    ordem = [texto.index(t) for t in ["## Em resumo", "**Números-chave**", "**Lacunas: 1 de 10", "## 1. Contratos",
                                       "**Contratos críticos**", "| Contrato 1/2026 |", "## 2. Pessoal", "## 3. Passivos",
                                       "## 4. Orçamento, obras e estrutura", "### Estrutura e dirigentes",
-                                      "## 5. Riscos e decisões urgentes", "### R1. Risco 1", "### Outros riscos a acompanhar",
-                                      "### Decisões em aberto", "### Pedir à secretaria", "## Anexo A", "| tabela |",
+                                      "## 6. Cobertura do checklist obrigatório", "| tabela |", "## Anexo – Fontes",
                                       "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
     assert texto.count("| Contrato 1/2026 |") == 1                                  # o repetido da planilha não entra duas vezes
-    assert len(re.findall(r"^### R\d", texto, re.M)) == 5 and "| R6. Risco 6 |" in texto            # 5 em detalhe, o resto na tabela
-    assert "**Em curso:** aditivo publicado" in texto and "_Não se sabe:_ Organograma atualizado" in texto
-    assert "Sobre este documento" not in texto and "Como este documento foi feito" not in texto
-    assert "teme aditivo irregular" not in texto and "Anexo B" not in texto      # os olhares só no arquivo de anexos
-    anexos = funcoes.anexos_secretaria(resultado, d, None, "## Anexo 3 – Como este documento foi feito\nx")
-    assert "| Controle e jurídico (TCE-RJ, PGE, MPRJ) | aditivo irregular | legalidade |" in anexos
-    assert "## Todas as fontes do dossiê" in anexos and anexos.rstrip().endswith("x")
+    assert "_Não se sabe:_ Organograma atualizado" in texto
+    for fora in ("Riscos por prioridade", "### R1.", "Sobre este documento", "Como este documento foi feito", "teme aditivo"):
+        assert fora not in texto, fora                                            # riscos e método ficam em outros produtos
+    # produto 3: o relatório de riscos, em ordem de prazo e sem anexo
+    riscos = funcoes.relatorio_riscos(resultado, cobertura, nota)
+    ordem = [riscos.index(t) for t in ["## Situação", "**Lacunas: 1 de 10", "## Decisões urgentes, em ordem de prazo",
+                                       "| # | Decisão (risco) | Agir até |", "**R1. ", "## Decisões em aberto",
+                                       "## Pedir à secretaria", "_Apoio à decisão gerado com IA (registro abc"]]
+    assert ordem == sorted(ordem)
+    assert len(re.findall(r"^\| R\d ", riscos, re.M)) == len(resultado["riscos"][:8])   # todos na tabela, até 8
+    assert "Anexo" not in riscos and "aditivo irregular" not in riscos and "1. Contratos" not in riscos
+    datas = [d for d in re.findall(r"^\| R\d+ \| [^|]+ \| (\d\d/\d\d/\d{4}|–) \|", riscos, re.M)]
+    from datetime import datetime
+    assert [datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "–"] == sorted(
+        datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "–")                 # em ordem de prazo
+    # produto 5: a auditoria legível
+    auditoria = funcoes.auditoria_secretaria(resultado, d, None, "## Anexo 3 – Como este documento foi feito\nx")
+    assert "## Todas as fontes do dossiê" in auditoria and auditoria.rstrip().endswith("x")
     doc = docx.Document(io.BytesIO(funcoes.gerar_docx(texto, {"orgao": "Equipe", "assunto": "Secretaria de Exemplo"})))
     quebras = sum('w:br w:type="page"' in p._p.xml for p in doc.paragraphs)
-    assert quebras == 1                                                           # só o anexo em página nova
+    assert quebras == 1                                                           # só o anexo de fontes em página nova
 
 
 def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):
@@ -442,7 +457,8 @@ def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):
     assert r["riscos"][0]["firmeza"] == "dado do SIGA/PNCP" and r["riscos"][0]["prioridade"] == "Máxima"
     sem_base = next(x for x in r["riscos"] if x["titulo"] == "Sem base")
     assert sem_base["firmeza"] == "sem comprovação" and sem_base["nota"] <= 5 and sem_base["categoria"] == "Continuidade de serviço"
-    assert sem_base["agir_ate"] == date(2027, 1, 1)
+    assert sem_base["agir_ate"] == date(2026, 12, 31) and sem_base["horizonte"] == "Antes da posse"   # "antes da posse"
+    assert not sem_base["prazo_de_fato"] and r["riscos"][0]["prazo_de_fato"]          # vencimento é fato; janela é opinião
     assert len(r["decisoes"]) == 1 and r["decisoes"][0]["riscos"] == ["R1"]         # decisão com uma opção só sai
     assert r["pedir"][0]["serve_a"].startswith("R1 e R")
     c = funcoes.confianca(funcoes.resumo_dossie(d), r["riscos"])
@@ -671,3 +687,25 @@ def test_pacote_embutido_no_repositorio_cobre_as_31_secretarias(funcoes):
     assert {"pesquisa", "dossie", "contratos"} <= set(secid["partes"])
     textos = funcoes._texto_dossie(secid)
     assert "contratacao;" in textos["contratos"] and "Secretaria de Estado das Cidades" in textos["dossie"]
+
+
+def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
+    # base embutida do repositório (Caderno de RH de março de 2026)
+    secid = funcoes.itens("SECID")
+    assert len(secid) == 2 and all(i["bloco"] == "pessoal" and i["tipo_fonte"] == "dado_oficial" for i in secid)
+    assert "145 vínculos ativos" in secid[0]["afirmacao"] and "R$ 1,17 milhões" in secid[0]["afirmacao"]
+    assert "nenhum dos 145 vínculos ativos é de servidor efetivo" in secid[1]["afirmacao"]
+    sefaz = funcoes.itens("SEFAZ")[1]["afirmacao"]
+    assert "983 são de servidores efetivos" in sefaz and "509 (34,1%)" in sefaz
+    assert funcoes.quadro("SEAPA")["efetivos"] == "157"                      # SEAPA no dossiê, SEAPPA no Caderno
+    assert funcoes.itens("NAOEXISTE") == [] and funcoes.quadro("") is None
+    q = funcoes.quadro("SECID")
+    md = funcoes.markdown_capitulos({"secoes": []}, None, None, q)
+    assert "| 145 | 0 | 145 (100,0%) | R$ 1,17 mi | R$ 8.082,93 |" in md and "pode sair na troca de governo" in md
+    assert md.index("## 2. Pessoal") < md.index("**Folha de pessoal**") < md.index("## 3. Passivos")
+    # no dossiê: id novo, conferido, firmeza de fonte oficial; o checklist C9 sai por código
+    d = {"itens": [], "origem": "arquivo", "nao_encontrado": []}
+    funcoes.acrescentar_itens(d, secid)
+    assert [i["id"] for i in d["itens"]] == ["O1", "O2"] and d["itens"][0]["checagem"] == "conferido"
+    c9 = next(c for c in funcoes.conferir({}, d, "", []) if c["id"] == "C9")
+    assert c9["estado"] == "encontrado" and c9["fatos"] == ["O1", "O2"] and c9["firmeza"] == "confirmado em fonte oficial"

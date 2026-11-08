@@ -642,6 +642,15 @@ def itens_do_painel(texto):
     return itens
 
 
+def acrescentar_itens(dossie, brutos):
+    """Acrescenta ao dossiê fatos de bases oficiais embutidas (já conferidos na origem), com id novo."""
+    novos = [x for x in (normalizar_item(b) for b in brutos or []) if x]
+    if not novos:
+        return dossie
+    dossie["itens"] = numerar_itens(dossie["itens"] + [dict(i, id="") for i in novos])
+    return dossie
+
+
 def dossie_enviado(partes, orgao, data_corte, estado=None):
     """O dossiê a partir do que a equipe enviou, no lugar da pesquisa do app. partes: textos "pesquisa" (Markdown
     com citações), "dossie" (o dossiê reduzido, com o painel de contratos) e "contratos" (a planilha de vencimentos).

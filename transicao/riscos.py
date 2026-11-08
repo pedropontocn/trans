@@ -19,6 +19,22 @@ CATEGORIAS = ["Continuidade de serviço", "Fiscal e orçamentário", "Jurídico 
               "Obras e projetos"]
 POSSE = date(2027, 1, 1)
 
+HORIZONTES = ["Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias", "Depois dos 100 dias", "Sem prazo"]
+
+
+def horizonte(agir_ate, posse=POSSE):
+    """Em que janela a decisão precisa estar tomada, pela data-limite para agir, contada da posse."""
+    from datetime import timedelta
+    if not agir_ate:
+        return "Sem prazo"
+    if agir_ate < posse:
+        return "Antes da posse"
+    if agir_ate <= posse + timedelta(days=2):
+        return "Primeiras 72 horas"
+    if agir_ate <= posse + timedelta(days=99):
+        return "Primeiros 100 dias"
+    return "Depois dos 100 dias"
+
 PAPEIS = [
     ("fiscal", "Fazenda e orçamento",
      "Olha caixa, restos a pagar, limite do art. 42 da LRF, PLOA 2027 e o custo de cada obrigação assumida agora."),
@@ -43,7 +59,9 @@ no material, citando os ids (F1, V2, O3). Valores arredondados (R$ 2,49 bi, R$ 9
 
 ESQUEMA_RISCO = ('{"titulo": "até 10 palavras", "categoria": "' + "|".join(CATEGORIAS) + '", '
                  '"causa": "...", "consequencia": "...", "em_jogo": "valor, serviço ou obra", '
-                 '"prazo": "dd/mm/aaaa, antes da posse ou vazio", "impacto": "Alto|Médio|Baixo", "chance": "Alta|Média|Baixa", '
+                 '"prazo": "dd/mm/aaaa, antes da posse, nas primeiras 72 horas, nos primeiros 100 dias ou vazio", '
+                 '"impacto": "Alto|Médio|Baixo", "chance": "Alta|Média|Baixa", '
+                 '"sensibilidade_politica": "Alta|Média|Baixa", "motivo_sensibilidade": "o que a torna sensível, ou vazio", '
                  '"em_curso": "providência já publicada ou informada, ou vazio", "decisao": "a pergunta", '
                  '"quem_decide": "...", "fatos": ["F3", "V1"]}')
 
@@ -59,6 +77,12 @@ Entregue:
 - "riscos": 5 a 8 riscos. Cada risco liga uma causa a uma consequência concreta e cita os fatos que o sustentam
   ("fatos": ids F e V do material). Serviço essencial que pode parar pesa mais que obra de valor maior. Se o
   vencimento citado tem aditivo recente, registre em "em_curso".
+- Em cada risco, "sensibilidade_politica": a repercussão política da decisão (toda decisão tem): Alta quando a
+  reação vem no primeiro dia ou expõe o governador eleito (investigação de MP, TCE, CGE ou polícia; imprensa; serviço
+  visível que para; conflito com Alerj, municípios, servidores ou grandes fornecedores; contrato alto sob suspeita);
+  Média quando pode chegar lá; Baixa quando fica restrita à máquina. "motivo_sensibilidade" diz quem reage e como.
+- Em cada risco, "prazo": a data em que a decisão precisa estar tomada. Sem data no material, diga se é "antes da
+  posse", "nas primeiras 72 horas" (o que não pode esperar a primeira semana de governo) ou "nos primeiros 100 dias".
 - "decisoes": as 2 ou 3 decisões mais difíceis, que não se resolvem só cumprindo um prazo. Cada uma com 2 ou 3
   opções de mesmo peso ("nome" com verbo; "o_que_e" em uma frase), "o_que_falta_saber" e os riscos ligados ("riscos":
   ["R1"]).
@@ -337,6 +361,18 @@ def _rotulo_prioridade(nota):
     return "Máxima" if nota >= 9 else "Alta" if nota >= 6 else "Média" if nota >= 3 else "Baixa"
 
 
+def _sensibilidade(r):
+    """Repercussão política da decisão (campo "sensibilidade"). Alta só com o motivo dito; sem motivo, cai para Média."""
+    nivel = str(r.get("sensibilidade_politica") or "").strip().capitalize()
+    nivel = {"Media": "Média"}.get(nivel, nivel)
+    motivo = str(r.get("motivo_sensibilidade") or "").strip()
+    if nivel not in ("Alta", "Média", "Baixa"):
+        nivel = "Média" if motivo else "Baixa"
+    if nivel == "Alta" and not motivo:
+        nivel = "Média"
+    return {"sensibilidade": nivel, "motivo_sensibilidade": motivo}
+
+
 def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
     """Confere os fatos de cada risco, dá a firmeza (a melhor entre os fatos citados) e a prioridade:
     a dos vencimentos citados ou, sem eles, impacto × urgência pelo prazo. Risco sem fato conferido fica com
@@ -360,10 +396,16 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
         if ligados:
             nota = max(e.get("prioridade_nota") or 0 for e in ligados)
             agir = min(e["agir_ate"] for e in ligados if e.get("agir_ate"))
+            prazo_de_fato = True
         else:
             prazo = str(r.get("prazo") or "")
             lida = _ler_data(prazo)
-            agir = lida[0] if lida else POSSE if "posse" in _norm(prazo) else None
+            from datetime import timedelta
+            texto = _norm(prazo)
+            agir = (lida[0] if lida else POSSE - timedelta(days=1) if "posse" in texto
+                    else POSSE + timedelta(days=2) if "72" in texto
+                    else POSSE + timedelta(days=99) if "100 dias" in texto else None)
+            prazo_de_fato = bool(lida) and firmeza != "sem comprovação"
             nota = IMPACTO_PONTOS[impacto] * (_urgencia((agir - base_dia).days) if agir else 1)
         if firmeza == "sem comprovação":
             nota = min(nota, 5)
@@ -374,7 +416,8 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
                        if r.get("categoria") in CATEGORIAS else "Continuidade de serviço",
                        "impacto": impacto, "chance": r.get("chance") if r.get("chance") in ("Alta", "Média", "Baixa")
                        else "Média", "fatos": validos, "fatos_invalidos": [f for f in citados if f not in validos],
-                       "firmeza": firmeza, "agir_ate": agir, "nota": nota, "prioridade": _rotulo_prioridade(nota)})
+                       "firmeza": firmeza, "agir_ate": agir, "nota": nota, "prioridade": _rotulo_prioridade(nota),
+                       "horizonte": horizonte(agir), "prazo_de_fato": prazo_de_fato, **_sensibilidade(r)})
     riscos.sort(key=lambda r: (-r["nota"], r["agir_ate"] or date.max))
     novo_id = {r["id_original"]: f"R{k}" for k, r in enumerate(riscos, 1)}
     for r in riscos:
@@ -393,6 +436,162 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
              for p in resultado.get("pedir") or [] if isinstance(p, dict) and str(p.get("o_que") or "").strip()][:6]
     situacao = [str(x).strip() for x in resultado.get("situacao") or [] if str(x).strip()][:5]
     return {"situacao": situacao, "riscos": riscos, "decisoes": decisoes, "pedir": pedir}
+
+
+# --- VOTAÇÃO ITEM A ITEM ---------------------------------------------------------------------------
+# Depois da consolidação, os seis agentes votam, em cada risco, os três eixos da decisão: impacto, janela (quando a
+# decisão precisa estar tomada, contada da posse) e sensibilidade política. Cada voto traz a justificativa e os fatos.
+# O código apura: impacto e sensibilidade por maioria (empate vai para o nível mais grave), janela pela data do
+# documento quando há (fato prevalece sobre opinião) e, sem data, pelo voto (empate vai para a mais urgente). A
+# divergência entre agentes fica registrada.
+
+NIVEIS_IMPACTO = ["Baixo", "Médio", "Alto"]
+NIVEIS_SENS = ["Baixa", "Média", "Alta"]
+JANELAS_VOTO = ["Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias", "Depois dos 100 dias"]
+
+PROMPT_VOTO = """Você vota, item a item, os riscos da transição de uma secretaria do Estado do Rio de Janeiro, com um
+olhar específico. VOCÊ É: {papel}. {criterio}
+
+Para CADA risco da lista, dê três votos, cada um com uma justificativa de uma frase que cite os ids dos fatos:
+- "impacto": Alto, Médio ou Baixo. O que acontece se nada for feito: serviço à população que para, dinheiro em jogo,
+  responsabilização de gestores.
+- "janela": quando a decisão precisa estar tomada: "Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias" ou
+  "Depois dos 100 dias". A posse é em 01/01/2027.
+- "sensibilidade": a REPERCUSSÃO POLÍTICA da decisão, Alta, Média ou Baixa. Toda decisão tem repercussão; diga
+  qual e com que força. Na justificativa, diga QUEM REAGE E COMO (imprensa, MP, TCE, CGE, polícia, Alerj, municípios,
+  servidores, sindicatos, população atendida, fornecedores). Alta quando a reação vem no primeiro dia de governo ou
+  expõe o governador eleito.
+Vote pelo seu olhar, sem procurar consenso. Não invente fatos.
+
+""" + LINGUAGEM + """
+
+Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON], com um item por risco:
+{{"votos": [{{"risco": "R1", "impacto": "Alto", "por_que_impacto": "...", "janela": "Primeiras 72 horas",
+"por_que_janela": "...", "sensibilidade": "Alta", "por_que_sensibilidade": "...", "fatos": ["F3"]}}]}}"""
+
+
+def votar_por_agentes(modelo, texto_material, resultado, uso, modelos=None):
+    """Os seis agentes votam, em paralelo e sem ver uns aos outros, cada risco final nos três eixos."""
+    lista = [{"id": r["id"], "titulo": r["titulo"], "causa": r["causa"], "consequencia": r["consequencia"],
+              "em_jogo": r.get("em_jogo", ""), "em_curso": r.get("em_curso", ""), "decisao": r["decisao"],
+              "agir_ate": f"{r['agir_ate']:%d/%m/%Y}" if r.get("agir_ate") and r.get("prazo_de_fato") else "",
+              "fatos": r["fatos"]} for r in resultado.get("riscos") or []]
+    if not lista:
+        return []
+    pedido = texto_material + "\n\nRISCOS A VOTAR:\n" + json.dumps(lista, ensure_ascii=False, indent=1)
+    modelos = modelos or [modelo] * len(PAPEIS)
+
+    def um(papel, modelo_agente):
+        _, nome, criterio = papel
+        mensagens = [{"role": "system", "content": PROMPT_VOTO.format(papel=nome, criterio=criterio)},
+                     {"role": "user", "content": pedido}]
+        for m, substituto in ((modelo_agente, False), (modelo, True)):
+            if substituto and m == modelo_agente:
+                break
+            try:
+                r = chamar_json(m, mensagens, 6000, etapa=f"votação: {nome}" + (" (substituto)" if substituto else ""),
+                                uso_lista=uso)
+                if isinstance(r, dict) and isinstance(r.get("votos"), list):
+                    return {"papel": nome, "modelo": m, "substituto": substituto, "votos": r["votos"]}
+            except Exception as e:
+                erro = f"{type(e).__name__}: {e}"[:200]
+                continue
+            erro = "resposta ilegível"
+        return {"papel": nome, "modelo": modelo_agente, "erro": erro}
+    return _em_paralelo([lambda p=p, m=m: um(p, m) for p, m in zip(PAPEIS, modelos)])
+
+
+def _normaliza(valor, niveis):
+    v = _norm(str(valor or ""))
+    for n in niveis:
+        if _norm(n) == v or (len(v) > 3 and _norm(n).startswith(v[:5])):
+            return n
+    if "72" in v:
+        return "Primeiras 72 horas" if "Primeiras 72 horas" in niveis else None
+    if "100" in v:
+        return ("Depois dos 100 dias" if "depois" in v else "Primeiros 100 dias") if "Primeiros 100 dias" in niveis else None
+    if "posse" in v:
+        return "Antes da posse" if "Antes da posse" in niveis else None
+    return None
+
+
+def _apura(votos, niveis, grave_primeiro):
+    """Maioria simples; empate vai para o nível mais grave. Devolve (nível, quantos votaram nele, total, contagem)."""
+    validos = [v for v in votos if v]
+    if not validos:
+        return None, 0, 0, {}
+    contagem = {n: validos.count(n) for n in niveis if validos.count(n)}
+    maior = max(contagem.values())
+    empatados = [n for n in niveis if contagem.get(n) == maior]
+    nivel = empatados[-1] if grave_primeiro else empatados[0]
+    return nivel, maior, len(validos), contagem
+
+
+def apurar_votos(resultado, votacoes, data_corte=None):
+    """Aplica os votos aos riscos, recalcula a prioridade e reordena. Fica em cada risco "votos" com a apuração dos
+    três eixos e as divergências, para o relatório e o painel."""
+    from datetime import timedelta
+    base_dia = (_ler_data(data_corte) or (date.today(), False))[0] if data_corte else date.today()
+    validas = [v for v in votacoes or [] if not v.get("erro")]
+    if not validas:
+        return resultado
+    por_risco = {}
+    for v in validas:
+        for voto in v.get("votos") or []:
+            if isinstance(voto, dict):
+                por_risco.setdefault(str(voto.get("risco") or "").strip(), []).append((v["papel"], voto))
+    data_da_janela = {"Antes da posse": POSSE - timedelta(days=1), "Primeiras 72 horas": POSSE + timedelta(days=2),
+                      "Primeiros 100 dias": POSSE + timedelta(days=99), "Depois dos 100 dias": POSSE + timedelta(days=180)}
+    for r in resultado.get("riscos") or []:
+        votos = por_risco.get(r["id"], [])
+        if not votos:
+            continue
+        eixos = {}
+        for eixo, niveis, grave, campo in (("impacto", NIVEIS_IMPACTO, True, "por_que_impacto"),
+                                           ("janela", JANELAS_VOTO, False, "por_que_janela"),
+                                           ("sensibilidade", NIVEIS_SENS, True, "por_que_sensibilidade")):
+            lidos = [(papel, _normaliza(voto.get(eixo), niveis), str(voto.get(campo) or "").strip()) for papel, voto in votos]
+            nivel, n, total, contagem = _apura([x[1] for x in lidos], niveis, grave)
+            if not nivel:
+                continue
+            # divergência: alguém votou dois níveis longe do resultado, ou o resultado não teve maioria de 2/3
+            longe = [x for x in lidos if x[1] and abs(niveis.index(x[1]) - niveis.index(nivel)) >= 2]
+            fraca = n * 3 < total * 2
+            minoria = [x for x in lidos if x[1] and x[1] != nivel]
+            eixos[eixo] = {"nivel": nivel, "votos": n, "total": total, "contagem": contagem,
+                           "divergencia": [{"papel": x[0], "voto": x[1], "por_que": x[2]} for x in (longe or (minoria if fraca else []))],
+                           "justificativas": [{"papel": x[0], "voto": x[1], "por_que": x[2]} for x in lidos if x[1]]}
+        r["votos"] = eixos
+        if "impacto" in eixos:
+            r["impacto"] = eixos["impacto"]["nivel"]
+        if "sensibilidade" in eixos:
+            r["sensibilidade"] = eixos["sensibilidade"]["nivel"]
+            if r["sensibilidade"] == "Alta":
+                motivos = [j["por_que"] for j in eixos["sensibilidade"]["justificativas"] if j["voto"] == "Alta" and j["por_que"]]
+                r["motivo_sensibilidade"] = motivos[0] if motivos else r.get("motivo_sensibilidade", "")
+        if "janela" in eixos and not r.get("prazo_de_fato"):
+            r["agir_ate"] = data_da_janela[eixos["janela"]["nivel"]]
+            r["horizonte"] = eixos["janela"]["nivel"]
+            eixos["janela"]["prevaleceu"] = "voto"
+        elif "janela" in eixos:
+            eixos["janela"]["prevaleceu"] = "data do documento"
+        # prioridade: a maior entre a do vencimento (código) e impacto votado × urgência; sem base, no máximo Média
+        nota_votada = IMPACTO_PONTOS[r["impacto"]] * (_urgencia((r["agir_ate"] - base_dia).days) if r.get("agir_ate") else 1)
+        r["nota"] = max(r["nota"], nota_votada) if r.get("prazo_de_fato") else nota_votada
+        if r["firmeza"] == "sem comprovação":
+            r["nota"] = min(r["nota"], 5)
+        r["prioridade"] = _rotulo_prioridade(r["nota"])
+    # reordena e renumera, levando os vínculos das decisões e do que pedir
+    riscos = resultado["riscos"]
+    riscos.sort(key=lambda r: (-r["nota"], r["agir_ate"] or date.max))
+    novo = {r["id"]: f"R{k}" for k, r in enumerate(riscos, 1)}
+    for r in riscos:
+        r["id"] = novo[r["id"]]
+    for q in resultado.get("decisoes") or []:
+        q["riscos"] = [novo.get(x, x) for x in q.get("riscos") or []]
+    for p in resultado.get("pedir") or []:
+        p["serve_a"] = re.sub(r"\bR\d+\b", lambda m: novo.get(m.group(0), m.group(0)), p.get("serve_a") or "")
+    return resultado
 
 
 # --- NEUTRALIDADE E CONFIANÇA ----------------------------------------------------------------------

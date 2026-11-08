@@ -1,6 +1,7 @@
 """Documentos: Word (a partir de Markdown, com tabelas, quadros e links) e Excel do calendário."""
 import io
 import re
+from datetime import date
 
 import docx
 from docx.enum.text import WD_TAB_ALIGNMENT
@@ -436,12 +437,18 @@ def markdown_dossie(dossie, confronto=None):
     return "\n".join(linhas)
 
 
+def _sigla_orgao(nome):
+    partes = [p.strip() for p in str(nome).rsplit(" - ", 1)]
+    return partes[-1] if len(partes) == 2 and partes[-1].isupper() else nome
+
+
 def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimentos críticos", data_corte=""):
     """Planilha do calendário: uma linha por evento, ordenada por data, com filtro, criticidade colorida e as
     instruções de leitura numa aba própria. Serve para um órgão ou para o consolidado do lote."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
+    from .riscos import horizonte
     wb = Workbook()
     ws = wb.active
     ws.title = "Calendário"
@@ -451,31 +458,35 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
                ("Prioridade", 11), ("Nota (impacto × urgência)", 10), ("Impacto", 9), ("Categoria", 24),
                ("Serviço essencial", 10), ("Agir até", 12), ("Sem tempo para nova licitação", 12),
                ("Situação no PNCP", 40)]
+    # as três primeiras colunas são para filtrar: secretaria (sigla), janela contada da posse e mês
+    colunas = [("Secretaria", 12), ("Janela", 18), ("Mês", 10)] + colunas
     ws.append([c for c, _ in colunas])
     cores_prioridade = {"Máxima": "C00000", "Alta": "F4B183", "Média": "FFE699", "Baixa": "E2EFDA"}
     cores = {"Vencido": "C00000", "Crítico (até 30 dias)": "F4B183", "Atenção (31 a 90 dias)": "FFE699",
              "Acompanhar": "E2EFDA"}
+    o = 3                                                   # deslocamento das colunas originais
     for e in sorted(eventos, key=lambda x: (x["data"], -(x["valor"] or 0))):
-        ws.append([e["data"], e["dias"], e["criticidade"], e["orgao"], e["tipo"], e["evento"], e["objeto"], e["valor"],
+        ws.append([_sigla_orgao(e["orgao"]), horizonte(e.get("agir_ate") or e["data"]), f"{e['data']:%Y-%m}",
+                   e["data"], e["dias"], e["criticidade"], e["orgao"], e["tipo"], e["evento"], e["objeto"], e["valor"],
                    e["valor_texto"], e["consequencia"], e["decisao"], e["origem"], e["fonte"], e["trecho"],
                    e.get("prioridade", ""), e.get("prioridade_nota"), e.get("impacto", ""), e.get("categoria", ""),
                    "sim" if e.get("essencial") else "não", e.get("agir_ate"),
                    "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", "")])
         linha = ws.max_row
-        ws.cell(linha, 20).number_format = "dd/mm/yyyy"
+        ws.cell(linha, o + 20).number_format = "dd/mm/yyyy"
         if e.get("prioridade") in cores_prioridade:
-            ws.cell(linha, 15).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
+            ws.cell(linha, o + 15).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
             if e["prioridade"] == "Máxima":
-                ws.cell(linha, 15).font = Font(color="FFFFFF", bold=True)
-        ws.cell(linha, 1).number_format = "mm/yyyy" if e["so_mes"] else "dd/mm/yyyy"
-        ws.cell(linha, 8).number_format = '#,##0.00'
+                ws.cell(linha, o + 15).font = Font(color="FFFFFF", bold=True)
+        ws.cell(linha, o + 1).number_format = "mm/yyyy" if e["so_mes"] else "dd/mm/yyyy"
+        ws.cell(linha, o + 8).number_format = '#,##0.00'
         if e["criticidade"] in cores:
-            ws.cell(linha, 3).fill = PatternFill("solid", fgColor=cores[e["criticidade"]])
+            ws.cell(linha, o + 3).fill = PatternFill("solid", fgColor=cores[e["criticidade"]])
             if e["criticidade"] == "Vencido":
-                ws.cell(linha, 3).font = Font(color="FFFFFF", bold=True)
+                ws.cell(linha, o + 3).font = Font(color="FFFFFF", bold=True)
         if str(e["fonte"]).startswith("http"):
-            ws.cell(linha, 13).hyperlink = e["fonte"]
-            ws.cell(linha, 13).font = Font(color="2E5FA8", underline="single")
+            ws.cell(linha, o + 13).hyperlink = e["fonte"]
+            ws.cell(linha, o + 13).font = Font(color="2E5FA8", underline="single")
     for j, (_, largura) in enumerate(colunas, 1):
         ws.column_dimensions[get_column_letter(j)].width = largura
         ws.cell(1, j).font = Font(bold=True, color="FFFFFF")
@@ -484,24 +495,25 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
     for linha in ws.iter_rows(min_row=2):
         for c in linha:
             c.alignment = Alignment(wrap_text=True, vertical="top")
-    ws.freeze_panes = "B2"
+    ws.freeze_panes = "D2"
     ws.auto_filter.ref = ws.dimensions
     prioridades = wb.create_sheet("Prioridades", 0)        # a primeira aba: o que tratar primeiro, em todos os órgãos
-    cab = ["Prioridade", "Agir até", "Vence em", "Órgão", "Categoria", "Serviço essencial", "Evento", "Valor (R$)",
-           "Sem tempo para nova licitação", "Situação no PNCP", "Fonte"]
+    cab = ["Secretaria", "Janela", "Prioridade", "Agir até", "Vence em", "Órgão", "Categoria", "Serviço essencial", "Evento",
+           "Valor (R$)", "Sem tempo para nova licitação", "Situação no PNCP", "Fonte"]
     prioridades.append(cab)
     from .produtos import ordem_de_prioridade
-    for e in sorted([e for e in eventos if e["dias"] >= -30], key=ordem_de_prioridade)[:200]:
-        prioridades.append([e.get("prioridade", ""), e.get("agir_ate"), e["data"], e["orgao"], e.get("categoria", ""),
+    for e in sorted([e for e in eventos if e["dias"] >= -30], key=ordem_de_prioridade)[:500]:
+        prioridades.append([_sigla_orgao(e["orgao"]), horizonte(e.get("agir_ate") or e["data"]), e.get("prioridade", ""),
+                            e.get("agir_ate"), e["data"], e["orgao"], e.get("categoria", ""),
                             "sim" if e.get("essencial") else "não", e["evento"], e["valor"],
                             "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", ""), e["fonte"]])
         linha = prioridades.max_row
-        for col in (2, 3):
+        for col in (4, 5):
             prioridades.cell(linha, col).number_format = "dd/mm/yyyy"
-        prioridades.cell(linha, 8).number_format = '#,##0.00'
+        prioridades.cell(linha, 10).number_format = '#,##0.00'
         if e.get("prioridade") in cores_prioridade:
-            prioridades.cell(linha, 1).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
-    for j, largura in enumerate([11, 12, 12, 30, 24, 10, 50, 16, 12, 40, 40], 1):
+            prioridades.cell(linha, 3).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
+    for j, largura in enumerate([12, 18, 11, 12, 12, 30, 24, 10, 50, 16, 12, 40, 40], 1):
         prioridades.column_dimensions[get_column_letter(j)].width = largura
         prioridades.cell(1, j).font = Font(bold=True, color="FFFFFF")
         prioridades.cell(1, j).fill = PatternFill("solid", fgColor="1B2A41")
@@ -527,7 +539,10 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
                   "Alta: 6 a 8; Média: 3 a 5; Baixa: 1 ou 2.",
                   "Agir até: para contratos, 30 dias antes do fim (tempo de assinar uma prorrogação). Sem tempo para "
                   "nova licitação: o contrato vence em menos de 120 dias.",
-                  "A aba Prioridades mostra os 200 eventos de maior prioridade de todos os órgãos. Limite: "
+                  "Filtros: as setas no cabeçalho filtram qualquer coluna. As três primeiras servem para isso: "
+                  "Secretaria (sigla), Janela (antes da posse, primeiras 72 horas, primeiros 100 dias ou depois, pela "
+                  "data-limite para agir contada da posse em 01/01/2027) e Mês.",
+                  "A aba Prioridades mostra os 500 eventos de maior prioridade de todos os órgãos. Limite: "
                   "contratos de gestão com OS, convênios e concessões não estão na base de contratos (SIGA).",
                   "Datas só com mês e ano aparecem como mm/aaaa.",
                   "Limite: só entram datas que estão escritas nos documentos. Se um relatório não traz a vigência dos "
@@ -607,9 +622,10 @@ def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
     """Capítulo 5: riscos por prioridade (os primeiros em detalhe), decisões em aberto com as opções e o que pedir à
     secretaria. O que cada agente teme e valoriza fica no Anexo B."""
     riscos, decisoes = resultado.get("riscos") or [], resultado.get("decisoes") or []
-    linhas = ["## 5. Riscos e decisões urgentes",
+    linhas = ["## Riscos por prioridade",
               "Ordem por prioridade (impacto × urgência), com a mesma régua em todas as secretarias. \"Base\" diz quão "
-              "firme é a informação que sustenta o risco."]
+              "firme é a informação que sustenta o risco; \"Revisão\" diz quantos dos seis agentes independentes não fizeram "
+              "objeção e o que o advogado do diabo contestou."]
     for r in riscos[:limite_detalhe]:
         linhas.append(f"### {r['id']}. {r['titulo']} – {_agir(r)} · {r['prioridade'].lower()}")
         linhas.append(f"- {r['causa']} → {r['consequencia']}")
@@ -625,15 +641,15 @@ def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
         linhas += [f"| {r['id']}. {r['titulo']} | {r['categoria']} | {r['prioridade']} | {_agir(r)} | {r['firmeza']} |"
                    for r in riscos[limite_detalhe:]]
     if decisoes:
-        linhas += ["### Decisões em aberto", "As opções têm o mesmo peso. O que cada olhar de gestão teme e valoriza em "
-                   "cada opção está no arquivo de anexos da secretaria."]
+        linhas += ["## Decisões em aberto", "As opções têm o mesmo peso. O que cada olhar de gestão teme e valoriza em "
+                   "cada opção está no Anexo."]
         for q in decisoes:
             linhas.append(f"**{q['id']}. {q['pergunta']}**" + (f" _(ligada a {', '.join(q['riscos'])})_" if q["riscos"] else ""))
             linhas += [f"- **{o['nome']}:** {o.get('o_que_e', '')}" for o in q["opcoes"]]
             if q.get("o_que_falta_saber"):
                 linhas.append(f"- _Falta saber:_ {q['o_que_falta_saber']}")
     if resultado.get("pedir"):
-        linhas.append("### Pedir à secretaria")
+        linhas.append("## Pedir à secretaria")
         linhas += [f"{k}. {p['o_que']}" + (f" _(serve a {p['serve_a']})_" if p.get("serve_a") else "")
                    for k, p in enumerate(resultado["pedir"], 1)]
     return "\n".join(linhas)
@@ -680,7 +696,7 @@ def markdown_visoes(resultado):
     decisoes = [q for q in resultado.get("decisoes") or [] if q.get("visoes")]
     if not decisoes:
         return ""
-    linhas = ["## O que cada olhar de gestão teme e valoriza",
+    linhas = ["## Anexo – O que cada olhar de gestão teme e valoriza",
               "Seis agentes independentes, cada um com um olhar (Fazenda; controle e jurídico; área-fim; operação; nova "
               "gestão; advogado do diabo), leram a análise sem ver uns aos outros. Nenhum escolhe uma opção."]
     for q in decisoes:
@@ -689,14 +705,23 @@ def markdown_visoes(resultado):
     return "\n".join(linhas)
 
 
-def em_uma_pagina(resultado, cobertura=None, indicadores=None, limite_riscos=5):
-    """O resumo executivo: situação, números-chave, os riscos mais urgentes, as decisões em aberto e as lacunas.
-    Tudo o que quem decide precisa, em uma página; o resto do documento é a base disso."""
+def resumo_do_dossie(resultado, cobertura=None, indicadores=None):
+    """A abertura do dossiê: a situação da secretaria em poucas frases, os números-chave e as lacunas do checklist."""
     from .checklist import linha_essencial
-    linhas = ["## Resumo executivo"] + [f"- {x}" for x in resultado.get("situacao") or []]
+    linhas = ["## Em resumo"] + [f"- {x}" for x in resultado.get("situacao") or []]
     if indicadores:
         linhas += ["**Números-chave**", "| Indicador | Valor | Base |", "|---|---|---|"]
         linhas += [f"| {i['nome']} | {i['valor']} | {_base_curta(i)} |" for i in indicadores]
+    lacunas = linha_essencial(cobertura) if cobertura else ""
+    if lacunas:
+        linhas.append(lacunas.replace("Ver a tabela de cobertura no Capítulo 1.", "Tabela no capítulo 6."))
+    return "\n".join(linhas)
+
+
+def resumo_dos_riscos(resultado, cobertura=None, limite_riscos=5):
+    """A abertura do relatório de riscos: os riscos mais urgentes, as decisões em aberto e as lacunas."""
+    from .checklist import linha_essencial
+    linhas = ["## Resumo executivo"]
     riscos = resultado.get("riscos") or []
     if riscos:
         linhas.append("**Riscos mais urgentes**")
@@ -707,8 +732,16 @@ def em_uma_pagina(resultado, cobertura=None, indicadores=None, limite_riscos=5):
         linhas += [f"- {q['pergunta']}" for q in resultado["decisoes"]]
     lacunas = linha_essencial(cobertura) if cobertura else ""
     if lacunas:
-        linhas.append(lacunas.replace("Ver a tabela de cobertura no Capítulo 1.", "Tabela no Anexo A."))
+        linhas.append(lacunas.replace("Ver a tabela de cobertura no Capítulo 1.", "Tabela no dossiê da secretaria."))
+    linhas.append("_A base de cada risco (contratos, pessoal, passivos, orçamento, fontes e o que a secretaria informou) "
+                  "está no dossiê da secretaria, que acompanha este relatório._")
     return "\n".join(linhas)
+
+
+def em_uma_pagina(resultado, cobertura=None, indicadores=None, limite_riscos=5):
+    """Resumo em uma página com tudo (situação, números, riscos, decisões, lacunas): usado na revisão de neutralidade."""
+    return "\n".join([resumo_do_dossie(resultado, cobertura, indicadores),
+                       resumo_dos_riscos(resultado, cobertura, limite_riscos).split("\n", 1)[1]])
 
 
 def _chave_contrato(c):
@@ -795,7 +828,18 @@ CAPITULOS = [("1. Contratos", ["Contratos"]), ("2. Pessoal", ["Pessoal"]),
              ("4. Orçamento, obras e estrutura", ["Orçamento e execução", "Obras e entregas", "Estrutura e dirigentes"])]
 
 
-def markdown_capitulos(diag, contratos_criticos=None, ficha=None):
+def _quadro_folha(q):
+    """A folha do órgão, por código, do Caderno de RH: o que não é efetivo é o que pode sair na troca de governo."""
+    return "\n".join([
+        f"**Folha de pessoal** ([Caderno de RH, SEPLAG, {q['competencia']}]({q['url']}))",
+        "| Vínculos ativos | Efetivos | Não efetivos (comissão, temporários, requisitados) | Folha do mês | Remuneração média |",
+        "|---|---|---|---|---|",
+        f"| {q['vinculos']} | {q['efetivos']} | {q['nao_efetivos']} ({q['pct_nao_efetivos']}) | {q['folha_mes']} | {q['remuneracao_media']} |"]
+        + ([f"_{q['pct_nao_efetivos']} dos vínculos não são de servidor efetivo: é a parte da equipe que pode sair na troca "
+            "de governo._"] if q["pct"] >= 50 else []))
+
+
+def markdown_capitulos(diag, contratos_criticos=None, ficha=None, folha=None):
     """Os capítulos de dados, na ordem do que mais pesa: contratos (com a tabela dos críticos), pessoal, passivos,
     e por fim orçamento, obras e estrutura. Cada afirmação traz a origem conferida."""
     por_titulo = {_norm(s["titulo"]): s for s in (diag or {}).get("secoes") or []}
@@ -804,6 +848,8 @@ def markdown_capitulos(diag, contratos_criticos=None, ficha=None):
         linhas.append(f"## {titulo}")
         if titulo.startswith("1.") and contratos_criticos:
             linhas += ["**Contratos críticos**", markdown_contratos_criticos(contratos_criticos)]
+        if titulo.startswith("2.") and folha:
+            linhas.append(_quadro_folha(folha))
         if titulo.startswith("1.") and ficha:
             linhas += ["| Carteira que vence (planilha SIGA/PNCP) | Contratos (valor) |", "|---|---|"]
             linhas += [f"| {a} | {b} |" for a, b in ficha]
@@ -869,30 +915,118 @@ def _papeis():
     return PAPEIS
 
 
-def documento_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
-                         contratos_criticos=None):
-    """O documento de cada secretaria, em Markdown: resumo executivo; capítulos de dados (contratos, pessoal, passivos,
-    orçamento e obras); riscos e decisões; anexos com cobertura e fontes, vencimentos e os olhares dos agentes. Sem
-    anexos de método: uma linha de proveniência no fim."""
+def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
+                      contratos_criticos=None):
+    """Produto 2, o dossiê da secretaria atualizado com o que ela informou: resumo e números-chave; 1. Contratos (com
+    a tabela dos críticos); 2. Pessoal; 3. Passivos; 4. Orçamento, obras e estrutura; 5. o confronto entre o que a
+    secretaria informou e o que as fontes mostram; 6. a cobertura do checklist; anexos com fontes citadas e prazos que
+    não são contratos. Só dados, cada um com a origem conferida."""
     outros = [e for e in eventos or [] if not e.get("origem", "").startswith("Contratos")]
     venc = markdown_vencimentos(outros, limite=10)
-    venc = ("## Anexo C – Prazos de controle, convênios e outros vencimentos\n" + venc.split("\n", 1)[1]) if venc else ""
-    cobre_siga = any(e.get("origem", "").startswith("Contratos") for e in eventos or [])
-    partes = [em_uma_pagina(resultado, cobertura, (diag or {}).get("indicadores")),
-              markdown_capitulos(diag, contratos_criticos, ficha),
-              markdown_riscos(resultado, cobre_siga=cobre_siga),
-              markdown_fontes(dossie, confronto, ids_citados(diag, resultado, contratos_criticos), cobertura_md),
+    venc = ("## Anexo – Prazos de controle, convênios e outros vencimentos\n" + venc.split("\n", 1)[1]) if venc else ""
+    partes = [resumo_do_dossie(resultado, cobertura, (diag or {}).get("indicadores")),
+              markdown_capitulos(diag, contratos_criticos, ficha, (dossie or {}).get("folha")),
+              markdown_confronto(dossie, confronto),
+              markdown_fontes(dossie, None, ids_citados(diag, resultado, contratos_criticos), cobertura_md),
               venc, nota_md]
     return "\n\n".join(p for p in partes if p)
 
 
-def anexos_secretaria(resultado, dossie, confronto, metodo_md):
-    """O segundo arquivo de cada secretaria, para quem quer aprofundar: as visões de cada agente sobre cada decisão,
-    as objeções risco a risco, todas as fontes do dossiê e o método. O documento principal fica só com os dados."""
-    partes = [markdown_visoes(resultado), markdown_objecoes(resultado),
+def _contestacao_curta(r):
+    """A contestação do advogado do diabo, se houver, em até 140 caracteres."""
+    from .riscos import PAPEL_CONTRA
+    rev = r.get("revisao") or {}
+    contra = next((o for o in rev.get("objecoes") or [] if o["papel"] == PAPEL_CONTRA), None)
+    return _curto(contra["motivo"], 140) if contra else ""
+
+
+def _voto(r, eixo, valor):
+    """O resultado de um eixo com a contagem de votos ("Alto 5/6"); sem votação, só o valor."""
+    v = (r.get("votos") or {}).get(eixo)
+    if not v:
+        return valor or "–"
+    return f"{v['nivel']} {v['votos']}/{v['total']}" + (" ⚠" if v.get("divergencia") else "")
+
+
+def _divergencias(r):
+    """As divergências entre agentes, em uma frase por eixo: quem votou diferente e por quê."""
+    partes = []
+    nomes = {"impacto": "impacto", "janela": "janela", "sensibilidade": "sensibilidade"}
+    for eixo, rotulo in nomes.items():
+        v = (r.get("votos") or {}).get(eixo) or {}
+        for d in (v.get("divergencia") or [])[:1]:
+            papel = d["papel"].split(":")[0].split(" (")[0]
+            partes.append(f"{papel} vê {rotulo} {d['voto'].lower()}" + (f" ({_curto(d['por_que'], 110)})" if d.get("por_que") else ""))
+    return "; ".join(partes)
+
+
+def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedir=5):
+    """Produto 3, o relatório de riscos, em até 3 páginas: situação; tabela de todos os riscos (prazo, janela,
+    prioridade, sensibilidade política, base, revisão); cada risco em três linhas; decisões em aberto com as opções numa
+    linha; o que pedir à secretaria. Sem anexo: as visões e objeções completas ficam no registro de auditoria."""
+    from .checklist import linha_essencial
+    riscos = sorted((resultado.get("riscos") or [])[:limite_riscos], key=lambda r: (r.get("agir_ate") or date.max, -r["nota"]))
+    md = ["## Situação"] + [f"- {_curto(x, 260)}" for x in (resultado.get("situacao") or [])[:4]]
+    lacunas = linha_essencial(cobertura) if cobertura else ""
+    if lacunas and "não foram procurados" in lacunas:
+        md.append(lacunas.replace(" Ver a tabela de cobertura no Capítulo 1.", " Ver o dossiê da secretaria."))
+    if riscos:
+        votado = any(r.get("votos") for r in riscos)
+        md += ["## Decisões urgentes, em ordem de prazo",
+               ("_Impacto, janela e repercussão política foram votados, item a item, pelos seis agentes independentes "
+                "(a contagem diz quantos votaram no resultado; ⚠ marca divergência). Data que está no documento prevalece "
+                "sobre o voto de janela. Prioridade: impacto × urgência, por código._" if votado else ""),
+               "| # | Decisão (risco) | Agir até | Janela | Impacto | Repercussão política | Prioridade | Base |",
+               "|---|---|---|---|---|---|---|---|"]
+        for r in riscos:
+            agir = f"{r['agir_ate']:%d/%m/%Y}" if r.get("agir_ate") else "–"
+            md.append(f"| {r['id']} | {_curto(r.get('decisao') or r['titulo'], 90)} _({_curto(r['titulo'], 50)})_ | {agir} | "
+                      f"{_voto(r, 'janela', r.get('horizonte'))} | {_voto(r, 'impacto', r.get('impacto'))} | "
+                      f"{_voto(r, 'sensibilidade', r.get('sensibilidade'))} | {r['prioridade']} | "
+                      f"{BASE_CURTA.get(r['firmeza'], r['firmeza'])} |")
+        for r in riscos:
+            md.append(f"**{r['id']}. {_curto(r.get('decisao') or r['titulo'], 180)}**"
+                      + (f" — {_curto(r['quem_decide'], 60)}" if r.get("quem_decide") else ""))
+            linha = f"Risco: {r['titulo']}. {_curto(r['causa'], 180)} → {_curto(r['consequencia'], 180)}"
+            if r.get("motivo_sensibilidade"):
+                linha += f". Repercussão: {_curto(r['motivo_sensibilidade'], 130)}"
+            div = _divergencias(r)
+            if div:
+                linha += f". Divergência: {div}"
+            contra = _contestacao_curta(r)
+            if contra:
+                linha += f". Advogado do diabo contesta: {contra}"
+            md.append(f"- {linha}.")
+    decisoes = resultado.get("decisoes") or []
+    if decisoes:
+        md += ["## Decisões em aberto", "_As opções têm o mesmo peso._"]
+        for q in decisoes:
+            opcoes = "; ".join(f"**{o['nome']}**" + (f" ({_curto(o.get('o_que_e'), 110)})" if o.get("o_que_e") else "")
+                               for o in q["opcoes"])
+            md.append(f"- **{q['id']}. {_curto(q['pergunta'], 160)}** {opcoes}."
+                      + (f" _Falta saber: {_curto(q['o_que_falta_saber'], 140)}_" if q.get("o_que_falta_saber") else ""))
+    pedir = (resultado.get("pedir") or [])[:limite_pedir]
+    if pedir:
+        md.append("## Pedir à secretaria")
+        md += [f"{k}. {_curto(p['o_que'], 170)}" + (f" _({p['serve_a']})_" if p.get("serve_a") else "")
+               for k, p in enumerate(pedir, 1)]
+    md.append(nota_md)
+    return "\n".join(m for m in md if m)
+
+
+def auditoria_secretaria(resultado, dossie, confronto, metodo_md):
+    """Produto 5, a auditoria legível: as objeções de cada agente risco a risco com a resposta da consolidação, todas as
+    fontes do dossiê com as conferências, e o método (modelos, confiança, números conferidos, neutralidade). O registro
+    completo, em JSON, fica ao lado."""
+    partes = [markdown_objecoes(resultado),
               "## Todas as fontes do dossiê\n" + markdown_fontes(dossie, confronto).split("\n", 1)[1],
               metodo_md]
     return "\n\n".join(p for p in partes if p)
+
+
+def documento_secretaria(*args, **kwargs):
+    """Compatibilidade: o antigo documento único é o dossiê."""
+    return dossie_secretaria(*args, **kwargs)
 
 
 def markdown_vencimentos(eventos, limite=12, dias_passados=30):
@@ -926,9 +1060,9 @@ def markdown_fontes(dossie, confronto=None, citados=None, cobertura_md=""):
     """Anexo A: a cobertura do checklist, as fontes citadas no documento (uma linha cada, com link e selo) e o que o
     órgão informou contra o que as fontes mostram. Sem explicação de método: isso fica no arquivo de auditoria."""
     itens = itens_incluidos(dossie)
-    linhas = ["## Anexo A – Cobertura e fontes"]
-    if cobertura_md:
-        linhas.append(cobertura_md.split("\n", 1)[1] if cobertura_md.startswith("## ") else cobertura_md)
+    linhas = ["## Anexo – Fontes"] if not cobertura_md else ["## 6. Cobertura do checklist obrigatório",
+                                                             cobertura_md.split("\n", 1)[1] if cobertura_md.startswith("## ") else cobertura_md,
+                                                             "## Anexo – Fontes"]
     usados = [i for i in itens if (not citados or i["id"] in citados)
               and not (i.get("conferido_pela_equipe") and i["fonte"].startswith("Base de contratos"))]
     if usados:
@@ -943,18 +1077,27 @@ def markdown_fontes(dossie, confronto=None, citados=None, cobertura_md=""):
             fonte = (i["fonte"] or "fonte") + (f", {i['data_fonte']}" if i["data_fonte"] else "")
             fonte = f"[{fonte}]({i['url']})" if i["url"] else fonte
             linhas.append(f"- {fonte} · {selo} — {', '.join(g['itens'])}")
+    return "\n".join(linhas)
+
+
+def markdown_confronto(dossie, confronto):
+    """Capítulo 5 do dossiê: o que a secretaria informou contra o que as fontes públicas e o SIGA mostram, e o que as
+    fontes trazem e a secretaria não mencionou."""
     divs = (confronto or {}).get("divergencias") or []
-    if divs:
-        linhas.append("**O que o órgão informou e o que as fontes mostram**")
-        por_id = {i["id"]: i for i in itens}
-        for d in divs:
-            item = por_id.get(d["item"], {})
-            fonte = f" ([fonte]({item['url']}))" if item.get("url") else ""
-            if d["situacao"] == "contradiz":
-                linhas.append(f"- **O órgão informa:** {d['o_orgao_declara'] or d['trecho_relatorio']} "
-                              f"**As fontes mostram:** {d['as_fontes_mostram']}{fonte}")
-            else:
-                linhas.append(f"- **Não mencionado pelo órgão:** {d['as_fontes_mostram']}{fonte}")
+    if not divs:
+        return ""
+    por_id = {i["id"]: i for i in itens_incluidos(dossie)}
+    linhas = ["## 5. O que a secretaria informou e o que as fontes mostram",
+              "Confronto feito pelo modelo e conferido por código: cada trecho da secretaria é literal e cada fato das "
+              "fontes tem o link. Divergência não é erro de ninguém até ser apurada; é o que perguntar primeiro."]
+    for d in divs:
+        item = por_id.get(d["item"], {})
+        fonte = f" ([fonte]({item['url']}))" if item.get("url") else ""
+        if d["situacao"] == "contradiz":
+            linhas.append(f"- **A secretaria informa:** {d['o_orgao_declara'] or d['trecho_relatorio']} "
+                          f"**As fontes mostram:** {d['as_fontes_mostram']}{fonte}")
+        else:
+            linhas.append(f"- **Não mencionado pela secretaria:** {d['as_fontes_mostram']}{fonte}")
     return "\n".join(linhas)
 
 

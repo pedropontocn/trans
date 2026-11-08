@@ -169,8 +169,8 @@ def linhas(trabalho):
 
 st.set_page_config(page_title="Análise da Transição", page_icon="🏛️", layout="wide")
 st.title("🏛️ Análise da Transição")
-st.caption("Para cada secretaria, um documento curto: em uma página, diagnóstico, riscos e decisões urgentes, com "
-           "anexos de fontes e vencimentos. Para o conjunto, o painel estadual de urgências e o calendário em Excel. "
+st.caption("Cinco produtos: o painel estadual de urgências; por secretaria, o dossiê atualizado com o que ela informou, "
+           "o relatório de riscos e a auditoria; e o calendário de vencimentos em Excel. "
            "Expõe riscos e escolhas para quem decide: não recomenda.")
 
 
