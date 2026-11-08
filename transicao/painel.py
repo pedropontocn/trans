@@ -137,7 +137,8 @@ def markdown_painel(riscos, situacoes, eventos, temas, data_corte, linhas=None):
     altas = [r for r in riscos if r["sensibilidade"] == "Alta"]
 
     md = ["## O essencial",
-          f"- {len(secretarias)} secretaria(s) analisada(s), {len(riscos)} decisão(ões) no total.",
+          (f"- {len(secretarias)} secretaria(s) analisada(s), {len(riscos)} decisão(ões) no total." if len(secretarias) > 1
+           else f"- {len(riscos)} decisão(ões) no total."),
           f"- {len(por_janela['Antes da posse'])} com prazo antes da posse; {len(por_janela['Primeiras 72 horas'])} nas "
           f"primeiras 72 horas; {len(por_janela['Primeiros 100 dias'])} nos primeiros 100 dias.",
           f"- {len(altas)} de repercussão política alta"
@@ -175,12 +176,14 @@ def markdown_painel(riscos, situacoes, eventos, temas, data_corte, linhas=None):
     return "\n".join(md)
 
 
-def painel_estadual(riscos, situacoes, eventos, cfg, linhas=None):
-    """Devolve (Word do painel, uso de tokens)."""
+def painel_estadual(riscos, situacoes, eventos, cfg, linhas=None, orgao=None):
+    """Devolve (Word do painel, uso de tokens). Com `orgao`, é o painel de uma secretaria só (sem temas
+    transversais, sem chamada ao modelo)."""
     uso = []
     temas = temas_transversais(cfg["modelo"], riscos, uso) if len({r["orgao"] for r in riscos}) >= 2 else []
     md = markdown_painel(riscos, situacoes, eventos, temas, cfg["data_corte"], linhas)
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
-            "assunto": "Painel estadual de urgências da transição", "tipo": "Painel estadual",
+            "assunto": f"Painel de urgências da transição – {orgao}" if orgao else "Painel estadual de urgências da transição",
+            "tipo": "Painel de urgências" if orgao else "Painel estadual",
             "data": documentos._data_extenso(date.today()), "rodape_extra": "apoio de IA, processamento automático"}
     return documentos.gerar_docx(md, meta), uso

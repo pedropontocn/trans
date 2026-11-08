@@ -203,8 +203,8 @@ def linhas(trabalho):
 
 st.set_page_config(page_title="Análise da Transição", page_icon="🏛️", layout="wide")
 st.title("🏛️ Análise da Transição")
-st.caption("Cinco produtos: o painel estadual de urgências; por secretaria, o dossiê atualizado com o que ela informou, "
-           "o relatório de riscos e a auditoria; e o calendário de vencimentos em Excel. "
+st.caption("Cinco produtos por secretaria: o painel de urgências; o dossiê atualizado com o que ela informou; "
+           "o relatório de riscos; o calendário de vencimentos em Excel; e a auditoria. "
            "Expõe riscos e escolhas para quem decide: não recomenda.")
 
 
@@ -407,7 +407,7 @@ if not trabalho or trabalho["situacao"] != "rodando":
                 faixa = CUSTO_POR_ORGAO[economico]
                 peso = sum(1 if o.get("ler_dossie") else PESO_COM_PESQUISA for o in escolhidos)
                 st.caption(f"Estimativa: US$ {faixa[0] * peso:.0f} a {faixa[1] * peso:.0f} para "
-                           f"{len(escolhidos)} secretaria(s), mais o painel estadual. O valor real sai no resumo. Não envie documentos sigilosos.")
+                           f"{len(escolhidos)} secretaria(s). O valor real sai no resumo. Não envie documentos sigilosos.")
                 if st.button(f"▶️ Analisar {len(escolhidos)} secretaria(s)", type="primary", width="stretch",
                              disabled=not escolhidos):
                     cfg = {"modelo_pesquisa": modelo_pesquisa, "modelo_auxiliar": modelo_auxiliar, "modelo": modelo_debate,

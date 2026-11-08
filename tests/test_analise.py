@@ -229,7 +229,9 @@ def test_varios_orgaos_gravam_documentos_calendario_e_resumo(llm, tmp_path):
     assert len(list((tmp_path / "dossies").glob("*_dossie.docx"))) == 2
     assert len(list((tmp_path / "riscos").glob("*_riscos.docx"))) == 2
     assert not list((tmp_path / "auditoria").glob("*.docx"))                        # auditoria só em JSON
-    assert (tmp_path / "calendario_consolidado.xlsx").exists() and (tmp_path / "LEIA-ME.txt").exists()
+    assert len(list((tmp_path / "calendarios").glob("*_calendario.xlsx"))) == 2 and (tmp_path / "LEIA-ME.txt").exists()
+    assert len(list((tmp_path / "paineis").glob("*_painel.docx"))) == 2
+    assert not (tmp_path / "calendario_consolidado.xlsx").exists() and not (tmp_path / "painel_estadual.docx").exists()
     assert len(list((tmp_path / "auditoria").glob("*_arquivos_lidos.json"))) == 2
     assert [r["situacao"] for r in _resumo(tmp_path)] == ["concluído", "concluído"]
     # a pesquisa do Estado é feita uma vez só
@@ -237,7 +239,8 @@ def test_varios_orgaos_gravam_documentos_calendario_e_resumo(llm, tmp_path):
     estado = [p for p in pedidos if "Monte a camada" in p and 'camada\\n\\"Estado\\"' in p]
     assert estado and len(set(estado)) == len(estado)          # cada grupo do Estado pesquisado uma vez só
     with zipfile.ZipFile(io.BytesIO(analise.zipar(tmp_path))) as z:
-        assert "calendario_consolidado.xlsx" in z.namelist() and "resumo.csv" in z.namelist()
+        assert any(n.startswith("calendarios/") for n in z.namelist()) and "resumo.csv" in z.namelist()
+        assert any(n.startswith("paineis/") for n in z.namelist())
 
 
 def test_orgao_com_erro_nao_para_os_outros(llm, tmp_path):
@@ -261,7 +264,7 @@ def test_modo_economico_passa_tudo_pela_batch_api(llm, tmp_path):
     assert any(sum("Você revisa a análise de riscos" in texto(p) for p in batches.pedidos
                    if p["custom_id"] in {x["custom_id"] for x in lote}) >= 5 for lote in batches.lotes.values())
     assert analise.JUNTAS is False                                           # volta ao normal depois
-    assert (tmp_path / "painel_estadual.docx").exists()
+    assert list((tmp_path / "paineis").glob("*_painel.docx"))
 
 
 def test_prazo_esgotado_libera_quem_espera(llm):
@@ -471,7 +474,7 @@ def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
     texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "dossies").glob("*_dossie.docx"))).paragraphs)
     assert "Cobertura do checklist obrigatório" in texto and "Contratos críticos" in texto
     import openpyxl
-    planilha = openpyxl.load_workbook(tmp_path / "calendario_consolidado.xlsx").active
+    planilha = openpyxl.load_workbook(next((tmp_path / "calendarios").glob("*_calendario.xlsx"))).active
     assert any("2025000001" in str(c.value) for linha in planilha.iter_rows() for c in linha)
 
 
@@ -482,33 +485,34 @@ def test_dossie_sem_fatos_avisa(llm, tmp_path):
     assert linhas[0]["situacao"] == "erro" and "dossiê insuficiente" in linhas[0]["observacao"]
 
 
-def test_painel_estadual_consolida_as_secretarias(llm, tmp_path):
+def test_painel_de_cada_secretaria(llm, tmp_path):
     import docx
     from transicao import analise
     orgaos = [{"nome": n, "texto": RELATORIO} for n in ("Secretaria de Exemplo - SEX", "Secretaria de Ypsilon - SEY")]
     linhas = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=lambda *_: None)
     assert [l["situacao"] for l in linhas] == ["concluído", "concluído"] and linhas[0]["riscos"] == 2
-    doc = docx.Document(tmp_path / "painel_estadual.docx")
+    assert sorted(p.name for p in (tmp_path / "paineis").iterdir()) == [
+        "secretaria_de_exemplo_sex_painel.docx", "secretaria_de_ypsilon_sey_painel.docx"]
+    doc = docx.Document(tmp_path / "paineis" / "secretaria_de_exemplo_sex_painel.docx")
     textos = [p.text for p in doc.paragraphs] + [c.text.split("\n")[0] for t in doc.tables for c in t._cells]
-    for titulo in ["O ESSENCIAL", "Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias",
-                   "Temas que se repetem entre secretarias"]:
+    assert "Temas que se repetem entre secretarias" not in textos and not hasattr(llm, "pedido_temas")
+    for titulo in ["O ESSENCIAL", "Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias"]:
         assert titulo in textos, titulo
     assert "Mapa de calor" not in textos and "Cronograma: quando agir" not in textos
     texto = "\n".join(p.text for p in doc.paragraphs)
-    assert "Contratos vencendo" in texto and "Tema de uma só" not in texto   # tema de uma secretaria só sai
+    assert "secretaria(s) analisada(s)" not in texto and "Contratos vencendo" not in texto     # sem temas
     celulas = [c.text for t in doc.tables for c in t._cells]
     k = celulas.index("Agir até")
     assert celulas[k:k + 7] == ["Agir até", "Secretaria", "Decisão a tomar (risco)", "Quem decide", "Repercussão política",
                                 "Prioridade", "Base"]
-    assert "SEX" in celulas and "SEY" in celulas
+    assert "SEX" in celulas and "SEY" not in celulas
     # a repercussão política vem da votação dos seis agentes: R1 teve 5 votos "Alta" (Fazenda votou Baixa)
     assert any(c.startswith("Alta 5/6") and "TCE apontou" in c for c in celulas)
     # as decisões das primeiras 72 horas, votadas, estão na janela certa; em ordem de prazo
     datas = [c for c in celulas if c[:2].isdigit() and c[2:3] == "/"]
     from datetime import datetime
     assert datas and all(datetime.strptime(d, "%d/%m/%Y") for d in datas)
-    assert "SEX:R1" in llm.pedido_temas
-    assert "painel estadual" in (tmp_path / "LEIA-ME.txt").read_text(encoding="utf-8")
+    assert "paineis/" in (tmp_path / "LEIA-ME.txt").read_text(encoding="utf-8")
 
 
 def test_dossie_casado_pelo_conteudo_quando_o_nome_do_arquivo_nao_diz(llm):
@@ -545,23 +549,22 @@ def test_rodar_de_novo_na_mesma_pasta_pula_os_prontos(llm, tmp_path):
     chamadas_antes = len(llm.chamadas)
     # simula a queda: o segundo órgão não terminou (sem resultado gravado) e o painel se perdeu
     (tmp_path / "auditoria" / "secretaria_de_ypsilon_sey_resultado.json").unlink()
-    (tmp_path / "painel_estadual.docx").unlink()
+    (tmp_path / "paineis" / "secretaria_de_exemplo_sex_painel.docx").unlink()
+    (tmp_path / "calendarios" / "secretaria_de_exemplo_sex_calendario.xlsx").unlink()
     registros = []
     linhas2 = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=registros.append)
     assert [l["situacao"] for l in linhas2] == ["concluído", "concluído"]
     assert any("já estava pronto" in r and "SEX" in r for r in registros)
     pedidos_sex = [c for c in llm.chamadas[chamadas_antes:] if "Secretaria de Exemplo" in str(c["mensagens"])]
     assert not any("Você é analista de riscos" in str(c["mensagens"][0]["content"]) for c in pedidos_sex)
-    # o painel e o calendário foram remontados com os dois órgãos
-    assert (tmp_path / "painel_estadual.docx").exists()
-    doc = docx.Document(tmp_path / "painel_estadual.docx")
-    texto = "\n".join(p.text for p in doc.paragraphs) + "\n".join(c.text for t in doc.tables for c in t._cells)
+    # o painel e o calendário de quem estava pronto foram remontados por código, sem chamar o modelo
+    doc = docx.Document(tmp_path / "paineis" / "secretaria_de_exemplo_sex_painel.docx")
     celulas = [c.text for t in doc.tables for c in t._cells]
-    assert "SEX" in celulas and "SEY" in celulas and sum("(Licitações adiadas)" in c for c in celulas) == 2
+    assert "SEX" in celulas and "SEY" not in celulas and sum("(Licitações adiadas)" in c for c in celulas) == 1
     import openpyxl
-    planilha = openpyxl.load_workbook(tmp_path / "calendario_consolidado.xlsx")
-    orgaos_na_planilha = {str(c.value) for ws in planilha.worksheets for linha in ws.iter_rows() for c in linha if c.value}
-    assert any("SEX" in v for v in orgaos_na_planilha) and any("SEY" in v for v in orgaos_na_planilha)
+    for sigla in ("exemplo_sex", "ypsilon_sey"):
+        planilha = openpyxl.load_workbook(tmp_path / "calendarios" / f"secretaria_de_{sigla}_calendario.xlsx")
+        assert planilha.sheetnames[0] == "Prioridades"
     # sem retomar, refaz tudo; e um resultado de outra versão do app não é reaproveitado
     linhas3 = analise.rodar_orgaos(orgaos[:1], CFG, tmp_path, log=lambda *_: None, retomar=False)
     assert linhas3[0]["situacao"] == "concluído" and not any("já estava pronto" in r for r in registros[-1:])
