@@ -3,7 +3,7 @@
 Aplicação em Streamlit que apoia a equipe de transição do governo do Estado do Rio de Janeiro. Para cada secretaria,
 ela monta um diagnóstico a partir do dossiê de fontes públicas e dos documentos enviados, identifica riscos e decisões
 urgentes, submete a análise a cinco agentes independentes com olhares de gestão diferentes e entrega um documento
-curto. No fim, um painel estadual consolida as urgências. **Não decide e não recomenda**: expõe riscos e escolhas, com
+curto, um painel de urgências e um calendário. **Não decide e não recomenda**: expõe riscos e escolhas, com
 as fontes conferidas por código.
 
 ## O que sai
@@ -12,11 +12,11 @@ Um `.zip` com:
 
 | Arquivo | O que é |
 |---|---|
-| `painel_estadual.docx` | **1. Painel estadual:** todas as decisões de todas as secretarias com prazo antes da posse, nas primeiras 72 horas e nos primeiros 100 dias, e todas as de repercussão política alta. Em ordem de prazo; cada linha com a decisão a tomar, quem decide, a repercussão política votada pelos seis agentes (e quem reage), a prioridade e a base |
+| `paineis/<sigla>_painel.docx` | **1. Painel de urgências, por secretaria:** as decisões com prazo antes da posse, nas primeiras 72 horas e nos primeiros 100 dias, e as de repercussão política alta. Em ordem de prazo; cada linha com a decisão a tomar, quem decide, a repercussão política votada pelos seis agentes (e quem reage), a prioridade e a base. Montado por código |
 | `dossies/<secretaria>_dossie.docx` | **2. Dossiê da secretaria, atualizado com o que ela informou**: em resumo (situação, números-chave, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. O que a secretaria informou e o que as fontes mostram; 6. Cobertura do checklist; anexo de fontes citadas e prazos que não são contratos |
 | `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, até 3 páginas e sem anexo: situação; as decisões urgentes em ordem de prazo, com janela, impacto e repercussão política votados item a item pelos seis agentes (contagem dos votos e divergências), prioridade e base; decisões em aberto com opções de mesmo peso; o que pedir à secretaria |
 | `auditoria/<secretaria>.json` | **5. Auditoria**: o registro completo de cada análise: dossiê e conferências, análise inicial, revisões e votos dos seis agentes, consolidação, objeções risco a risco, método, descartes, custo |
-| `calendario_consolidado.xlsx` | **4. Calendário:** os vencimentos de todas as secretarias, com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro |
+| `calendarios/<sigla>_calendario.xlsx` | **4. Calendário, por secretaria:** os vencimentos com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro; datas só do SIGA ficam na aba "A confirmar (SIGA)" |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
 
 ## Como usar

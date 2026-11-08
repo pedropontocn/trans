@@ -42,7 +42,7 @@ def _seguro(funcao, vazio):
 def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, manifesto=None):
     """Analisa uma secretaria. texto: o relatório ou resumo enviado (pode ser vazio). dossie: o dossiê enviado pela
     equipe (pesquisa.dossie_enviado); sem ele, o app pesquisa as fontes públicas. Devolve o documento (Word), os
-    eventos do calendário, os riscos (para o painel estadual), o registro de auditoria e os números do resumo.
+    eventos do calendário, os riscos (para o painel), o registro de auditoria e os números do resumo.
     Levanta ErroAnalise quando não há base para analisar."""
     progresso = progresso or (lambda _t: None)
     uso = modelo.novo_uso_do_fio()            # todas as chamadas desta secretaria registram aqui
