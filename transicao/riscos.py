@@ -193,7 +193,7 @@ def material(orgao, diag, vencimentos, txt_confronto="", data_corte="", txt_chec
 def analisar(modelo, texto_material, uso):
     return chamar_json(modelo, [{"role": "system", "content": PROMPT_ANALISE},
                                 {"role": "user", "content": texto_material}],
-                       12000, etapa="análise de riscos", uso_lista=uso) or {}
+                       16000, etapa="análise de riscos", uso_lista=uso, chave="riscos") or {}
 
 
 def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
@@ -334,8 +334,8 @@ def consolidar(modelo, texto_material, analise, revisoes, uso):
     pedido = (texto_material + "\n\nANÁLISE:\n" + json.dumps(analise, ensure_ascii=False, indent=1)
               + "\n\nREVISÕES DOS AGENTES:\n" + json.dumps(validas, ensure_ascii=False, indent=1))
     final = chamar_json(modelo, [{"role": "system", "content": PROMPT_CONSOLIDACAO},
-                                 {"role": "user", "content": pedido}], 14000, etapa="consolidação dos riscos",
-                        uso_lista=uso)
+                                 {"role": "user", "content": pedido}], 16000, etapa="consolidação dos riscos",
+                        uso_lista=uso, chave="riscos")
     return final if isinstance(final, dict) and final.get("riscos") else analise
 
 
@@ -489,8 +489,8 @@ def votar_por_agentes(modelo, texto_material, resultado, uso, modelos=None):
             if substituto and m == modelo_agente:
                 break
             try:
-                r = chamar_json(m, mensagens, 6000, etapa=f"votação: {nome}" + (" (substituto)" if substituto else ""),
-                                uso_lista=uso)
+                r = chamar_json(m, mensagens, 8000, etapa=f"votação: {nome}" + (" (substituto)" if substituto else ""),
+                                uso_lista=uso, chave="votos")
                 if isinstance(r, dict) and isinstance(r.get("votos"), list):
                     return {"papel": nome, "modelo": m, "substituto": substituto, "votos": r["votos"]}
             except Exception as e:

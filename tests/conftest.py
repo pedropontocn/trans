@@ -250,7 +250,9 @@ class LLMFalso:
         if "Você é analista de riscos" in sistema:
             if self.analises_quebradas > 0:                       # simula JSON inválido (aspas sem escape)
                 self.analises_quebradas -= 1
-                return self._resp('[INÍCIO DO JSON]{"situacao": ["O "Pregão" 002/2024"], "riscos": [[FIM DO JSON]')
+                # o defeito no meio faz o leitor achar só um risco solto, sem a lista "riscos"
+                return self._resp('[INÍCIO DO JSON]{"situacao": ["O "Pregão" 002/2024"], "riscos": [{"id": "R1", '
+                                  '"titulo": "Solto", "fatos": []}, ]}[FIM DO JSON]')
             if "não é um JSON válido" not in ultimo:
                 self.material_riscos = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.analise_riscos) + "[FIM DO JSON]")
