@@ -556,3 +556,18 @@ def test_pesquisa_do_estado_e_reaproveitada_no_mesmo_dia(llm, tmp_path):
     analise.rodar_orgaos(orgaos, CFG, tmp_path / "b", log=registros.append)
     assert pedidos_estado() == antes and any("reaproveitando a pesquisa de hoje" in x for x in registros)
     assert any("sem custo" in x for x in registros)
+
+
+def test_painel_e_calendario_saem_mesmo_sem_data_nem_risco(llm, tmp_path):
+    import docx
+    import openpyxl
+    from transicao import analise
+    linha = {"orgao": "Secretaria de Exemplo", "situacao": "concluído", "riscos": 0}
+    for sub in ("calendarios", "paineis"):
+        (tmp_path / sub).mkdir(exist_ok=True)
+    analise._gravar_painel_e_calendario(tmp_path, "sex", "Secretaria de Exemplo", [], ["s"], [], [],
+                                        {"data_corte": "08/11/2026"}, linha)
+    wb = openpyxl.load_workbook(tmp_path / "calendarios" / "sex_calendario.xlsx")
+    assert wb["Calendário"].cell(2, 1).value.startswith("A secretaria não informou nenhuma data")
+    textos = [p.text for p in docx.Document(tmp_path / "paineis" / "sex_painel.docx").paragraphs]
+    assert any("Nenhuma decisão" in t for t in textos)

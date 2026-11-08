@@ -282,15 +282,16 @@ def prontos(saida):
 
 def _gravar_painel_e_calendario(saida, pasta, nome, riscos_orgao, situacao, eventos_orgao, descartados_orgao, cfg,
                                 linha, sobrescrever=True):
-    """O painel de urgências e o calendário da secretaria, montados por código (sem chamada ao modelo)."""
+    """O painel de urgências e o calendário da secretaria, montados por código (sem chamada ao modelo). Saem sempre,
+    mesmo sem data ou sem risco: nesse caso dizem que não há."""
     calendario = saida / "calendarios" / f"{pasta}_calendario.xlsx"
-    if eventos_orgao and (sobrescrever or not calendario.exists()):
+    if sobrescrever or not calendario.exists():
         calendario.write_bytes(documentos.calendario_xlsx(
-            eventos_orgao, [dict(d, orgao=d.get("orgao") or nome) for d in descartados_orgao or []],
+            eventos_orgao or [], [dict(d, orgao=d.get("orgao") or nome) for d in descartados_orgao or []],
             f"Calendário de vencimentos críticos – {nome}", cfg["data_corte"]))
     arquivo = saida / "paineis" / f"{pasta}_painel.docx"
-    if riscos_orgao and (sobrescrever or not arquivo.exists()):
-        doc, _ = painel.painel_estadual(riscos_orgao, [(nome, situacao)], eventos_orgao, cfg, linhas=[linha],
+    if sobrescrever or not arquivo.exists():
+        doc, _ = painel.painel_estadual(riscos_orgao or [], [(nome, situacao)], eventos_orgao or [], cfg, linhas=[linha],
                                         orgao=nome)
         arquivo.write_bytes(doc)
 
