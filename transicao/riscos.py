@@ -12,7 +12,7 @@ import re
 from datetime import date
 
 from .modelo import _comparavel, _em_paralelo, _norm, _shingles, chamar_json, chamar_modelo, extrair_json, trecho_confere
-from .produtos import IMPACTO_PONTOS, LIMITE_SIGA, _ler_data, ordem_de_prioridade
+from .produtos import IMPACTO_PONTOS, LIMITE_SIGA, _ler_data, confirmado, ordem_de_prioridade
 from .pesquisa import TIPOS_OFICIAIS, itens_incluidos
 
 CATEGORIAS = ["Continuidade de serviço", "Fiscal e orçamentário", "Jurídico e controle", "Pessoas e capacidade",
@@ -154,11 +154,12 @@ Responda SOMENTE com JSON, no mesmo formato da análise, entre [INÍCIO DO JSON]
 
 def vencimentos_numerados(eventos, limite=15):
     """Os vencimentos de maior prioridade, com ids V1, V2... para os riscos citarem."""
-    escolhidos = sorted([e for e in eventos or [] if e["dias"] >= -30], key=ordem_de_prioridade)[:limite]
+    escolhidos = sorted([e for e in eventos or [] if e["dias"] >= -30 and confirmado(e)],
+                        key=ordem_de_prioridade)[:limite]
     return {f"V{k}": e for k, e in enumerate(escolhidos, 1)}
 
 
-def material(orgao, diag, vencimentos, txt_confronto="", data_corte="", txt_checklist=""):
+def material(orgao, diag, vencimentos, txt_confronto="", data_corte="", txt_checklist="", txt_a_confirmar=""):
     """O material da análise e dos agentes, em texto compacto e com ids."""
     linhas = [f"SECRETARIA: {orgao}" + (f" · data de corte {data_corte}" if data_corte else ""), "", "DIAGNÓSTICO:"]
     for sec in (diag or {}).get("secoes") or []:
@@ -175,12 +176,19 @@ def material(orgao, diag, vencimentos, txt_confronto="", data_corte="", txt_chec
                       if e.get("agir_ate") else ""]
             marcas += ["serviço essencial" if e.get("essencial") else "",
                        "sem tempo para nova licitação" if e.get("sem_tempo_licitar") else "", e.get("situacao_pncp", "")]
+            if e.get("fonte_data") == "órgão":
+                marcas.append("data informada pela secretaria"
+                              + (f"; o SIGA dizia {e['data_siga']:%d/%m/%Y}" if e.get("data_siga") else ""))
+            elif e.get("fonte_data") in ("PNCP", "DOERJ"):
+                marcas.append(f"data conferida no {e['fonte_data']}")
             linhas.append(f"- [{vid}] vence {e['data']:%d/%m/%Y}: {e['evento']}"
                           + (f" – {e['objeto'][:140]}" if e.get("objeto") else "")
                           + (f" – {e['valor_texto']}" if e.get("valor_texto") else "")
                           + f" ({'; '.join(m for m in marcas if m)}) [{e.get('origem', '')}]")
         if any(e.get("origem", "").startswith("Contratos") for e in vencimentos.values()):
             linhas.append(f"Limite da base: {LIMITE_SIGA}")
+    if txt_a_confirmar:
+        linhas += ["", "DATAS A CONFIRMAR (não são prazos; não as use como data de decisão): " + txt_a_confirmar]
     if txt_confronto:
         linhas += ["", txt_confronto]
     if txt_checklist:
@@ -625,25 +633,35 @@ def revisar_neutralidade(modelo, texto, uso_lista=None):
 
 def confianca(resumo_dossie, riscos, cobertura=None):
     """Confiança da análise por regras explícitas: conferência do dossiê, firmeza dos fatos que sustentam os riscos e
-    cobertura do checklist obrigatório (ponto não procurado derruba a confiança: alta só sem nenhum em branco)."""
-    nivel, motivos = 2, []
+    cobertura do checklist (tema sem informação derruba a confiança: alta só sem nenhum em branco). Devolve também, em
+    português, o que derrubou a nota ("por_que"), para a abertura do documento."""
+    criterios = []                                   # (nível, motivo técnico, motivo em português)
     if cobertura:
-        em_branco = [c["id"] for c in cobertura if c["estado"] == "não procurado"]
-        motivos.append(f"{len(cobertura) - len(em_branco)} de {len(cobertura)} pontos do checklist obrigatório procurados"
-                       + (f" (não procurados: {', '.join(em_branco)})" if em_branco else ""))
-        nivel = min(nivel, 0 if len(em_branco) > len(cobertura) / 2 else 1 if em_branco else 2)
+        em_branco = [c for c in cobertura if c["estado"] == "não procurado"]
+        nivel = 0 if len(em_branco) > len(cobertura) / 2 else 1 if em_branco else 2
+        criterios.append((nivel, f"{len(cobertura) - len(em_branco)} de {len(cobertura)} temas do checklist com informação"
+                          + (f" (sem informação: {', '.join(c['id'] for c in em_branco)})" if em_branco else ""),
+                          f"dos {len(cobertura)} temas básicos que toda secretaria precisa ter verificados, {len(em_branco)} "
+                          f"ficaram sem informação ({', '.join(c.get('tema', c['id']).lower() for c in em_branco)})"))
     if resumo_dossie and resumo_dossie.get("itens"):
         c = resumo_dossie["conferidos"] / resumo_dossie["itens"]
-        motivos.append(f"{resumo_dossie['conferidos']} de {resumo_dossie['itens']} fatos do dossiê conferidos na fonte "
-                       "ou vindos do SIGA/PNCP")
-        nivel = min(nivel, 0 if c < 0.4 else 1 if c < 0.7 else 2)
+        criterios.append((0 if c < 0.4 else 1 if c < 0.7 else 2,
+                          f"{resumo_dossie['conferidos']} de {resumo_dossie['itens']} fatos do dossiê conferidos na fonte "
+                          "ou vindos do SIGA/PNCP",
+                          f"só {resumo_dossie['conferidos']} dos {resumo_dossie['itens']} fatos do dossiê puderam ser "
+                          "conferidos na fonte"))
     else:
-        motivos.append("sem dossiê de fontes independentes")
-        nivel = 0
+        criterios.append((0, "sem dossiê de fontes independentes", "não houve dossiê de fontes independentes"))
     if riscos:
         fracos = [r for r in riscos if r["firmeza"] in ("informado pelo órgão", "sem comprovação",
                                                         "fonte pública não conferida", "só na imprensa")]
-        motivos.append(f"{len(riscos) - len(fracos)} de {len(riscos)} riscos apoiados em fonte oficial, conferida ou "
-                       "no SIGA/PNCP")
-        nivel = min(nivel, 0 if len(fracos) / len(riscos) > 0.6 else 1 if len(fracos) / len(riscos) > 0.3 else 2)
-    return {"nivel": ["baixa", "média", "alta"][nivel], "motivos": motivos}
+        p = len(fracos) / len(riscos)
+        criterios.append((0 if p > 0.6 else 1 if p > 0.3 else 2,
+                          f"{len(riscos) - len(fracos)} de {len(riscos)} riscos apoiados em fonte oficial, conferida ou "
+                          "no SIGA/PNCP",
+                          f"{len(fracos)} dos {len(riscos)} riscos se apoiam só no que a secretaria informou ou em fonte "
+                          "que não pôde ser conferida"))
+    nivel = min(c[0] for c in criterios)
+    por_que = [c[2] for c in criterios if c[0] == nivel] if nivel < 2 else []
+    return {"nivel": ["baixa", "média", "alta"][nivel], "motivos": [c[1] for c in criterios], "por_que": por_que,
+            "lacuna_checklist": any(m.startswith("dos ") for m in por_que)}

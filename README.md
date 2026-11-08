@@ -74,10 +74,10 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    estrutura e dirigentes. Mais os números-chave do resumo executivo e a **tabela de contratos críticos** (da
    planilha do SIGA/PNCP, por código, e os apontados no material). Cada afirmação, número e contrato cita o dossiê
    ou um trecho literal do relatório da secretaria; o que não confere é retirado.
-3. **Checklist obrigatório.** Dez pontos que toda secretaria precisa responder (contratos a vencer, emergenciais,
+3. **Checklist obrigatório.** Dez temas básicos que toda secretaria precisa ter verificados (contratos a vencer, emergenciais,
    execução, restos a pagar, TCE-RJ, judicialização, convênios federais, obras, pessoal, sistemas críticos). Cada um
    sai com estado conferido por código: **encontrado** (com os fatos), **procurado e não encontrado** (a pesquisa
-   registrou a busca, ou o órgão informou que não há) ou **não procurado**. O que ficou em branco aparece na primeira
+   registrou a busca, ou o órgão informou que não há) ou **sem informação**. O que ficou em branco aparece na primeira
    página do documento, entra no que pedir à secretaria e derruba a confiança: alta só sem nenhum ponto em branco.
    A pesquisa do app recebe os pontos como obrigatórios e registra os que não achou.
 4. **Vencimentos.** Régua de risco por código: serviço essencial, impacto, data-limite para agir, tempo para nova

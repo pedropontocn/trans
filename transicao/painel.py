@@ -79,18 +79,23 @@ def markdown_apagao(eventos, limite_lista=25):
     from datetime import timedelta
     from .riscos import POSSE, horizonte
     limite = POSSE + timedelta(days=99)
-    ess = [e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e.get("essencial")
-           and e["data"] <= limite and e["dias"] >= -30]
-    if not ess:
+    from .produtos import confirmado
+    todos = [e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e.get("essencial")
+             and e["data"] <= limite and e["dias"] >= -30]
+    ess = [e for e in todos if confirmado(e)]
+    so_siga = [e for e in todos if not confirmado(e)]
+    if not todos:
         return []
     janelas = ["Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias"]
     jan = lambda e: horizonte(e.get("agir_ate") or e["data"])
     total = sum(e.get("valor") or 0 for e in ess)
     md = [f"## Serviços essenciais que podem parar até {limite:%d/%m/%Y}",
           f"{len(ess)} contrato(s) de serviço essencial (saúde, alimentação, custódia, vigilância, combustível, sistemas "
-          f"e outros) vencem até o fim dos 100 dias, somando {_mi(total)}, pela planilha do SIGA/PNCP. A janela é a da "
-          "data-limite para agir (30 dias antes do fim). O SIGA nem sempre registra os aditivos de prazo: cada contrato "
-          "precisa ser confirmado no PNCP ou no DOERJ. A lista completa, um a um, está no calendário (filtre Janela).",
+          f"e outros) vencem até o fim dos 100 dias, somando {_mi(total)}, com a data informada pela secretaria ou "
+          "conferida no PNCP/DOERJ. A janela é a da data-limite para agir (30 dias antes do fim). A lista completa, um a "
+          "um, está no calendário (filtre Janela)."
+          + (f" Outros {len(so_siga)} ({_mi(sum(e.get('valor') or 0 for e in so_siga))}) têm a data só no SIGA, que é "
+             "defasado: ficam fora desta conta e estão na aba \"A confirmar (SIGA)\" do calendário." if so_siga else ""),
           "| Secretaria | " + " | ".join(janelas) + " | Total |", "|---|" + "---|" * (len(janelas) + 1)]
     por_sec = {}
     for e in ess:

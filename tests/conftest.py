@@ -374,6 +374,12 @@ MODULOS = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "c
            "painel", "analise"]
 
 
+@pytest.fixture(autouse=True)
+def _registros_temporarios(tmp_path, monkeypatch):
+    """Nada de teste grava em registros/ do repositório (inclusive a pesquisa do Estado guardada do dia)."""
+    monkeypatch.setenv("PASTA_REGISTROS", str(tmp_path / "registros"))
+
+
 @pytest.fixture
 def funcoes(llm):
     """Todas as funções do pacote transicao num só lugar (os nomes não se repetem entre os módulos)."""

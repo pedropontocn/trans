@@ -442,6 +442,14 @@ def _sigla_orgao(nome):
     return partes[-1] if len(partes) == 2 and partes[-1].isupper() else nome
 
 
+def _conferida_em(e):
+    """Onde a data do evento foi conferida, em palavras."""
+    f = e.get("fonte_data")
+    return {"órgão": "secretaria", "PNCP": "PNCP", "DOERJ": "DOERJ", "SIGA": "só no SIGA",
+            "portal público": "só em portal público"}.get(f, "secretaria" if e.get("origem") == "Informado pelo órgão"
+                                                      else "fonte citada")
+
+
 def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimentos críticos", data_corte=""):
     """Planilha do calendário: uma linha por evento, ordenada por data, com filtro, criticidade colorida e as
     instruções de leitura numa aba própria. Serve para um órgão ou para o consolidado do lote."""
@@ -449,6 +457,9 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
     from .riscos import horizonte
+    from .produtos import confirmado
+    a_confirmar = [e for e in eventos if not confirmado(e)]
+    eventos = [e for e in eventos if confirmado(e)]
     wb = Workbook()
     ws = wb.active
     ws.title = "Calendário"
@@ -457,7 +468,7 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
                ("Decisão necessária", 40), ("Origem da informação", 20), ("Fonte", 40), ("Trecho conferido", 60),
                ("Prioridade", 11), ("Nota (impacto × urgência)", 10), ("Impacto", 9), ("Categoria", 24),
                ("Serviço essencial", 10), ("Agir até", 12), ("Sem tempo para nova licitação", 12),
-               ("Situação no PNCP", 40)]
+               ("Situação no PNCP", 40), ("Data conferida em", 14), ("Data no SIGA, se diferente", 12)]
     # as três primeiras colunas são para filtrar: secretaria (sigla), janela contada da posse e mês
     colunas = [("Secretaria", 12), ("Janela", 18), ("Mês", 10)] + colunas
     ws.append([c for c, _ in colunas])
@@ -471,8 +482,10 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
                    e["valor_texto"], e["consequencia"], e["decisao"], e["origem"], e["fonte"], e["trecho"],
                    e.get("prioridade", ""), e.get("prioridade_nota"), e.get("impacto", ""), e.get("categoria", ""),
                    "sim" if e.get("essencial") else "não", e.get("agir_ate"),
-                   "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", "")])
+                   "sim" if e.get("sem_tempo_licitar") else "não", e.get("situacao_pncp", ""), _conferida_em(e),
+                   e.get("data_siga")])
         linha = ws.max_row
+        ws.cell(linha, o + 24).number_format = "dd/mm/yyyy"
         ws.cell(linha, o + 20).number_format = "dd/mm/yyyy"
         if e.get("prioridade") in cores_prioridade:
             ws.cell(linha, o + 15).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
@@ -529,6 +542,10 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
                   "\"Descartados\".",
                   "Origem: \"Informado pelo órgão\" quer dizer que a data só consta do relatório do órgão; \"Fonte "
                   "pública\" quer dizer que veio de documento ou notícia com link.",
+                  "Data dos contratos, nesta ordem de confiança: a informada pela secretaria; a conferida no PNCP ou "
+                  "no DOERJ (termos aditivos publicados). A data que só está no SIGA, ou só num portal público, é "
+                  "defasada (essas bases nem sempre registram os aditivos de prazo) e não entra no calendário: fica na "
+                  "aba \"A confirmar (SIGA)\", para confirmar com a secretaria.",
                   "Criticidade (pela distância até a data de corte): Vencido; Crítico, até 30 dias; Atenção, de 31 a "
                   "90 dias; Acompanhar, mais de 90 dias.",
                   "Prioridade (régua igual para todos os órgãos, calculada por código): impacto × urgência. Impacto "
@@ -552,6 +569,21 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
     leia["A1"].font = Font(bold=True, size=13)
     for c in leia["A"]:
         c.alignment = Alignment(wrap_text=True, vertical="top")
+    if a_confirmar:
+        conf = wb.create_sheet("A confirmar (SIGA)")
+        conf.append(["Secretaria", "Fim segundo o SIGA", "Órgão", "Evento", "Objeto", "Valor (R$)", "Serviço essencial",
+                     "Onde está a data", "Fonte"])
+        for e in sorted(a_confirmar, key=lambda x: (x["data"], -(x["valor"] or 0))):
+            conf.append([_sigla_orgao(e["orgao"]), e["data"], e["orgao"], e["evento"], e["objeto"], e["valor"],
+                         "sim" if e.get("essencial") else "não", _conferida_em(e), e["fonte"]])
+            conf.cell(conf.max_row, 2).number_format = "dd/mm/yyyy"
+            conf.cell(conf.max_row, 6).number_format = '#,##0.00'
+        for j, largura in enumerate([12, 12, 30, 50, 40, 16, 10, 22, 40], 1):
+            conf.column_dimensions[get_column_letter(j)].width = largura
+            conf.cell(1, j).font = Font(bold=True, color="FFFFFF")
+            conf.cell(1, j).fill = PatternFill("solid", fgColor="7F7F7F")
+        conf.freeze_panes = "A2"
+        conf.auto_filter.ref = conf.dimensions
     if descartados:
         desc = wb.create_sheet("Descartados")
         desc.append(["Órgão", "Data informada", "Evento", "Motivo do descarte"])
@@ -703,6 +735,48 @@ def markdown_visoes(resultado):
         linhas += [f"**{q['id']}. {q['pergunta']}**", "| Olhar | Teme | Valoriza |", "|---|---|---|"]
         linhas += [f"| {v['papel']} | {v.get('teme') or '–'} | {v.get('valoriza') or '–'} |" for v in q["visoes"]]
     return "\n".join(linhas)
+
+
+FRASE_CONFIANCA = {"alta": "Pode servir de base; confira os pontos marcados como \"órgão\".",
+                   "média": "Confirme os pontos marcados como \"órgão\" ou \"sem comprovação\" antes de usar.",
+                   "baixa": "Use para saber o que perguntar à secretaria, não para afirmar."}
+
+
+def antes_de_ler(confianca, data_corte, cortes=None, contratos=True):
+    """O quadro de abertura do dossiê e do relatório de riscos: o que é o documento, a confiança (com o motivo em
+    português e o que fazer com ela), material cortado, como ler a base de cada informação e as ressalvas."""
+    linhas = ["## Antes de ler",
+              f"- **O que é:** apoio à decisão gerado com IA a partir do que a secretaria enviou, do dossiê de fontes "
+              f"públicas e dos dados do SIGA/PNCP e da SEPLAG, com data de corte {data_corte or 'não informada'}. Expõe "
+              "riscos e opções; não recomenda decisões."]
+    if confianca:
+        nivel = confianca["nivel"]
+        por_que = "; ".join(confianca.get("por_que") or [])
+        texto = f"- **Confiança desta análise: {nivel.upper()}**" + (f", porque {por_que}." if por_que else ".")
+        if confianca.get("lacuna_checklist"):
+            texto += " Silêncio do documento sobre esses temas não quer dizer que não haja risco."
+        linhas.append(f"{texto} {FRASE_CONFIANCA[nivel]}")
+    for c in cortes or []:
+        linhas.append(f"- **Material cortado:** {c}. O que estava no trecho cortado não entrou na análise.")
+    linhas.append("- **Base de cada informação:** \"SIGA/PNCP\" e \"fonte oficial ✔\" são dados conferidos; \"órgão\" é o "
+                  "que a secretaria declarou; \"sem comprovação\" precisa ser confirmado.")
+    if contratos:
+        linhas.append("- **Contratos:** o SIGA nem sempre registra aditivos de prazo. Confirme no PNCP ou no DOERJ antes "
+                      "de cobrar.")
+    linhas.append("- **Sem revisão da equipe:** confira antes de usar.")
+    return "\n".join(linhas)
+
+
+def cortes_de_leitura(manifesto=None, avisos=None):
+    """O que foi cortado do material da secretaria, em frases curtas: arquivos de uma pasta (pelo manifesto) e o
+    relatório que passou do limite (pelos avisos da limpeza)."""
+    cortes = []
+    for c in (manifesto or {}).get("cortados") or []:
+        cortes.append(f"{c['arquivo']} ({c['usados'] // 1000} de {c['caracteres'] // 1000} mil caracteres lidos)")
+    for a in avisos or []:
+        if "foi cortado" in a:
+            cortes.append(re.sub(r"^⚠️\s*", "", a).rstrip(". ").replace(" e não entra na análise", ""))
+    return cortes
 
 
 def resumo_do_dossie(resultado, cobertura=None, indicadores=None):
@@ -916,7 +990,7 @@ def _papeis():
 
 
 def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
-                      contratos_criticos=None):
+                      contratos_criticos=None, antes_md=""):
     """Produto 2, o dossiê da secretaria atualizado com o que ela informou: resumo e números-chave; 1. Contratos (com
     a tabela dos críticos); 2. Pessoal; 3. Passivos; 4. Orçamento, obras e estrutura; 5. o confronto entre o que a
     secretaria informou e o que as fontes mostram; 6. a cobertura do checklist; anexos com fontes citadas e prazos que
@@ -924,7 +998,7 @@ def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobert
     outros = [e for e in eventos or [] if not e.get("origem", "").startswith("Contratos")]
     venc = markdown_vencimentos(outros, limite=10)
     venc = ("## Anexo – Prazos de controle, convênios e outros vencimentos\n" + venc.split("\n", 1)[1]) if venc else ""
-    partes = [resumo_do_dossie(resultado, cobertura, (diag or {}).get("indicadores")),
+    partes = [antes_md, resumo_do_dossie(resultado, cobertura, (diag or {}).get("indicadores")),
               markdown_capitulos(diag, contratos_criticos, ficha, (dossie or {}).get("folha")),
               markdown_confronto(dossie, confronto),
               markdown_fontes(dossie, None, ids_citados(diag, resultado, contratos_criticos), cobertura_md),
@@ -960,15 +1034,15 @@ def _divergencias(r):
     return "; ".join(partes)
 
 
-def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedir=5):
+def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedir=5, antes_md=""):
     """Produto 3, o relatório de riscos, em até 3 páginas: situação; tabela de todos os riscos (prazo, janela,
     prioridade, sensibilidade política, base, revisão); cada risco em três linhas; decisões em aberto com as opções numa
     linha; o que pedir à secretaria. Sem anexo: as visões e objeções completas ficam no registro de auditoria."""
     from .checklist import linha_essencial
     riscos = sorted((resultado.get("riscos") or [])[:limite_riscos], key=lambda r: (r.get("agir_ate") or date.max, -r["nota"]))
-    md = ["## Situação"] + [f"- {_curto(x, 260)}" for x in (resultado.get("situacao") or [])[:4]]
+    md = ([antes_md] if antes_md else []) + ["## Situação"] + [f"- {_curto(x, 260)}" for x in (resultado.get("situacao") or [])[:4]]
     lacunas = linha_essencial(cobertura) if cobertura else ""
-    if lacunas and "não foram procurados" in lacunas:
+    if lacunas and "sem informação" in lacunas:
         md.append(lacunas.replace(" Ver a tabela de cobertura no Capítulo 1.", " Ver o dossiê da secretaria."))
     if riscos:
         votado = any(r.get("votos") for r in riscos)
@@ -1032,7 +1106,9 @@ def documento_secretaria(*args, **kwargs):
 def markdown_vencimentos(eventos, limite=12, dias_passados=30):
     """Os vencimentos de maior prioridade do órgão, em tabela curta. O calendário completo vai no Excel."""
     from .produtos import LIMITE_SIGA, ordem_de_prioridade
-    candidatos = [e for e in eventos or [] if e["dias"] >= -dias_passados]
+    from .produtos import confirmado
+    eventos = [e for e in eventos or [] if confirmado(e)]
+    candidatos = [e for e in eventos if e["dias"] >= -dias_passados]
     proximos = sorted(candidatos, key=ordem_de_prioridade)[:limite]
     if not proximos:
         return ""
@@ -1124,6 +1200,5 @@ def nota_final(registro_id, modelos, confianca, data_corte, neutralidade=None, r
                   if substitutos else "") + ".") if revisoes else "",
               f"Revisão de neutralidade: {neutralidade['avaliacao_geral'].replace('_', ' ')}."
               if neutralidade and not neutralidade.get("erro") and neutralidade.get("avaliacao_geral") else "",
-              "Método, conferências por código e revisões completas no arquivo de auditoria. Gerado em processamento "
-              "automático, sem revisão da equipe: confira antes de usar."]
+              "Método, conferências por código e revisões completas no arquivo de auditoria."]
     return "_" + " ".join(p for p in partes if p) + "_"

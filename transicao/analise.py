@@ -9,6 +9,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 import threading
 import time
@@ -37,7 +38,7 @@ def _seguro(funcao, vazio):
     return rodar
 
 
-def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
+def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, manifesto=None):
     """Analisa uma secretaria. texto: o relatório ou resumo enviado (pode ser vazio). dossie: o dossiê enviado pela
     equipe (pesquisa.dossie_enviado); sem ele, o app pesquisa as fontes públicas. Devolve o documento (Word), os
     eventos do calendário, os riscos (para o painel estadual), o registro de auditoria e os números do resumo.
@@ -93,7 +94,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
     progresso("Analisando riscos e decisões...")
     vencimentos = riscos.vencimentos_numerados(eventos)
     material = riscos.material(nome, diagnostico, vencimentos, conf.texto_confronto(confronto), cfg["data_corte"],
-                               checklist.texto_para_analise(cobertura))
+                               checklist.texto_para_analise(cobertura), produtos.resumo_so_no_siga(eventos))
     analise = riscos.analisar(principal, material, uso)
     if not analise.get("riscos"):
         falha = modelo.ultima_falha()
@@ -139,10 +140,11 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None):
                "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes)),
                "neutralidade": esquema["neutralidade"], "familias_de_fora": esquema["familias"]}
     nota = documentos.nota_final(registro_id, modelos, confianca, cfg["data_corte"], neutralidade, revisoes)
+    antes = documentos.antes_de_ler(confianca, cfg["data_corte"], documentos.cortes_de_leitura(manifesto, avisos))
     texto_dossie = documentos.dossie_secretaria(
         resultado, diagnostico, ficha, eventos, dossie, confronto, checklist.markdown(cobertura), nota,
-        cobertura=cobertura, contratos_criticos=contratos_criticos)
-    texto_riscos = documentos.relatorio_riscos(resultado, cobertura, nota)
+        cobertura=cobertura, contratos_criticos=contratos_criticos, antes_md=antes)
+    texto_riscos = documentos.relatorio_riscos(resultado, cobertura, nota, antes_md=antes)
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
             "assunto": nome, "tipo": "Dossiê da secretaria, atualizado com o que ela informou",
             "data": documentos._data_extenso(date.today()),
@@ -289,11 +291,10 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
 
     try:
         modelo.usar_completion(chamada)
-        log("Pesquisando o contexto do Estado (uma vez para todos os órgãos)...")
         modelo.novo_uso_do_fio()
-        estado = pesquisa.pesquisar_estado(cfg["modelo_pesquisa"], cfg["data_corte"], cfg.get("foco", ""))
-        custo_estado, _ = modelo.custo_estimado(estado.get("uso") or [])
-        log(f"Estado: {len(estado.get('itens') or [])} itens.")
+        estado, reaproveitada = _estado_do_dia(cfg, log)
+        custo_estado, _ = modelo.custo_estimado(estado.get("uso") or []) if not reaproveitada else (0.0, False)
+        log(f"Estado: {len(estado.get('itens') or [])} itens" + (" (pesquisa de hoje reaproveitada, sem custo)." if reaproveitada else "."))
 
         linhas, eventos, descartados, todos_riscos, situacoes, trava = {}, {}, {}, {}, {}, threading.Lock()
         pastas = _pastas_unicas(o["nome"] for o in orgaos)
@@ -319,7 +320,7 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                 return linha
             log(f"[{k}/{len(orgaos)}] {nome}: começando")
             try:
-                texto = orgao.get("texto", "")
+                texto, manifesto = orgao.get("texto", ""), None
                 if orgao.get("ler"):
                     texto, manifesto = orgao["ler"]()
                     (saida / "auditoria" / f"{pasta}_arquivos_lidos.json").write_text(
@@ -330,7 +331,7 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                 if orgao.get("ler_dossie"):
                     log(f"[{k}] Conferindo os links do dossiê enviado...")
                     dossie = pesquisa.dossie_enviado(orgao["ler_dossie"](), nome, cfg["data_corte"], estado=estado)
-                r = analisar_orgao(nome, texto, cfg, estado=estado, dossie=dossie,
+                r = analisar_orgao(nome, texto, cfg, estado=estado, dossie=dossie, manifesto=manifesto,
                                    progresso=lambda t: log(f"[{k}] {t}"))
                 (saida / "dossies" / f"{pasta}_dossie.docx").write_bytes(r["dossie_docx"])
                 (saida / "riscos" / f"{pasta}_riscos.docx").write_bytes(r["riscos_docx"])
@@ -386,6 +387,32 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
         if fila:
             fila.encerrar()
             log(f"Modo econômico: {fila.enviados} lote(s) enviados à Batch API.")
+
+
+def _estado_do_dia(cfg, log):
+    """A pesquisa do contexto do Estado é a mesma para todos os órgãos e para todas as rodadas do dia com a mesma data
+    de corte, modelo e foco: fica guardada em disco (pasta de registros) e é reaproveitada. Devolve (estado,
+    reaproveitada)."""
+    pasta = Path(os.getenv("PASTA_REGISTROS") or "registros") / "estado"
+    chave = modelo.chave_guardada("estado", VERSAO, pesquisa.PROMPT_PESQUISA, cfg["modelo_pesquisa"], cfg["data_corte"],
+                                  cfg.get("foco", ""), date.today().isoformat())[:20]
+    arquivo = pasta / f"{date.today():%Y-%m-%d}_{chave}.json"
+    try:
+        if arquivo.exists():
+            estado = json.loads(arquivo.read_text(encoding="utf-8"))
+            if estado.get("itens"):
+                log("Contexto do Estado: reaproveitando a pesquisa de hoje...")
+                return estado, True
+    except (OSError, ValueError):
+        pass
+    log("Pesquisando o contexto do Estado (uma vez para todos os órgãos)...")
+    estado = pesquisa.pesquisar_estado(cfg["modelo_pesquisa"], cfg["data_corte"], cfg.get("foco", ""))
+    try:
+        pasta.mkdir(parents=True, exist_ok=True)
+        arquivo.write_text(json.dumps(estado, ensure_ascii=False, default=str), encoding="utf-8")
+    except OSError:
+        pass
+    return estado, False
 
 
 def _pastas_unicas(nomes):
