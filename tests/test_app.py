@@ -10,8 +10,10 @@ from conftest import RAIZ, RELATORIO
 
 @pytest.fixture(autouse=True)
 def pasta_de_registros(tmp_path, monkeypatch):
-    """Cada teste grava as análises numa pasta temporária, não em registros/ do repositório."""
+    """Cada teste grava as análises numa pasta temporária, não em registros/ do repositório, e roda sem os dossiês
+    embutidos (o teste que os usa aponta PASTA_DOSSIES para o pacote do repositório)."""
     monkeypatch.setenv("PASTA_REGISTROS", str(tmp_path / "registros"))
+    monkeypatch.setenv("PASTA_DOSSIES", str(tmp_path / "sem_dossies"))
     return tmp_path / "registros"
 
 
@@ -129,3 +131,19 @@ def test_depois_de_um_reinicio_a_tela_oferece_retomar(llm, monkeypatch, pasta_de
     # só a SEFAZ foi analisada de novo
     novas = [c for c in llm.chamadas[chamadas_antes:] if "Você é analista de riscos" in str(c["mensagens"][0]["content"])]
     assert len(novas) == 1 and "SEFAZ" in str(novas[0]["mensagens"][1]["content"])
+
+
+def test_dossies_embutidos_entram_sozinhos_na_tabela(llm, monkeypatch):
+    import streamlit
+    from streamlit.testing.v1 import AppTest
+    streamlit.cache_resource.clear()
+    monkeypatch.setenv("PASTA_DOSSIES", str(RAIZ / "dossies_embutidos"))
+    envio = [Envio("resumos.zip", _zip({"SECID - Cidades.docx": b"a", "Secretaria Nova - SNOVA.pdf": b"b"}))]
+    monkeypatch.setattr(streamlit, "file_uploader", lambda rotulo, *a, **k: [] if "Dossiê" in rotulo else envio)
+    at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=60)
+    at.run()
+    assert not at.exception
+    assert any("Dossiês embutidos: 3" in c.value and "06/11/2026" in c.value for c in at.caption)
+    # a SECID casou com o dossiê embutido; a secretaria desconhecida ficou sem; as 30 só com dossiê ficam escondidas
+    assert any(b.label.startswith("▶️ Analisar 2") for b in at.button)
+    assert any("secretarias que têm dossiê mas nenhum documento enviado" in c.label for c in at.checkbox)

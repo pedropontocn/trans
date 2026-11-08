@@ -536,6 +536,41 @@ def dossies_do_envio(arquivos):
     return itens
 
 
+PASTA_DOSSIES_EMBUTIDOS = Path(__file__).resolve().parent.parent / "dossies_embutidos"
+
+
+def dossies_embutidos(pasta=None):
+    """O pacote de dossiês que vem com o app (pasta dossies_embutidos/, ou PASTA_DOSSIES): os .zip e arquivos soltos
+    que estiverem lá, lidos como um envio. Devolve (dossiês, data do pacote), com a data tirada do nome do arquivo
+    (dd-mm-aaaa) quando houver."""
+    pasta = Path(pasta or os.getenv("PASTA_DOSSIES") or PASTA_DOSSIES_EMBUTIDOS)
+    if not pasta.is_dir():
+        return [], ""
+    arquivos = [(str(c.relative_to(pasta)), c.read_bytes()) for c in sorted(pasta.rglob("*"))
+                if c.is_file() and not c.name.startswith((".", "LEIA-ME", "README"))]
+    if not arquivos:
+        return [], ""
+    datas = re.findall(r"(\d{2})-(\d{2})-(\d{4})", " ".join(n for n, _ in arquivos))
+    data = max((f"{d}/{m}/{a}" for d, m, a in datas), key=lambda x: x[6:] + x[3:5] + x[:2]) if datas else ""
+    dossies = dossies_do_envio(arquivos)
+    for d in dossies:
+        d["embutido"] = True
+    return dossies, data
+
+
+def juntar_dossies(embutidos, enviados):
+    """Os dossiês disponíveis, por secretaria (pela sigla, quando há): o enviado na tela vale sobre o embutido da
+    mesma secretaria, e herda o nome por extenso se vier só com a sigla."""
+    chave = lambda d: sigla(d["orgao"]) or (d["orgao"] if re.fullmatch(r"[A-Z][A-Z0-9]{1,14}", d["orgao"]) else _norm(d["orgao"]))
+    por_chave = {chave(d): d for d in embutidos}
+    for d in enviados:
+        k = chave(d)
+        if k in por_chave and " - " in por_chave[k]["orgao"] and " - " not in d["orgao"]:
+            d = dict(d, orgao=por_chave[k]["orgao"])
+        por_chave[k] = d
+    return list(por_chave.values())
+
+
 def _texto_dossie(d):
     """Os textos do dossiê: pesquisa (com citações), dossiê reduzido e planilha de contratos."""
     textos = {}

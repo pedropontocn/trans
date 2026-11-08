@@ -23,10 +23,12 @@ Um `.zip` com:
 
 1. Suba os arquivos: o `.zip` com os documentos (Word, PDF ou Excel; o nome ou a sigla da secretaria no nome do arquivo; arquivos com o mesmo nome são juntados) ou o
    `.zip` da pasta com uma subpasta de documentos brutos por órgão.
-2. Opcional: suba o **pacote de dossiês das secretarias** (.zip) montado pela equipe. Por sigla, o app usa
-   `SIGLA_pesquisa.md` (pesquisa web com citações `[título](link)`), `SIGLA.md` (painel de contratos do SIGA/PNCP) e
-   `SIGLA_vencimentos_180d.csv` (contratos que vencem em 180 dias); os nomes por extenso vêm de
-   `00_CONSOLIDACAO_ESTADUAL.md`. Também aceita um arquivo por secretaria (Word, PDF ou Markdown) com fatos citados.
+2. O **pacote de dossiês das secretarias** montado pela equipe já vem embutido no app (`dossies_embutidos/`, pacote de
+   06/11/2026, 31 secretarias) e é usado sozinho: por sigla, o app pega `SIGLA_pesquisa.md` (pesquisa web com
+   citações `[título](link)`), `SIGLA.md` (painel de contratos do SIGA/PNCP) e `SIGLA_vencimentos_180d.csv`
+   (contratos que vencem em 180 dias); os nomes por extenso vêm de `00_CONSOLIDACAO_ESTADUAL.md`. Para atualizar,
+   troque o `.zip` da pasta (ou suba um pacote mais novo na tela: vale sobre o embutido para as secretarias que
+   cobrir). Também aceita um arquivo por secretaria (Word, PDF ou Markdown) com fatos citados.
    Para quem tiver dossiê, o app não pesquisa a web sobre o órgão:
    - cada fato da pesquisa tem o link aberto pelo código, e os números da afirmação precisam estar na página;
    - os números do SIGA/PNCP entram como dado oficial conferido pela equipe;
