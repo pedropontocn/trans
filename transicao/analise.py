@@ -3,7 +3,8 @@
 Para cada secretaria: dossiê (enviado pela equipe ou pesquisado) → confronto com o relatório, calendário e diagnóstico
 → vencimentos com a régua de risco → análise de riscos → revisão por cinco agentes independentes → consolidação
 → conferência e prioridade por código → documento curto (montado por código) → revisão de neutralidade.
-No fim do lote: o calendário consolidado, o painel estadual e um resumo com situação e custo de cada secretaria.
+Também por secretaria, montados por código (sem custo de modelo): o painel de urgências e o calendário em Excel.
+No fim do lote, um resumo com situação e custo de cada secretaria. O painel e o calendário unificados ficam para depois.
 """
 import csv
 import hashlib
@@ -41,7 +42,7 @@ def _seguro(funcao, vazio):
 def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, manifesto=None):
     """Analisa uma secretaria. texto: o relatório ou resumo enviado (pode ser vazio). dossie: o dossiê enviado pela
     equipe (pesquisa.dossie_enviado); sem ele, o app pesquisa as fontes públicas. Devolve o documento (Word), os
-    eventos do calendário, os riscos (para o painel estadual), o registro de auditoria e os números do resumo.
+    eventos do calendário, os riscos (para o painel), o registro de auditoria e os números do resumo.
     Levanta ErroAnalise quando não há base para analisar."""
     progresso = progresso or (lambda _t: None)
     uso = modelo.novo_uso_do_fio()            # todas as chamadas desta secretaria registram aqui
@@ -198,18 +199,20 @@ def _gravar_resumo(saida, linhas, custo_estado):
     total = sum(l["custo_usd"] for l in linhas) + custo_estado
     (saida / "LEIA-ME.txt").write_text(
         "Resultados da análise das secretarias\n\n"
-        "- painel_estadual.docx: as urgências de todas as secretarias, com a mesma régua, num documento só.\n"
+        "- paineis/: o painel de urgências de cada secretaria (antes da posse, 72 horas, 100 dias e repercussão\n"
+        "  política alta), com a mesma régua para todas.\n"
         "- dossies/: o dossiê de cada secretaria, atualizado com o que ela informou (resumo e números-chave; contratos,\n"
         "  pessoal, passivos, orçamento e obras; o que a secretaria informou x o que as fontes mostram; cobertura do\n"
         "  checklist; fontes).\n"
         "- riscos/: o relatório de riscos de cada secretaria, em até 3 páginas (riscos com prazo, janela,\n"
         "  prioridade, sensibilidade política e revisão dos agentes; decisões em aberto; o que pedir).\n"
-        "- calendario_consolidado.xlsx: os vencimentos de todas as secretarias; a aba Prioridades vem primeiro.\n"
+        "- calendarios/: o calendário de vencimentos de cada secretaria em Excel; a aba Prioridades vem primeiro, e as\n"
+        "  datas só do SIGA ficam na aba \"A confirmar (SIGA)\".\n"
         "- resumo.csv: situação, números e custo de cada órgão.\n"
         "- auditoria/: o registro completo de cada análise em JSON (dossiê e conferências, revisões dos seis agentes,\n"
         "  objeções risco a risco, método, descartes, custo).\n\n"
         f"Órgãos concluídos: {sum(l['situacao'] == 'concluído' for l in linhas)} de {len(linhas)}. "
-        f"Custo estimado: US$ {total:.2f} (inclui US$ {custo_estado:.2f} da pesquisa sobre o Estado e do painel estadual).\n"
+        f"Custo estimado: US$ {total:.2f} (inclui US$ {custo_estado:.2f} da pesquisa sobre o Estado).\n"
         "Documentos gerados com apoio de IA, sem revisão da equipe: confira antes de usar.\n", encoding="utf-8")
 
 
@@ -263,10 +266,19 @@ def prontos(saida):
     return nomes
 
 
-def _gravar_calendario(saida, todos_eventos, todos_descartados, data_corte):
-    if todos_eventos:
-        (saida / "calendario_consolidado.xlsx").write_bytes(documentos.calendario_xlsx(
-            todos_eventos, todos_descartados, "Calendário consolidado de vencimentos críticos", data_corte))
+def _gravar_painel_e_calendario(saida, pasta, nome, riscos_orgao, situacao, eventos_orgao, descartados_orgao, cfg,
+                                linha, sobrescrever=True):
+    """O painel de urgências e o calendário da secretaria, montados por código (sem chamada ao modelo)."""
+    calendario = saida / "calendarios" / f"{pasta}_calendario.xlsx"
+    if eventos_orgao and (sobrescrever or not calendario.exists()):
+        calendario.write_bytes(documentos.calendario_xlsx(
+            eventos_orgao, [dict(d, orgao=d.get("orgao") or nome) for d in descartados_orgao or []],
+            f"Calendário de vencimentos críticos – {nome}", cfg["data_corte"]))
+    arquivo = saida / "paineis" / f"{pasta}_painel.docx"
+    if riscos_orgao and (sobrescrever or not arquivo.exists()):
+        doc, _ = painel.painel_estadual(riscos_orgao, [(nome, situacao)], eventos_orgao, cfg, linhas=[linha],
+                                        orgao=nome)
+        arquivo.write_bytes(doc)
 
 
 def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, paralelos=40, prazo_minutos=23 * 60,
@@ -278,7 +290,7 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
     analisado de novo: o lote reaproveita o resultado e só refaz o que faltou."""
     global JUNTAS
     saida = Path(saida)
-    for sub in ("dossies", "riscos", "auditoria"):
+    for sub in ("paineis", "dossies", "riscos", "calendarios", "auditoria"):
         (saida / sub).mkdir(parents=True, exist_ok=True)
     fila = None
     if economico:
@@ -315,6 +327,11 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                     todos_riscos[k], situacoes[k] = pronto["riscos"], (nome, pronto["situacao"])
                     linhas[k] = linha
                     _gravar_resumo(saida, [linhas[i] for i in sorted(linhas)], custo_estado)
+                try:                                       # se a pasta perdeu o painel ou o calendário, remonta
+                    _gravar_painel_e_calendario(saida, pasta, nome, pronto["riscos"], pronto["situacao"],
+                                                pronto["eventos"], pronto["descartados"], cfg, linha, sobrescrever=False)
+                except Exception as e:
+                    log(f"[{k}] painel/calendário não remontados: {type(e).__name__}: {e}"[:300])
                 log(f"[{k}/{len(orgaos)}] {nome}: já estava pronto nesta pasta, reaproveitado")
                 modelo.usar_completion(None)
                 return linha
@@ -346,6 +363,11 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                     eventos[k], descartados[k] = r["eventos"], r["descartados"]
                     todos_riscos[k], situacoes[k] = r["riscos"], (nome, r["situacao"])
                 gravar_resultado(saida, pasta, dict(linha, minutos=round((time.time() - inicio) / 60, 1)), r)
+                try:
+                    _gravar_painel_e_calendario(saida, pasta, nome, r["riscos"], r["situacao"], r["eventos"],
+                                                r["descartados"], cfg, linha)
+                except Exception as e:
+                    log(f"[{k}] painel/calendário não montados: {type(e).__name__}: {e}"[:300])
             except Exception as e:
                 linha["observacao"] = f"{type(e).__name__}: {e}"[:300]
                 custo, _ = modelo.custo_estimado(modelo.uso_do_fio())
@@ -356,8 +378,6 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
             with trava:
                 linhas[k] = linha
                 _gravar_resumo(saida, [linhas[i] for i in sorted(linhas)], custo_estado)
-                _gravar_calendario(saida, [e for i in sorted(eventos) for e in eventos[i]],
-                                   [d for i in sorted(descartados) for d in descartados[i]], cfg["data_corte"])
             log(f"[{k}/{len(orgaos)}] {nome} → {linha['situacao']}"
                 + (f": {linha['observacao']}" if linha["observacao"] else "")
                 + f" ({linha['minutos']} min, US$ {linha['custo_usd']:.2f})")
@@ -367,19 +387,6 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
         with ThreadPoolExecutor(max_workers=trabalhadores) as ex:
             resultado = list(ex.map(lambda par: um(*par), enumerate(orgaos, 1)))
 
-        riscos_lote = [r for k in sorted(todos_riscos) for r in todos_riscos[k]]
-        if riscos_lote:
-            log("Montando o painel estadual...")
-            modelo.novo_uso_do_fio()
-            try:
-                doc_painel, uso_painel = painel.painel_estadual(
-                    riscos_lote, [situacoes[k] for k in sorted(situacoes)],
-                    [e for k in sorted(eventos) for e in eventos[k]], cfg, linhas=[linhas[k] for k in sorted(linhas)])
-                (saida / "painel_estadual.docx").write_bytes(doc_painel)
-                custo_estado += modelo.custo_estimado(uso_painel)[0]
-                _gravar_resumo(saida, [linhas[k] for k in sorted(linhas)], custo_estado)
-            except Exception as e:
-                log(f"O painel estadual não pôde ser montado: {type(e).__name__}: {e}"[:300])
         return resultado
     finally:
         modelo.usar_completion(None)
