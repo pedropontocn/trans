@@ -523,3 +523,15 @@ def test_folha_da_seplag_entra_no_dossie_da_secretaria(llm):
     assert "| 145 | 0 | 145 (100,0%) | R$ 1,17 mi |" in r["dossie_md"]
     c9 = next(c for c in r["registro"]["checklist"] if c["id"] == "C9")
     assert c9["estado"] == "encontrado"
+
+
+def test_json_invalido_na_analise_e_pedido_de_novo_e_o_erro_diz_o_motivo(llm):
+    from transicao import analise
+    llm.analises_quebradas = 1                     # a primeira resposta vem quebrada; a segunda, certa
+    r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
+    assert r["riscos"] and any("pedindo só o JSON" in u["etapa"] for u in r["registro"]["uso_tokens"])
+    llm.analises_quebradas = 2                     # as duas quebradas: o erro diz o motivo e mostra o começo
+    import pytest
+    with pytest.raises(analise.ErroAnalise) as erro:
+        analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
+    assert "motivo de parada: stop / stop" in str(erro.value) and "Pregão" in str(erro.value)

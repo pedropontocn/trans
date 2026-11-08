@@ -178,15 +178,35 @@ def chamar_modelo(modelo, mensagens, max_tokens, ferramenta=None, etapa="", uso_
     return (msg.content or ""), argumentos, getattr(escolha, "finish_reason", None)
 
 
+_FALHAS = threading.local()
+
+
+def ultima_falha():
+    """O que a última chamada JSON sem resposta legível deste fio devolveu: (etapa, motivo de parada, início do
+    texto). Serve para a mensagem de erro dizer o que aconteceu, em vez de só "não devolveu"."""
+    return getattr(_FALHAS, "falha", None)
+
+
 def chamar_json(modelo, mensagens, max_tokens, etapa="", uso_lista=None, teto=32000):
-    """Chama o modelo e devolve o JSON da resposta. Se a resposta foi cortada pelo limite de tokens antes de fechar o
-    JSON (relatórios grandes geram listas longas), repete uma vez com o dobro do limite."""
+    """Chama o modelo e devolve o JSON da resposta. Se a resposta não trouxe JSON legível, repete uma vez: com o dobro
+    do limite, se foi cortada pelo limite de tokens; senão, mostrando ao modelo a resposta e pedindo só o JSON (aspas
+    sem escape, texto antes do JSON). Sem JSON nas duas, devolve None e guarda o motivo em ultima_falha()."""
     texto, _, motivo = chamar_modelo(modelo, mensagens, max_tokens, etapa=etapa, uso_lista=uso_lista)
     dados = extrair_json(texto)
-    if dados is None and motivo == "length" and max_tokens < teto:
-        texto, _, motivo = chamar_modelo(modelo, mensagens, min(teto, max_tokens * 2),
-                                         etapa=f"{etapa} (de novo, com mais espaço)", uso_lista=uso_lista)
-        dados = extrair_json(texto)
+    if dados is None:
+        if motivo == "length" and max_tokens < teto:
+            texto2, _, motivo2 = chamar_modelo(modelo, mensagens, min(teto, max_tokens * 2),
+                                               etapa=f"{etapa} (de novo, com mais espaço)", uso_lista=uso_lista)
+        else:
+            pedido = mensagens + [{"role": "assistant", "content": (texto or "(resposta vazia)")[:60000]},
+                                  {"role": "user", "content": "A resposta acima não é um JSON válido. Responda de novo, "
+                                   "SOMENTE com o JSON pedido, entre [INÍCIO DO JSON] e [FIM DO JSON], com as aspas "
+                                   "internas dos textos escapadas."}]
+            texto2, _, motivo2 = chamar_modelo(modelo, pedido, min(teto, max(max_tokens, 8000)),
+                                               etapa=f"{etapa} (de novo, pedindo só o JSON)", uso_lista=uso_lista)
+        dados = extrair_json(texto2)
+        if dados is None:
+            _FALHAS.falha = (etapa, f"{motivo} / {motivo2}", re.sub(r"\s+", " ", (texto2 or texto or ""))[:160])
     return dados
 
 
