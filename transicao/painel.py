@@ -1,5 +1,6 @@
 """Painel estadual: todas as decisões com prazo antes da posse, nas primeiras 72 horas e nos primeiros 100 dias, e
-todas as de repercussão política alta, de todas as secretarias, em ordem de prazo.
+todas as de repercussão política alta, de todas as secretarias, em ordem de prazo; e os serviços essenciais que podem
+parar até o fim dos 100 dias (contratos do SIGA/PNCP, por código).
 
 Quase tudo é calculado por código a partir dos riscos de cada secretaria (janela pela data-limite contada da posse,
 prioridade, ordem). O modelo entra uma vez, para apontar os temas que se repetem entre secretarias; o código confere
@@ -9,6 +10,7 @@ from datetime import date
 
 from . import documentos
 from .modelo import chamar_json
+from .produtos import _mi
 
 PROMPT_TEMAS = """Você lê os riscos da transição de várias secretarias do Estado do Rio de Janeiro, já ordenados por
 prioridade, e aponta os TEMAS TRANSVERSAIS: problemas que se repetem em várias secretarias ou que dependem de uma
@@ -71,6 +73,46 @@ CABECALHO = ["| Agir até | Secretaria | Decisão a tomar (risco) | Quem decide 
              "|---|---|---|---|---|---|---|"]
 
 
+def markdown_apagao(eventos, limite_lista=25):
+    """Serviços essenciais que podem parar: contratos da planilha do SIGA/PNCP de serviço essencial que vencem até o fim
+    dos 100 dias, por secretaria e janela (quantos e quanto), e a lista dos de prioridade máxima. Tudo por código."""
+    from datetime import timedelta
+    from .riscos import POSSE, horizonte
+    limite = POSSE + timedelta(days=99)
+    ess = [e for e in eventos or [] if e.get("origem", "").startswith("Contratos") and e.get("essencial")
+           and e["data"] <= limite and e["dias"] >= -30]
+    if not ess:
+        return []
+    janelas = ["Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias"]
+    jan = lambda e: horizonte(e.get("agir_ate") or e["data"])
+    total = sum(e.get("valor") or 0 for e in ess)
+    md = [f"## Serviços essenciais que podem parar até {limite:%d/%m/%Y}",
+          f"{len(ess)} contrato(s) de serviço essencial (saúde, alimentação, custódia, vigilância, combustível, sistemas "
+          f"e outros) vencem até o fim dos 100 dias, somando {_mi(total)}, pela planilha do SIGA/PNCP. A janela é a da "
+          "data-limite para agir (30 dias antes do fim). O SIGA nem sempre registra os aditivos de prazo: cada contrato "
+          "precisa ser confirmado no PNCP ou no DOERJ. A lista completa, um a um, está no calendário (filtre Janela).",
+          "| Secretaria | " + " | ".join(janelas) + " | Total |", "|---|" + "---|" * (len(janelas) + 1)]
+    por_sec = {}
+    for e in ess:
+        por_sec.setdefault(_sigla(e["orgao"]), []).append(e)
+    for sec, lista in sorted(por_sec.items(), key=lambda x: -sum(e.get("valor") or 0 for e in x[1])):
+        celulas = []
+        for j in janelas:
+            da_janela = [e for e in lista if jan(e) == j]
+            celulas.append(f"{len(da_janela)} ({_mi(sum(e.get('valor') or 0 for e in da_janela))})" if da_janela else "–")
+        md.append(f"| {sec} | " + " | ".join(celulas) + f" | {len(lista)} ({_mi(sum(e.get('valor') or 0 for e in lista))}) |")
+    maximas = sorted([e for e in ess if e.get("prioridade") == "Máxima"], key=lambda e: (e.get("agir_ate") or e["data"]))
+    if maximas:
+        md += [f"**Prioridade máxima ({len(maximas)})**" + (f", os {limite_lista} primeiros por data:" if len(maximas) > limite_lista else ":"),
+               "| Agir até | Secretaria | Contrato e objeto | Fornecedor | Valor | Fim |", "|---|---|---|---|---|---|"]
+        for e in maximas[:limite_lista]:
+            agir = f"{e['agir_ate']:%d/%m/%Y}" if e.get("agir_ate") else "–"
+            md.append(f"| {agir} | {_sigla(e['orgao'])} | {documentos._curto(e.get('contratacao') or e['evento'], 20)}: "
+                      f"{documentos._curto(e.get('objeto'), 70)} | {documentos._curto(e.get('fornecedor'), 30)} | "
+                      f"{e.get('valor_texto') or _mi(e.get('valor') or 0)} | {e['data']:%d/%m/%Y} |")
+    return md
+
+
 def markdown_painel(riscos, situacoes, eventos, temas, data_corte, linhas=None):
     """O painel estadual: todas as demandas que vencem antes da posse, nas primeiras 72 horas e nos primeiros 100 dias,
     e todas as de sensibilidade política alta, de todas as secretarias, na mesma régua. Montado por código."""
@@ -107,6 +149,8 @@ def markdown_painel(riscos, situacoes, eventos, temas, data_corte, linhas=None):
     if sensiveis_fora:
         md += ["## Repercussão política alta, com prazo depois dos 100 dias ou sem prazo"] + CABECALHO
         md += [_linha_demanda(r) for r in sensiveis_fora]
+
+    md += markdown_apagao(eventos)
 
     if temas:
         md.append("## Temas que se repetem entre secretarias")

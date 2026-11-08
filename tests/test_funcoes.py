@@ -709,3 +709,24 @@ def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
     assert [i["id"] for i in d["itens"]] == ["O1", "O2"] and d["itens"][0]["checagem"] == "conferido"
     c9 = next(c for c in funcoes.conferir({}, d, "", []) if c["id"] == "C9")
     assert c9["estado"] == "encontrado" and c9["fatos"] == ["O1", "O2"] and c9["firmeza"] == "confirmado em fonte oficial"
+
+
+def test_painel_mostra_servicos_essenciais_que_podem_parar(funcoes):
+    from datetime import date
+    base = {"origem": "Contratos do Estado (SIGA/PNCP)", "dias": 30, "valor_texto": "", "evento": "Fim do contrato"}
+    eventos = [dict(base, orgao="Secretaria de Saúde - SES", essencial=True, data=date(2026, 12, 20),
+                    agir_ate=date(2026, 11, 20), valor=2_000_000.0, prioridade="Máxima", contratacao="2026000001",
+                    objeto="Aquisição de medicamentos", fornecedor="FARMA LTDA"),
+               dict(base, orgao="Secretaria de Saúde - SES", essencial=True, data=date(2027, 3, 1),
+                    agir_ate=date(2027, 1, 30), valor=1_000_000.0, prioridade="Alta", contratacao="2026000002",
+                    objeto="Alimentação hospitalar", fornecedor="NUTRI"),
+               dict(base, orgao="Secretaria de Saúde - SES", essencial=True, data=date(2027, 5, 1),     # depois dos 100 dias
+                    agir_ate=date(2027, 4, 1), valor=9_000_000.0, prioridade="Alta", objeto="Oxigênio"),
+               dict(base, orgao="Secretaria de Turismo - SETUR", essencial=False, data=date(2026, 12, 1),  # não essencial
+                    agir_ate=date(2026, 11, 1), valor=5_000_000.0, prioridade="Alta", objeto="Eventos")]
+    md = "\n".join(funcoes.markdown_apagao(eventos))
+    assert md.startswith("## Serviços essenciais que podem parar até 10/04/2027")
+    assert "2 contrato(s) de serviço essencial" in md and "SETUR" not in md and "Oxigênio" not in md
+    assert "| SES | 1 (R$ 2,0 mi) | – | 1 (R$ 1,0 mi) | 2 (R$ 3,0 mi) |" in md
+    assert "**Prioridade máxima (1)**" in md and "| 20/11/2026 | SES | 2026000001: Aquisição de medicamentos | FARMA LTDA |" in md
+    assert funcoes.markdown_apagao([]) == []
