@@ -517,7 +517,7 @@ def test_folha_da_seplag_entra_no_dossie_da_secretaria(llm):
     r = analise.analisar_orgao("Secretaria de Estado das Cidades - SECID", RELATORIO, CFG)
     itens = [i for i in r["registro"]["dossie"]["itens"] if i["fonte"].startswith("Caderno de RH")]
     assert len(itens) == 2 and all(i["url"].startswith("https://www.rj.gov.br/gesperj/") for i in itens)
-    assert "| 145 | 0 | 145 (100,0%) | R$ 1,17 mi |" in r["dossie_md"]
+    assert "| 113 | 0 | 113 (100,0%) | R$ 0,92 mi |" in r["dossie_md"]
     c9 = next(c for c in r["registro"]["checklist"] if c["id"] == "C9")
     assert c9["estado"] == "encontrado"
 

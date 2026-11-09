@@ -1,4 +1,4 @@
-"""Folha de pessoal por órgão, do Caderno de RH da SEPLAG (base embutida em bases_embutidas/folha_rh_AAAA-MM.csv,
+"""Folha de pessoal por órgão, do Caderno de RH da SEPLAG (bases embutidas em bases_embutidas/folha_rh_AAAA-MM.csv,
 gerada por scripts/caderno_rh.py). Entra no dossiê de cada secretaria como dado oficial, por código: vínculos ativos,
 dispêndio do mês, remuneração média e quantos são servidores efetivos. O que não é efetivo (cargo em comissão,
 temporário, requisitado e outros) é o que sai ou pode sair na troca de governo: é a medida do risco de apagão."""
@@ -14,18 +14,34 @@ MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "a
 
 
 @lru_cache(maxsize=4)
-def _base(pasta):
-    arquivos = sorted(Path(pasta).glob("folha_rh_*.csv"))
-    if not arquivos:
-        return {}
-    with open(arquivos[-1], encoding="utf-8") as f:                 # a competência mais recente
-        return {l["sigla"].upper(): l for l in csv.DictReader(f)}
+def _bases(pasta):
+    """As competências embutidas, da mais recente para a mais antiga: [(competência, {sigla: linha})]."""
+    saida = []
+    for arquivo in sorted(Path(pasta).glob("folha_rh_*.csv"), reverse=True):
+        with open(arquivo, encoding="utf-8") as f:
+            linhas = {l["sigla"].upper(): l for l in csv.DictReader(f)}
+        if linhas:
+            saida.append((next(iter(linhas.values()))["competencia"], linhas))
+    return saida
 
 
 def linha(sigla, pasta=None):
-    """A linha da folha do órgão, ou None."""
+    """A linha da folha do órgão no Caderno mais recente em que ele aparece, ou None. Órgão que saiu do Caderno mais
+    recente (extinto, fundido ou renomeado) fica com o último Caderno em que apareceu; nunca se liga sigla a outra."""
     sigla = (sigla or "").strip().upper()
-    return _base(str(pasta or os.getenv("PASTA_BASES") or PASTA_BASES)).get(APELIDOS.get(sigla, sigla))
+    sigla = APELIDOS.get(sigla, sigla)
+    bases = _bases(str(pasta or os.getenv("PASTA_BASES") or PASTA_BASES))
+    for competencia, linhas in bases:
+        if sigla in linhas:
+            l = dict(linhas[sigla])
+            l["fora_do_mais_recente"] = bases[0][0] if competencia != bases[0][0] else ""
+            return l
+    return None
+
+
+def _extenso(competencia):
+    ano, mes = competencia.split("-")
+    return f"{MESES[int(mes) - 1]} de {ano}"
 
 
 def _reais(v):
@@ -38,8 +54,7 @@ def _int(v):
 
 
 def competencia_extenso(l):
-    ano, mes = l["competencia"].split("-")
-    return f"{MESES[int(mes) - 1]} de {ano}"
+    return _extenso(l["competencia"])
 
 
 def itens(sigla, pasta=None):
@@ -64,6 +79,9 @@ def itens(sigla, pasta=None):
         fatos.append(f"{nome} não aparece na tabela de servidores efetivos por órgão do Caderno de RH de {quando}: "
                      f"nenhum dos {_int(l['vinculos_ativos'])} vínculos ativos é de servidor efetivo/concursado; todos são "
                      "cargos em comissão, temporários, requisitados ou de outro vínculo não efetivo.")
+    if l["fora_do_mais_recente"]:
+        fatos.append(f"{nome} não aparece no Caderno de RH de {_extenso(l['fora_do_mais_recente'])}, o mais recente; "
+                     f"os números acima são os do último Caderno em que aparece, de {quando}.")
     return [dict(base, afirmacao=f) for f in fatos]
 
 
@@ -76,4 +94,5 @@ def quadro(sigla, pasta=None):
             "efetivos": _int(l["efetivos"]), "nao_efetivos": _int(l["nao_efetivos"]),
             "pct_nao_efetivos": f"{l['pct_nao_efetivos'].replace('.', ',')}%",
             "folha_mes": f"R$ {l['dispendio_mes_mi'].replace('.', ',')} mi",
-            "remuneracao_media": _reais(l["remuneracao_media"]), "pct": float(l["pct_nao_efetivos"] or 0)}
+            "remuneracao_media": _reais(l["remuneracao_media"]), "pct": float(l["pct_nao_efetivos"] or 0),
+            "fora_do_mais_recente": _extenso(l["fora_do_mais_recente"]) if l["fora_do_mais_recente"] else ""}
