@@ -5,8 +5,10 @@ Dados oficiais que o app usa sozinho, por código, sem passar pelo modelo.
 - `folha_rh_AAAA-MM.csv`: folha de pessoal por órgão, do **Caderno de RH** mensal da SEPLAG
   (https://www.rj.gov.br/gesperj/). Por sigla: vínculos ativos, dispêndio do mês, remuneração média, servidores
   efetivos (com idade e tempo de exercício médios) e os não efetivos (cargo em comissão, temporário, requisitado e
-  outros). Órgão que não aparece na tabela de efetivos do Caderno não tem servidor efetivo lotado. O app usa o arquivo
-  mais recente.
+  outros). Órgão que não aparece na tabela de efetivos do Caderno não tem servidor efetivo lotado. Para cada órgão, o
+  app usa o Caderno mais recente em que ele aparece. Hoje: setembro de 2026 e março de 2026. Os órgãos que saíram na
+  reforma administrativa de 2026 (SEAP, SECTI, SEDEICS, SEDIPAF, SEENEMAR, SEIJES e SEM) ficam com março, e o texto
+  diz que eles não aparecem no Caderno de setembro. O app nunca liga uma sigla antiga a uma nova por conta própria.
 
 Para atualizar a folha, baixe o Caderno do mês e rode:
 

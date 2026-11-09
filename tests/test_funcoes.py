@@ -692,18 +692,26 @@ def test_pacote_embutido_no_repositorio_cobre_as_31_secretarias(funcoes):
 
 
 def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
-    # base embutida do repositório (Caderno de RH de março de 2026)
+    # bases embutidas do repositório (Cadernos de RH de março e de setembro de 2026): vale o mais recente
     secid = funcoes.itens("SECID")
     assert len(secid) == 2 and all(i["bloco"] == "pessoal" and i["tipo_fonte"] == "dado_oficial" for i in secid)
-    assert "145 vínculos ativos" in secid[0]["afirmacao"] and "R$ 1,17 milhões" in secid[0]["afirmacao"]
-    assert "nenhum dos 145 vínculos ativos é de servidor efetivo" in secid[1]["afirmacao"]
+    assert "Em setembro de 2026, SECID tinha 113 vínculos ativos" in secid[0]["afirmacao"]
+    assert "R$ 0,92 milhões" in secid[0]["afirmacao"] and secid[0]["fonte"].endswith("setembro de 2026")
+    assert "nenhum dos 113 vínculos ativos é de servidor efetivo" in secid[1]["afirmacao"]
     sefaz = funcoes.itens("SEFAZ")[1]["afirmacao"]
-    assert "983 são de servidores efetivos" in sefaz and "509 (34,1%)" in sefaz
-    assert funcoes.quadro("SEAPA")["efetivos"] == "157"                      # SEAPA no dossiê, SEAPPA no Caderno
+    assert "1.002 são de servidores efetivos" in sefaz and "497 (33,2%)" in sefaz
+    assert funcoes.quadro("SEAPA")["efetivos"] == "155"                      # SEAPA no dossiê, SEAPPA no Caderno
+    # órgão que saiu do Caderno mais recente (reforma de 2026): fica com o último em que aparece, e o texto diz
+    seap = funcoes.itens("SEAP")
+    assert "Em março de 2026, SEAP tinha 5.810 vínculos ativos" in seap[0]["afirmacao"]
+    assert "não aparece no Caderno de RH de setembro de 2026, o mais recente" in seap[-1]["afirmacao"]
+    md_seap = funcoes.markdown_capitulos({"secoes": []}, None, None, funcoes.quadro("SEAP"))
+    assert "Caderno de RH, SEPLAG, março de 2026" in md_seap and "os números são os de março de 2026" in md_seap
     assert funcoes.itens("NAOEXISTE") == [] and funcoes.quadro("") is None
     q = funcoes.quadro("SECID")
     md = funcoes.markdown_capitulos({"secoes": []}, None, None, q)
-    assert "| 145 | 0 | 145 (100,0%) | R$ 1,17 mi | R$ 8.082,93 |" in md and "pode sair na troca de governo" in md
+    assert "| 113 | 0 | 113 (100,0%) | R$ 0,92 mi | R$ 8.113,29 |" in md and "pode sair na troca de governo" in md
+    assert "o mais recente" not in md
     assert md.index("## 5. Pessoal") < md.index("**Folha de pessoal**") < md.index("## 6. Orçamento")
     # no dossiê: id novo, conferido, firmeza de fonte oficial; o checklist C9 sai por código
     d = {"itens": [], "origem": "arquivo", "nao_encontrado": []}
