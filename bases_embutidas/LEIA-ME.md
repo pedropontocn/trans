@@ -14,3 +14,12 @@ Para atualizar a folha, baixe o Caderno do mês e rode:
 
 Limites do Caderno: não cruza órgão com tipo de vínculo (o não efetivo junta comissionados, temporários e
 requisitados) e não cobre PGE, DPGE e Cehab. A pasta pode ser trocada pela variável `PASTA_BASES`.
+
+## Contexto do Estado (`contexto_estado.json`)
+
+A pesquisa do contexto do Estado (situação fiscal, orçamento, órgãos de controle, prioridades do governo eleito) que
+serve a todas as secretarias. O app usa esta, sem custo, em vez de pesquisar a cada rodada. A atual foi pesquisada
+pelo próprio app em 08/11/2026, com os links conferidos por código.
+
+Para atualizar: rode uma análise com "Pesquisar de novo o contexto do Estado" marcado. O `.zip` sai com um
+`contexto_estado.json` novo; troque o arquivo desta pasta por ele. `ESTADO_EMBUTIDO=0` nos Secrets desliga o uso.
