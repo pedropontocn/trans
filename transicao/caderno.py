@@ -71,11 +71,26 @@ def _palavras_chave(texto):
     return {p for p in re.findall(r"[a-z0-9]+", _norm(texto)) if p not in vazias and len(p) > 2}
 
 
-def unidades_da_secretaria(nome, loa, nome_por_extenso=""):
-    """As unidades orçamentárias da secretaria e das vinculadas: a unidade cujo nome mais se parece com o da
-    secretaria, e todas as do mesmo órgão (os dois primeiros dígitos do código). Devolve (lista, unidade principal)."""
+def _unidade_da_sigla(sigla):
+    """A unidade principal da sigla na tabela conferida (bases_embutidas/siglas_2026.json), ou None."""
+    from .folha import APELIDOS, PASTA_BASES
+    try:
+        tabela = json.loads((Path(os.getenv("PASTA_BASES") or PASTA_BASES) / "siglas_2026.json")
+                            .read_text(encoding="utf-8")).get("unidades", {})
+    except (OSError, ValueError):
+        return None
+    sigla = (sigla or "").strip().upper()
+    return tabela.get(sigla) or tabela.get(APELIDOS.get(sigla, ""))
+
+
+def unidades_da_secretaria(nome, loa, nome_por_extenso="", sigla=""):
+    """As unidades orçamentárias da secretaria e das vinculadas: a unidade principal (pela sigla, na tabela conferida;
+    sem ela, a de nome mais parecido com o da secretaria) e todas as do mesmo órgão (os dois primeiros dígitos do
+    código). Devolve (lista, unidade principal)."""
     if not loa:
         return [], None
+    if (uo := _unidade_da_sigla(sigla)) and uo in loa["uos"]:
+        return sorted(u for u in loa["uos"] if u[:2] == uo[:2]), uo
     alvo = _palavras_chave(nome_por_extenso) | _palavras_chave(nome)
     melhor, nota = None, 0.0
     for uo, d in loa["uos"].items():
@@ -703,7 +718,7 @@ def gerar(nome, sigla, manifesto, riscos, eventos, cfg, folha_q=None, nome_por_e
     if not fichas:
         return {"situacao": "não gerado", "motivo": "nenhum Relatório de Transição (modelo v2) em PDF com a seção 3",
                 "uso": uso, "auditoria": auditoria}
-    uos, principal = unidades_da_secretaria(nome, loa, nome_por_extenso)
+    uos, principal = unidades_da_secretaria(nome, loa, nome_por_extenso, sigla)
     if not uos:
         return {"situacao": "não gerado", "motivo": "a secretaria não foi encontrada na LOA 2026", "uso": uso,
                 "auditoria": auditoria}

@@ -691,7 +691,7 @@ def test_pacote_embutido_no_repositorio_cobre_as_31_secretarias(funcoes):
     assert "SIGA" not in textos["pesquisa"][:2000] and "contratacao;" not in textos["pesquisa"]
 
 
-def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
+def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes, tmp_path_factory):
     # bases embutidas do repositório (Cadernos de RH de março e de setembro de 2026): vale o mais recente
     secid = funcoes.itens("SECID")
     assert len(secid) == 2 and all(i["bloco"] == "pessoal" and i["tipo_fonte"] == "dado_oficial" for i in secid)
@@ -703,20 +703,34 @@ def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
     assert funcoes.quadro("SEAPA")["efetivos"] == "155"                      # SEAPA no dossiê, SEAPPA no Caderno
     # vale o nome mais atualizado: quem saiu na reforma de 2026 e tem sucessora usa a sucessora, e o texto diz
     seap = funcoes.itens("SEAP")
-    assert seap[0]["tipo_fonte"] == "imprensa" and seap[0]["url"].startswith("https://diariodorio.com/")
+    assert seap[0]["tipo_fonte"] == "documento_oficial" and "PLOA" in seap[0]["fonte"]     # confirmada na PLOA 2027
     assert "SEAP passou a se chamar Secretaria de Estado de Polícia Penal" in seap[0]["afirmacao"]
+    assert "a unidade 25010 é a Secretaria de Estado de Polícia Penal" in seap[0]["afirmacao"]
+    secti = funcoes.itens("SECTI")
+    assert secti[0]["tipo_fonte"] == "imprensa" and secti[0]["url"].startswith("https://www.correiodamanha")
     assert "Em setembro de 2026, SEPPENRJ tinha 5.857 vínculos ativos" in seap[1]["afirmacao"]
     assert seap[1]["tipo_fonte"] == "dado_oficial"
     md_seap = funcoes.markdown_capitulos({"secoes": []}, None, None, funcoes.quadro("SEAP"))
     assert "| 5.857 |" in md_seap and "os números são de toda a SEPPENRJ" in md_seap
     assert funcoes.quadro("SECTI")["sigla"] == funcoes.quadro("SEENEMAR")["sigla"] == "SEDES"
     assert "1 é de servidor efetivo/concursado" in funcoes.itens("SEIJES")[2]["afirmacao"]
+    assert funcoes.quadro("SEM")["sigla"] == "SEMPI"
     # sem sucessora conhecida: fica com o último Caderno em que aparece, e o texto diz
-    sem = funcoes.itens("SEM")
-    assert "Em março de 2026, SEM tinha 125 vínculos ativos" in sem[0]["afirmacao"]
-    assert "não aparece no Caderno de RH de setembro de 2026, o mais recente" in sem[-1]["afirmacao"]
-    md_sem = funcoes.markdown_capitulos({"secoes": []}, None, None, funcoes.quadro("SEM"))
-    assert "Caderno de RH, SEPLAG, março de 2026" in md_sem and "os números são os de março de 2026" in md_sem
+    import csv
+    pasta = tmp_path_factory.mktemp("bases")
+    for comp, linhas in (("2026-03", [("SEX", "10")]), ("2026-09", [("SEY", "20")])):
+        with open(pasta / f"folha_rh_{comp}.csv", "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["competencia", "url", "sigla", "administracao", "vinculos_ativos", "dispendio_mes_mi",
+                        "remuneracao_media", "efetivos", "efetivos_na_tabela_8", "idade_media_efetivos",
+                        "tempo_exercicio_medio_efetivos", "nao_efetivos", "pct_nao_efetivos"])
+            for s, v in linhas:
+                w.writerow([comp, "https://x", s, "direta", v, "1", "1000", "0", "não", "", "", v, "100.0"])
+    sex = funcoes.itens("SEX", pasta)
+    assert "Em março de 2026, SEX tinha 10 vínculos ativos" in sex[0]["afirmacao"]
+    assert "não aparece no Caderno de RH de setembro de 2026, o mais recente" in sex[-1]["afirmacao"]
+    md_sex = funcoes.markdown_capitulos({"secoes": []}, None, None, funcoes.quadro("SEX", pasta))
+    assert "Caderno de RH, SEPLAG, março de 2026" in md_sex and "os números são os de março de 2026" in md_sex
     assert funcoes.itens("NAOEXISTE") == [] and funcoes.quadro("") is None
     q = funcoes.quadro("SECID")
     md = funcoes.markdown_capitulos({"secoes": []}, None, None, q)
