@@ -701,12 +701,22 @@ def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
     sefaz = funcoes.itens("SEFAZ")[1]["afirmacao"]
     assert "1.002 são de servidores efetivos" in sefaz and "497 (33,2%)" in sefaz
     assert funcoes.quadro("SEAPA")["efetivos"] == "155"                      # SEAPA no dossiê, SEAPPA no Caderno
-    # órgão que saiu do Caderno mais recente (reforma de 2026): fica com o último em que aparece, e o texto diz
+    # vale o nome mais atualizado: quem saiu na reforma de 2026 e tem sucessora usa a sucessora, e o texto diz
     seap = funcoes.itens("SEAP")
-    assert "Em março de 2026, SEAP tinha 5.810 vínculos ativos" in seap[0]["afirmacao"]
-    assert "não aparece no Caderno de RH de setembro de 2026, o mais recente" in seap[-1]["afirmacao"]
+    assert seap[0]["tipo_fonte"] == "imprensa" and seap[0]["url"].startswith("https://diariodorio.com/")
+    assert "SEAP passou a se chamar Secretaria de Estado de Polícia Penal" in seap[0]["afirmacao"]
+    assert "Em setembro de 2026, SEPPENRJ tinha 5.857 vínculos ativos" in seap[1]["afirmacao"]
+    assert seap[1]["tipo_fonte"] == "dado_oficial"
     md_seap = funcoes.markdown_capitulos({"secoes": []}, None, None, funcoes.quadro("SEAP"))
-    assert "Caderno de RH, SEPLAG, março de 2026" in md_seap and "os números são os de março de 2026" in md_seap
+    assert "| 5.857 |" in md_seap and "os números são de toda a SEPPENRJ" in md_seap
+    assert funcoes.quadro("SECTI")["sigla"] == funcoes.quadro("SEENEMAR")["sigla"] == "SEDES"
+    assert "1 é de servidor efetivo/concursado" in funcoes.itens("SEIJES")[2]["afirmacao"]
+    # sem sucessora conhecida: fica com o último Caderno em que aparece, e o texto diz
+    sem = funcoes.itens("SEM")
+    assert "Em março de 2026, SEM tinha 125 vínculos ativos" in sem[0]["afirmacao"]
+    assert "não aparece no Caderno de RH de setembro de 2026, o mais recente" in sem[-1]["afirmacao"]
+    md_sem = funcoes.markdown_capitulos({"secoes": []}, None, None, funcoes.quadro("SEM"))
+    assert "Caderno de RH, SEPLAG, março de 2026" in md_sem and "os números são os de março de 2026" in md_sem
     assert funcoes.itens("NAOEXISTE") == [] and funcoes.quadro("") is None
     q = funcoes.quadro("SECID")
     md = funcoes.markdown_capitulos({"secoes": []}, None, None, q)

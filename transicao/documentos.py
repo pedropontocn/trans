@@ -1028,6 +1028,8 @@ def _quadro_folha(q):
         f"| {q['vinculos']} | {q['efetivos']} | {q['nao_efetivos']} ({q['pct_nao_efetivos']}) | {q['folha_mes']} | {q['remuneracao_media']} |"]
         + ([f"_{q['pct_nao_efetivos']} dos vínculos não são de servidor efetivo: é a parte da equipe que pode sair na troca "
             "de governo._"] if q["pct"] >= 50 else [])
+        + ([f"_{q['sucessao']['antiga']} {q['sucessao']['como']} ([fonte]({q['sucessao']['fonte']})); os números são de "
+            f"toda a {q['sigla']}, como aparece no Caderno de RH de {q['competencia']}._"] if q.get("sucessao") else [])
         + ([f"_O órgão não aparece no Caderno de RH de {q['fora_do_mais_recente']}, o mais recente; os números são os de "
             f"{q['competencia']}._"] if q.get("fora_do_mais_recente") else []))
 
