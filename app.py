@@ -40,7 +40,7 @@ def _recarregar_se_mudou():
     if rodando:
         return
     ordem = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist",
-             "riscos", "documentos", "painel", "lote_api", "analise"]
+             "riscos", "revisao", "documentos", "painel", "lote_api", "analise"]
     for nome in ordem + sorted(n.split(".", 1)[1] for n in list(sys.modules) if n.startswith("transicao.")
                               and n.split(".", 1)[1] not in ordem):
         modulo = sys.modules.get(f"transicao.{nome}")
@@ -203,9 +203,9 @@ def linhas(trabalho):
 
 st.set_page_config(page_title="Análise da Transição", page_icon="🏛️", layout="wide")
 st.title("🏛️ Análise da Transição")
-st.caption("Cinco produtos por secretaria: o painel de urgências; o dossiê atualizado com o que ela informou; "
-           "o relatório de riscos; o calendário de vencimentos em Excel; e a auditoria. "
-           "Expõe riscos e escolhas para quem decide: não recomenda.")
+st.caption("Por secretaria: o dossiê atualizado com o que ela informou; o relatório de riscos; o calendário de "
+           "vencimentos em Excel; os dados do painel (JSON, para o painel unificado); e a auditoria. "
+           "Analisa riscos e pontos de decisão: não recomenda, não sugere caminho nem responsável.")
 
 
 def _senha_do_app():
@@ -313,7 +313,7 @@ def andamento():
         ok = sum(l.get("situacao") == "concluído" for l in feitas)
         custo = sum(float(l.get("custo_usd") or 0) for l in feitas)
         st.success(f"✅ Pronto em {minutos:.0f} min: {ok} de {t['total']} secretaria(s). "
-                   f"Custo estimado: US$ {custo:.2f}".replace(".", ",") + " (mais a pesquisa do Estado e o painel; ver LEIA-ME).")
+                   f"Custo estimado: US$ {custo:.2f}".replace(".", ",") + " (mais a pesquisa do Estado; ver LEIA-ME).")
     else:
         st.error(f"A análise parou: {t['erro']}")
     if feitas:

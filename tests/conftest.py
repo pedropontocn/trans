@@ -123,11 +123,23 @@ class LLMFalso:
                  "item": "", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
                 {"texto": "A Secretaria tem 40 subsecretarias.", "origem": "relatorio", "item": "",
                  "trecho": "a Secretaria tem 40 subsecretarias"}]},
-            {"titulo": "Estrutura e dirigentes", "itens": [
+            {"titulo": "Como se organiza", "itens": [
                 {"texto": "Item que não existe.", "origem": "dossie", "item": "O999", "trecho": ""},
                 {"texto": "O TCE-RJ apontou atraso na prestação de contas de convênios.", "origem": "dossie",
                  "item": "O4", "trecho": ""}],
              "leitura": "A secretaria tem pendências de controle.", "nao_se_sabe": ["Organograma atualizado"]}],
+            "panorama": ["A Secretaria de Exemplo cuida de obras e tem 40 subsecretarias."],
+            "organograma": [
+                {"unidade": "Gabinete do Secretário", "sigla": "GAB", "subordinada_a": "", "titular": "",
+                 "origem": "relatorio", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+                {"unidade": "Subsecretaria de Obras", "sigla": "SUBOB", "subordinada_a": "Gabinete do Secretário",
+                 "titular": "vago", "origem": "relatorio", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+                {"unidade": "Superintendência de Projetos", "sigla": "", "subordinada_a": "Subsecretaria de Obras",
+                 "titular": "", "origem": "relatorio", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+                {"unidade": "Subsecretaria Inventada", "subordinada_a": "Gabinete do Secretário",
+                 "origem": "relatorio", "trecho": "frase que não existe no relatório"},
+                {"unidade": "EMOP", "sigla": "EMOP", "subordinada_a": "", "vinculada": True, "origem": "dossie",
+                 "item": "O1"}],
             "indicadores": [
                 {"nome": "LOA 2026", "valor": "R$ 412 mi", "origem": "dossie", "item": "O1", "trecho": ""},
                 {"nome": "Empenhado", "valor": "R$ 398,75 mi", "origem": "relatorio", "item": "",
@@ -187,9 +199,10 @@ class LLMFalso:
                              "decisoes_desequilibradas": [],
                              "trade_offs": [{"id": "T1", "equilibrio": "pende_para_a", "motivo": "o polo A tem o dobro do espaço"}],
                              "recomendacoes_implicitas": [
-                                 {"trecho": "Retomar as licitações agora ou esperar", "por_que": "soa como ordem"},
+                                 {"trecho": "Retomar ou cancelar", "por_que": "lista caminhos"},
                                  {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
         self.falhar_neutralidade = False
+        self.revisao_texto = {"textos": {"R1.decisao": "Destino das licitações adiadas."}}
         self.modelos_que_falham = set()           # modelos (nomes) que respondem como fora do ar
         self.analises_quebradas = 0               # quantas respostas da análise de riscos vêm com JSON inválido
         self.checklist = {"respostas": [
@@ -235,10 +248,10 @@ class LLMFalso:
         if "Você confronta o que um órgão declarou" in contexto:
             self.mensagem_confronto = ultimo
             return self._resp(json.dumps(self.confronto))
-        if "Você escreve o DIAGNÓSTICO" in contexto:
+        if "Você escreve o DOSSIÊ de uma secretaria" in contexto:
             self.mensagem_diagnostico_orgao = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.diagnostico_orgao) + "[FIM DO JSON]")
-        if "Você lista os CONTRATOS CRÍTICOS" in contexto:
+        if "Você lista os PRINCIPAIS CONTRATOS" in contexto:
             self.mensagem_contratos = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.contratos_criticos) + "[FIM DO JSON]")
         if "Você responde ao CHECKLIST obrigatório" in contexto:
@@ -297,6 +310,10 @@ class LLMFalso:
         if "TEMAS TRANSVERSAIS" in sistema:
             self.pedido_temas = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.temas) + "[FIM DO JSON]")
+        if "Você revisa o TEXTO de um relatório" in sistema:
+            if self.revisao_texto is None:
+                return self._resp("sem JSON")
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.revisao_texto) + "[FIM DO JSON]")
         if "revisor de neutralidade" in sistema:
             if self.falhar_neutralidade:
                 raise RuntimeError("serviço indisponível")
@@ -371,7 +388,7 @@ def llm(monkeypatch):
 
 
 MODULOS = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist", "riscos", "documentos",
-           "painel", "analise"]
+           "revisao", "painel", "analise"]
 
 
 @pytest.fixture(autouse=True)
