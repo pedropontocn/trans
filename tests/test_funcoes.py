@@ -234,13 +234,13 @@ def test_memorando_sem_orgao_nem_unidade_no_cabecalho(funcoes):
 
 
 def test_resumo_de_100_paginas_entra_inteiro(funcoes):
-    """Um resumo de ~100 páginas (300 mil caracteres) entra inteiro; só o que passa de 400 mil é cortado, com aviso."""
+    """Um resumo de ~100 páginas (300 mil caracteres) entra inteiro; só o que passa de 800 mil é cortado, com aviso."""
     pagina = "## Contratos\n" + ("Contrato 012/2025, obra da Ponte do Rio, valor de R$ 1.000.000,00. " * 40) + "\n"
     resumo = pagina * 100 + "## Última seção\nRelação final de contratos."
     texto, avisos = funcoes.limpar_relatorio(resumo)
     assert len(resumo) > 250_000 and "Relação final de contratos." in texto
     assert not any("cortado" in a for a in avisos)
-    grande, avisos = funcoes.limpar_relatorio(resumo * 2)
+    grande, avisos = funcoes.limpar_relatorio(resumo * 3)
     assert len(grande) == funcoes.LIMITE_RELATORIO and any("passou do limite" in a for a in avisos)
 
 
