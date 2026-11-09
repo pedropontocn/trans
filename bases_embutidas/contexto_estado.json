@@ -1,0 +1,647 @@
+{
+ "itens": [
+  {
+   "id": "E1",
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "afirmacao": "O Projeto de Lei Orçamentária Anual de 2027 (PL 8.378/26), enviado pelo Executivo à Alerj, prevê déficit de R$ 13,98 bilhões. A despesa prevista é de R$ 138,37 bilhões e a receita líquida estimada é de R$ 124,39 bilhões. A discussão prévia em plenário terminou em 04/11/2026.",
+   "fonte": "O Gonçalense (imprensa), sobre o PLOA 2027 do Poder Executivo estadual em tramitação na Alerj",
+   "data_fonte": "04/11/2026",
+   "url": "https://jornalogoncalense.com.br/alerj-finaliza-discussao-previa-do-projeto-de-lei-orcamentaria-anual-de-2027-do-governo-do-estado/",
+   "trecho": "estima um déficit de R$ 13,98 bilhões, com despesas previstas de R$ 138,37 bilhões",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E2",
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "afirmacao": "O PLOA 2027 prevê R$ 80,85 bilhões de despesa com pessoal e encargos sociais, um aumento de R$ 9,64 bilhões. O valor inclui a recomposição salarial de 5,62% prevista na Lei 9.436/21.",
+   "fonte": "Brasil em Folhas (imprensa), sobre a mensagem do PLOA 2027",
+   "data_fonte": "03/11/2026",
+   "url": "https://brasilemfolhas.com.br/2026/11/alerj-debate-projeto-de-lei-orcamentaria-anual-para-2027/",
+   "trecho": "O gasto com servidores e encargos sociais deve chegar a R$ 80,85 bilhões",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E3",
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "afirmacao": "O PLOA 2027 lista R$ 7,5 bilhões em receitas condicionadas que poderiam reduzir o déficit. São R$ 6,34 bilhões de participações especiais dos campos de Tupi e Cernambi, R$ 792,5 milhões de dívida ativa de ICMS e R$ 362,1 milhões da venda de imóveis públicos.",
+   "fonte": "Correio do Povo Penedo (imprensa), sobre o PLOA 2027",
+   "data_fonte": "03/11/2026",
+   "url": "https://correiodopovopenedo.com.br/noticia/2026/11/03/alerj-inicia-discussoes-sobre-orcamento-do-estado-para-2027",
+   "trecho": "R$ 6,34 bilhões provenientes das participações especiais dos campos de petróleo de Tupi e Cernambi",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E4",
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "afirmacao": "A LDO 2026, já sancionada, estimou déficit de R$ 15,98 bilhões para 2026, com receita total de R$ 109,547 bilhões e despesa de R$ 125,527 bilhões.",
+   "fonte": "Alerj – notícia oficial 'Agora é Lei: sancionadas diretrizes orçamentárias do governo para 2026'",
+   "data_fonte": "2025",
+   "url": "https://www.alerj.rj.gov.br/Visualizar/Noticia/77471",
+   "trecho": "estima um déficit para o ano que vem no valor de R$ 15,98 bilhões",
+   "tipo_fonte": "documento_oficial",
+   "confianca": "alta",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E5",
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "afirmacao": "Em 01/06/2026, o TCE-RJ emitiu, por 3 votos a 1, parecer prévio contrário à aprovação das contas de governo do exercício de 2025. O parecer segue para julgamento da Alerj.",
+   "fonte": "Brasil 247 (imprensa), sobre sessão plenária do TCE-RJ",
+   "data_fonte": "01/06/2026",
+   "url": "https://www.brasil247.com/regionais/sudeste/tce-rj-rejeita-contas-de-claudio-castro-de-2025-e-enviara-parecer-a-alerj",
+   "trecho": "O parecer foi aprovado por três votos a um.",
+   "tipo_fonte": "decisao_controle_judicial",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E6",
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "afirmacao": "Segundo o TCE-RJ, o Estado não registrou possíveis perdas de ativos. Isso teria elevado em R$ 1,13 bilhão o patrimônio informado nas demonstrações financeiras de 2025.",
+   "fonte": "Jornal do Brasil (imprensa), sobre o parecer prévio do TCE-RJ",
+   "data_fonte": "01/06/2026",
+   "url": "https://www.jb.com.br/economia/2026/06/1059828-tce-rj-rejeita-contas-de-2025-do-governo-claudio-castro.html",
+   "trecho": "o que teria elevado em R$ 1,13 bilhão o valor do patrimônio informado nas demonstrações financeiras",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E7",
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "afirmacao": "A Lei estadual 11.072/25 autoriza o Estado a aderir ao Propag (LC federal 212/25) e a pedir o encerramento do Regime de Recuperação Fiscal, vigente desde 2017.",
+   "fonte": "Alerj – notícia oficial 'Agora é Lei: Estado do Rio está autorizado a aderir ao Propag'",
+   "data_fonte": "12/2025",
+   "url": "https://www.alerj.rj.gov.br/Visualizar/Noticia/82031",
+   "trecho": "A determinação é da Lei 11.072/25, de autoria do Poder Executivo",
+   "tipo_fonte": "documento_oficial",
+   "confianca": "alta",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E8",
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "afirmacao": "O Estado formalizou à STN, por ofício, o pedido de adesão ao Propag em 31/12/2025. A proposta busca correção por IPCA + 0%, amortizando 20% da dívida com recursos do FNDR.",
+   "fonte": "SINFRERJ (imprensa sindical), sobre o ofício do governo estadual à STN",
+   "data_fonte": "05/01/2026",
+   "url": "https://sinfrerj.com.br/conteudo/10351/claudio-castro-formaliza-pedido-de-adesao-do-rio-de-janeiro-ao-propag",
+   "trecho": "o Estado do Rio de Janeiro busca a atualização de IPCA + 0%, amortizando 20% da sua dívida",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E9",
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "afirmacao": "Em 05/05/2026, o governo federal autorizou o Estado a sair do RRF para aderir ao Propag. Pelo cálculo do Tesouro Estadual, a parcela mensal média cai de R$ 436 milhões para R$ 119 milhões.",
+   "fonte": "Agência Brasil (EBC)",
+   "data_fonte": "05/2026",
+   "url": "https://agenciabrasil.ebc.com.br/economia/noticia/2026-05/governo-do-rio-e-autorizado-entrar-no-propag-para-reduzir-divida",
+   "trecho": "vai reduzir o pagamento mensal médio de R$ 436 milhões para R$ 119 milhões",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E10",
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "afirmacao": "O Ministério da Fazenda comunicou ao Estado que os R$ 41,6 bilhões em ativos (receitas futuras do FNDR) cobriam só 19,75% do saldo devedor atualizado, abaixo dos 20% exigidos para juros reais de 0%. A STN pediu que o Estado complementasse os ativos ou escolhesse outra modalidade.",
+   "fonte": "SINFRERJ (imprensa sindical), sobre comunicação do Ministério da Fazenda/STN",
+   "data_fonte": "06/2026",
+   "url": "https://sinfrerj.com.br/conteudo/11418/proposta-do-estado-do-rio-para-aderir-ao-propag-fica-r-526-milhoes-abaixo-do-minimo-exigido-apos-correcao-da-divida",
+   "trecho": "o percentual oferecido caiu para 19,75%",
+   "tipo_fonte": "imprensa",
+   "confianca": "baixa",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E11",
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "afirmacao": "O termo de adesão do Estado do Rio de Janeiro ao Propag foi assinado em 22/06/2026. A Casa Civil estimou a dívida estadual com a União em R$ 210 bilhões.",
+   "fonte": "Casa Civil da Presidência da República – notícia oficial",
+   "data_fonte": "22/06/2026",
+   "url": "https://www.gov.br/casacivil/pt-br/assuntos/noticias/2026/junho/adesao-ao-propag-rio-de-janeiro-renegocia-divida-com-a-uniao-e-deve-economizar-r-3-1-bilhoes",
+   "trecho": "medida que viabiliza uma solução para a dívida estadual com a União, hoje estimada em R$ 210 bilhões",
+   "tipo_fonte": "documento_oficial",
+   "confianca": "alta",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E12",
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "afirmacao": "O PLOA 2027 prevê R$ 2,28 bilhões em investimentos vinculados ao Propag. Desse total, R$ 1,3 bilhão vai para a educação profissional e técnica.",
+   "fonte": "Campos em Foco (imprensa), sobre o PLOA 2027",
+   "data_fonte": "03/11/2026",
+   "url": "https://www.camposemfoco.com.br/alerj-inicia-discussao-do-orcamento-estadual-de-2027/",
+   "trecho": "O projeto também prevê R$ 2,28 bilhões em investimentos vinculados ao Programa de Pleno Pagamento de Dívidas dos Estados (Propag).",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E13",
+   "camada": "estado",
+   "bloco": "previdencia",
+   "afirmacao": "Segundo a Avaliação Atuarial do RioPrevidência referente a 2025, o Plano Financeiro (servidores admitidos até setembro de 2013 e militares) registrou déficit de R$ 212,369 bilhões.",
+   "fonte": "BandNews FM (imprensa), sobre a Avaliação Atuarial do RioPrevidência",
+   "data_fonte": "18/03/2026",
+   "url": "https://www.band.com.br/bandnews-fm/rio-de-janeiro/noticias/rioprevidencia-preve-mais-de-42-mil-aposentadorias-em-2026-202603181040",
+   "trecho": "registrou déficit de R$ 212 bilhões e 369 milhões no ano passado",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E14",
+   "camada": "estado",
+   "bloco": "previdencia",
+   "afirmacao": "O PLOA 2027 prevê que o Tesouro Estadual destine R$ 23,8 bilhões a obrigações previdenciárias.",
+   "fonte": "Brasil em Folhas (imprensa), sobre o PLOA 2027",
+   "data_fonte": "10/2026",
+   "url": "https://www.brasilemfolhas.com.br/2026/10/governo-do-rio-preve-deficit-de-r-13-98-bilhoes-no-orcamento-de-2027/",
+   "trecho": "O Tesouro Estadual também deverá destinar R$ 23,8 bilhões para o pagamento de obrigações previdenciárias.",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E15",
+   "camada": "estado",
+   "bloco": "previdencia",
+   "afirmacao": "Segundo o voto vencedor no TCE-RJ sobre as contas de 2025, o balanço do RioPrevidência não registrou possíveis perdas com investimentos no Banco Master, estimadas em quase R$ 2 bilhões.",
+   "fonte": "Jornal de Brasília (imprensa), sobre o voto do conselheiro revisor no TCE-RJ",
+   "data_fonte": "01/06/2026",
+   "url": "https://jornaldebrasilia.com.br/noticias/politica-e-poder/tce-recomenda-rejeicao-das-contas-de-2025-de-claudio-castro-no-rj/",
+   "trecho": "não considerou as possíveis perdas de investimentos realizados no Banco Master, estimado em quase R$ 2 bilhões",
+   "tipo_fonte": "decisao_controle_judicial",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E16",
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "afirmacao": "A Alerj publicou em 21/10/2026, no Diário Oficial do Legislativo, o calendário de tramitação do PLOA 2027 (PL 8.378/26) e da revisão do PPA 2024-2027 (PL 8.377/26). A votação final, com a redação final, está prevista para 17/12/2026.",
+   "fonte": "Notícia oficial da Alerj sobre o calendário do Orçamento 2027",
+   "data_fonte": "21/10/2026",
+   "url": "https://www.alerj.rj.gov.br/Visualizar/Noticia/88631",
+   "trecho": "a previsão é que a votação final das propostas aconteça no dia 17 de dezembro, quando será apreciada a redação final dos textos.",
+   "tipo_fonte": "documento_oficial",
+   "confianca": "alta",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E17",
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "afirmacao": "Pelo calendário da Comissão de Orçamento da Alerj, as emendas parlamentares ao PLOA 2027 podem ser apresentadas em 5, 6, 9, 10 e 11/11/2026.",
+   "fonte": "Notícia oficial da Alerj sobre o calendário do Orçamento 2027",
+   "data_fonte": "21/10/2026",
+   "url": "https://www.alerj.rj.gov.br/Visualizar/Noticia/88631",
+   "trecho": "Os deputados poderão apresentar emendas aos projetos nos dias 5, 6, 9, 10 e 11 de novembro.",
+   "tipo_fonte": "documento_oficial",
+   "confianca": "alta",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E18",
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "afirmacao": "O PLOA 2027 enviado pelo Executivo estadual prevê déficit de R$ 13,98 bilhões.",
+   "fonte": "Notícia oficial da Alerj sobre o calendário do Orçamento 2027",
+   "data_fonte": "21/10/2026",
+   "url": "https://www.alerj.rj.gov.br/Visualizar/Noticia/88631",
+   "trecho": "Cronograma estabelece prazos para apresentação de emendas, discussões e votações da proposta que estima déficit de R$ 13,98 bilhões para o Estado do Rio.",
+   "tipo_fonte": "documento_oficial",
+   "confianca": "alta",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E19",
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "afirmacao": "Em dezembro de 2026, o calendário do PLOA 2027 prevê: votação dos pareceres das emendas na Comissão de Orçamento em 08/12, publicação dos pareceres em 10/12, discussão e votação em plenário em 15/12 e redação final em 17/12. Depois, o Executivo tem 15 dias para sancionar ou vetar.",
+   "fonte": "Jornal O Gonçalense",
+   "data_fonte": "11/2026",
+   "url": "https://jornalogoncalense.com.br/alerj-finaliza-discussao-previa-do-projeto-de-lei-orcamentaria-anual-de-2027-do-governo-do-estado/",
+   "trecho": "A discussão e votação dos projetos em plenário estão previstas para 15 de dezembro, enquanto a votação da redação final está marcada para o dia 17.",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E20",
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "afirmacao": "O PLOA 2027 estima despesas de R$ 138,37 bilhões e receita líquida de R$ 124,39 bilhões.",
+   "fonte": "Campos em Foco",
+   "data_fonte": "11/2026",
+   "url": "https://www.camposemfoco.com.br/alerj-inicia-discussao-do-orcamento-estadual-de-2027/",
+   "trecho": "O Projeto de Lei Orçamentária Anual (PLOA) estima despesas de R$ 138,37 bilhões e receita líquida de R$ 124,39 bilhões, resultando em déficit previsto de R$ 13,98 bilhões.",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E21",
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "afirmacao": "O PLOA 2027 prevê R$ 2,28 bilhões em investimentos ligados ao Propag. Esse valor depende de R$ 6,34 bilhões de participações especiais dos campos de Tupi e Cernambi, de R$ 792,5 milhões de dívida ativa de ICMS e de R$ 362,1 milhões da venda de imóveis públicos.",
+   "fonte": "Brasil em Folhas",
+   "data_fonte": "11/2026",
+   "url": "https://brasilemfolhas.com.br/2026/11/alerj-discute-orcamento-de-2027-com-deficit-de-r-14-bilhoes/",
+   "trecho": "O montante depende de R$ 6,34 bilhões de participações especiais dos campos de Tupi e Cernambi, R$ 792,5 milhões de dívida ativa de ICMS e R$ 362,1 milhões de venda de imóveis públicos.",
+   "tipo_fonte": "imprensa",
+   "confianca": "baixa",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E22",
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "afirmacao": "Em 15/10/2026, o plenário do TRE-RJ homologou por unanimidade a retotalização dos votos para governador. O candidato do PL foi proclamado eleito no 1º turno.",
+   "fonte": "Notícia oficial do TRE-RJ",
+   "data_fonte": "15/10/2026",
+   "url": "https://www.tre-rj.jus.br/comunicacao/noticias/2026/Outubro/tre-rj-proclama-douglas-ruas-pl-governador-eleito",
+   "trecho": "Na sessão plenária desta quinta-feira (15), o Colegiado do TRE-RJ homologou, por unanimidade, o resultado da retotalização de votos para o cargo de governador nas Eleições de 2026.",
+   "tipo_fonte": "decisao_controle_judicial",
+   "confianca": "alta",
+   "checagem": "inacessivel",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E23",
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "afirmacao": "Em 08/10/2026, o TSE manteve a rejeição do registro de um candidato a governador (Republicanos). Com isso, o candidato do PL passou de 50% dos votos válidos.",
+   "fonte": "Agência Senado (Senado Notícias)",
+   "data_fonte": "08/10/2026",
+   "url": "https://www12.senado.leg.br/noticias/materias/2026/10/08/rio-de-janeiro-garotinho-tem-votos-anulados-e-douglas-ruas-sera-declarado-governador-eleito",
+   "trecho": "Com isso, Douglas Ruas (PL), alcança mais de 50% dos votos válidos e será oficializado como governador eleito do Rio de Janeiro.",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E24",
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "afirmacao": "A diplomação dos eleitos no RJ está marcada para 18/12/2026, no Theatro Municipal do Rio de Janeiro.",
+   "fonte": "Agência Brasil (EBC)",
+   "data_fonte": "15/10/2026",
+   "url": "https://agenciabrasil.ebc.com.br/justica/noticia/2026-10/tre-rj-proclama-douglas-ruas-eleito-para-o-governo-do-rio-de-janeiro",
+   "trecho": "A cerimônia de diplomação dos eleitos será no dia 18 de dezembro, no Theatro Municipal do Rio de Janeiro.",
+   "tipo_fonte": "imprensa",
+   "confianca": "media",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E25",
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "afirmacao": "Em 29/05/2026, um ministro do STF rejeitou o pedido da Mesa Diretora da Alerj para que o presidente da Casa assumisse o governo interinamente. O presidente do TJ-RJ segue como governador em exercício até nova deliberação do Plenário.",
+   "fonte": "Portal de notícias do STF",
+   "data_fonte": "29/05/2026",
+   "url": "https://noticias.stf.jus.br/postsnoticias/stf-nega-pedido-da-alerj-e-mantem-desembargador-como-governador-interino-do-rio-de-janeiro/",
+   "trecho": "há determinação expressa do Plenário para que o presidente do TJ-RJ permaneça no exercício do cargo de governador até nova deliberação do STF nas ações que tratam do formato das eleições suplementares.",
+   "tipo_fonte": "decisao_controle_judicial",
+   "confianca": "alta",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E26",
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "afirmacao": "O atual governador eleito foi eleito presidente da Alerj em 17/04/2026, segundo o pedido da Mesa Diretora relatado pelo STF. O vice-governador havia renunciado em 2025 para assumir vaga no TCE-RJ.",
+   "fonte": "Portal de notícias do STF",
+   "data_fonte": "29/05/2026",
+   "url": "https://noticias.stf.jus.br/postsnoticias/stf-nega-pedido-da-alerj-e-mantem-desembargador-como-governador-interino-do-rio-de-janeiro/",
+   "trecho": "a Mesa Diretora da Alerj alegou que a eleição de Douglas Ruas para a presidência, em 17/4/2026, e o exercício efetivo da chefia do Legislativo estadual constituem fato novo",
+   "tipo_fonte": "decisao_controle_judicial",
+   "confianca": "alta",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E27",
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "afirmacao": "O então governador renunciou em 23/03/2026, um dia antes da sessão em que o TSE o tornou inelegível. O STF começou a julgar o formato da eleição para o mandato-tampão (ADI 7942, do PSD).",
+   "fonte": "Portal de notícias do STF",
+   "data_fonte": "04/2026",
+   "url": "https://noticias.stf.jus.br/postsnoticias/stf-comeca-a-julgar-formato-de-eleicao-suplementar-para-governador-do-rio-de-janeiro/",
+   "trecho": "O governador Cláudio Castro renunciou ao cargo em 23 de março deste ano, um dia antes da sessão do Tribunal Superior Eleitoral (TSE) que o tornou inelegível",
+   "tipo_fonte": "decisao_controle_judicial",
+   "confianca": "alta",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E28",
+   "camada": "estado",
+   "bloco": "compromissos_governo",
+   "afirmacao": "Em 08/10/2026, o governador eleito anunciou que pretende convocar os excedentes dos concursos policiais, ampliar o efetivo e ocupar áreas dominadas pelo crime, sem repetir o modelo das UPPs.",
+   "fonte": "Diário do Rio",
+   "data_fonte": "08/10/2026",
+   "url": "https://diariodorio.com/politica/2026/10/08/novo-governador-do-rio-douglas-ruas-anuncia-plano-para-retomar-areas-dominadas-pelo-trafico-e-pela-milicia.html",
+   "trecho": "Douglas Ruas promete convocar excedentes dos concursos policiais, ampliar o efetivo e ocupar áreas dominadas por criminosos no Rio, mas descarta repetir o modelo das UPPs",
+   "tipo_fonte": "declaracao_politica",
+   "confianca": "baixa",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E29",
+   "camada": "estado",
+   "bloco": "compromissos_governo",
+   "afirmacao": "Em 03/11/2026, o governador eleito apresentou os três primeiros nomes do secretariado e anunciou que pretende reduzir bastante o número de secretarias.",
+   "fonte": "RC24H",
+   "data_fonte": "03/11/2026",
+   "url": "https://rc24h.com.br/douglas-ruas-anuncia-primeiros-nomes-do-secretariado-e-promete-reduzir-numero-de-pastas/",
+   "trecho": "O governador eleito, entretanto, antecipou que pretende promover uma redução significativa no número de secretarias em comparação com a estrutura administrativa atual.",
+   "tipo_fonte": "declaracao_politica",
+   "confianca": "baixa",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E30",
+   "camada": "estado",
+   "bloco": "compromissos_governo",
+   "afirmacao": "O governador eleito declarou que a segurança pública será a principal prioridade e que não aceitará indicações políticas para os cargos de comando da área.",
+   "fonte": "Brasil 247",
+   "data_fonte": "10/2026",
+   "url": "https://www.brasil247.com/sudeste/douglas-ruas-promete-presenca-permanente-do-estado-em-comunidades-do-rio-e-reforco-da-seguranca-publica/",
+   "trecho": "O governador eleito afirmou que a segurança pública será a principal prioridade de sua administração e prometeu não aceitar indicações políticas para os cargos de comando da área.",
+   "tipo_fonte": "declaracao_politica",
+   "confianca": "baixa",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E31",
+   "camada": "estado",
+   "bloco": "compromissos_governo",
+   "afirmacao": "O governador eleito anunciou que pretende expandir as escolas cívico-militares e adotar medidas contra o déficit fiscal.",
+   "fonte": "Brasil 247",
+   "data_fonte": "10/2026",
+   "url": "https://www.brasil247.com/sudeste/douglas-ruas-promete-presenca-permanente-do-estado-em-comunidades-do-rio-e-reforco-da-seguranca-publica/",
+   "trecho": "governador eleito anuncia convocação de policiais concursados, expansão de escolas cívico-militares e medidas para enfrentar déficit fiscal",
+   "tipo_fonte": "declaracao_politica",
+   "confianca": "baixa",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E32",
+   "camada": "estado",
+   "bloco": "compromissos_governo",
+   "afirmacao": "O governador eleito propôs um teto de gastos diante do déficit projetado de cerca de R$ 14 bilhões. O desenho da proposta não foi detalhado na fonte.",
+   "fonte": "Brasil 247",
+   "data_fonte": "10/2026",
+   "url": "https://www.brasil247.com/sudeste/douglas-ruas-promete-presenca-permanente-do-estado-em-comunidades-do-rio-e-reforco-da-seguranca-publica/",
+   "trecho": "Governador eleito propõe teto de gastos diante de déficit de R$ 14 bilhões",
+   "tipo_fonte": "declaracao_politica",
+   "confianca": "baixa",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  },
+  {
+   "id": "E33",
+   "camada": "estado",
+   "bloco": "compromissos_governo",
+   "afirmacao": "Em 13/10/2026, na Alerj, o governador eleito (também presidente da Casa) declarou que pretendia levar à pauta, na semana seguinte, as propostas do governador em exercício sobre renegociação de dívidas e transação tributária.",
+   "fonte": "Nossa Rádio FM",
+   "data_fonte": "10/2026",
+   "url": "https://www.nossaradio.fm/news/em-primeiro-discurso-como-governador-eleito-douglas-ruas-promete-manter-as-portas-abertas-a-oposicao/",
+   "trecho": "O governador eleito explicou que já pretende levar à pauta, na semana seguinte, as propostas do desembargador Ricardo Couto relacionadas à renegociação de dívidas e à transação tributária.",
+   "tipo_fonte": "declaracao_politica",
+   "confianca": "baixa",
+   "checagem": "conferido",
+   "conferido_pela_equipe": false,
+   "incluir": true
+  }
+ ],
+ "nao_encontrado": [
+  {
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "procurado": "RREO e RGF de 2026 do Estado (Siconfi/Sefaz-RJ): despesa de pessoal em % da RCL, DCL/RCL, resultado primário e nominal realizados"
+  },
+  {
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "procurado": "Restos a pagar processados e não processados inscritos no fim de 2025 e saldo em 2026"
+  },
+  {
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "procurado": "Texto integral do parecer prévio do TCE-RJ sobre as contas de 2025 (processo nº 103320-0/2026) no portal do TCE-RJ, e se a Alerj já julgou essas contas"
+  },
+  {
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "procurado": "Receita realizada de royalties e participações especiais em 2025-2026 em fonte oficial (ANP/Sefaz), e o que a previsão de R$ 61,15 bilhões citada na LDO 2027 representa"
+  },
+  {
+   "camada": "estado",
+   "bloco": "situacao_fiscal",
+   "procurado": "Texto oficial da LOA 2026 (Lei 11.098/26) e do PLOA 2027 (PL 8.378/26) no portal da Alerj ou no Diário Oficial; os números vieram só da imprensa"
+  },
+  {
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "procurado": "Texto integral do termo de adesão ao Propag assinado em 22/06/2026 e dos aditivos contratuais com a STN"
+  },
+  {
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "procurado": "Relatório de Conclusão do Regime de Recuperação Fiscal do Estado do RJ e ato formal de encerramento do RRF"
+  },
+  {
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "procurado": "Taxa de juros real efetivamente pactuada (0%, 1% ou 2%) e se o Estado completou os ativos até os 20% de amortização exigidos"
+  },
+  {
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "procurado": "Saldo devedor oficial da STN na data da adesão: as fontes divergem (R$ 195 bi, R$ 203,3 bi, R$ 208 bi, R$ 210 bi)"
+  },
+  {
+   "camada": "estado",
+   "bloco": "regime_divida",
+   "procurado": "Contrapartidas oficiais do Propag para o RJ: limite de crescimento da despesa primária, percentual de investimento obrigatório e regras do 'Juros por Educação'"
+  },
+  {
+   "camada": "estado",
+   "bloco": "previdencia",
+   "procurado": "Documento oficial da Avaliação Atuarial do RioPrevidência (data-base 2025) publicado pela autarquia"
+  },
+  {
+   "camada": "estado",
+   "bloco": "previdencia",
+   "procurado": "Aportes do Tesouro Estadual ao RioPrevidência efetivamente realizados em 2025 e 2026 (RREO, anexo de RPPS)"
+  },
+  {
+   "camada": "estado",
+   "bloco": "previdencia",
+   "procurado": "Previsão oficial do déficit financeiro de 2026 (a imprensa cita R$ 14 bilhões) e projeção atuarial de longo prazo"
+  },
+  {
+   "camada": "estado",
+   "bloco": "previdencia",
+   "procurado": "Valor oficial das perdas do RioPrevidência com aplicações no Banco Master e situação da apuração"
+  },
+  {
+   "camada": "estado",
+   "bloco": "previdencia",
+   "procurado": "Ato oficial que retirou do fundo as receitas de royalties destinadas ao RioPrevidência e o impacto anual"
+  },
+  {
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "procurado": "Decreto estadual de programação financeira e cronograma mensal de desembolso de 2026 (LRF art. 8) no DOERJ ou no portal da Sefaz-RJ."
+  },
+  {
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "procurado": "Ato de limitação de empenho e movimentação financeira em 2026 (LRF art. 9) e o relatório bimestral que o motivaria."
+  },
+  {
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "procurado": "Normas ou orientações do TCE-RJ sobre restrições de fim de mandato (LRF art. 42) e sobre a disponibilidade de caixa para restos a pagar em 31/12/2026."
+  },
+  {
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "procurado": "Texto da LDO 2027 (Lei 11.291/26) no DOERJ. Só foi achada uma menção indireta em site sindical; número e conteúdo não foram conferidos em fonte oficial."
+  },
+  {
+   "camada": "estado",
+   "bloco": "calendario_legal",
+   "procurado": "Página oficial (Alerj ou DOL) com as datas de dezembro (pareceres em 08/12 e 10/12, plenário em 15/12). Essas datas aparecem só na imprensa."
+  },
+  {
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "procurado": "Resultado final do julgamento do STF (ADI 7942 e ação conexa) sobre eleição direta ou indireta para o mandato-tampão. A sessão foi marcada para 26/08/2026, mas o desfecho não foi encontrado. As notícias do STF citam ora a LC estadual 226/2026, ora a 229/2026."
+  },
+  {
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "procurado": "Data de posse do governador eleito confirmada em fonte oficial. O dia 06/01/2027 aparece só em enciclopédia colaborativa."
+  },
+  {
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "procurado": "Composição partidária da Alerj eleita em 2026 e da atual, e quem ocupa a presidência da Alerj desde a eleição do presidente da Casa para governador."
+  },
+  {
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "procurado": "Decreto do governador em exercício que formaliza a transição. Foi anunciado pela imprensa para 14/10/2026, mas não foi localizado no DOERJ."
+  },
+  {
+   "camada": "estado",
+   "bloco": "cenario_politico",
+   "procurado": "Placar exato do TSE em 08/10/2026. A Agência Senado fala em unanimidade; o Tempo Real RJ fala em 5 a 2. A divergência não foi resolvida com o acórdão."
+  },
+  {
+   "camada": "estado",
+   "bloco": "compromissos_governo",
+   "procurado": "Plano de governo registrado no TSE (DivulgaCand) com metas e prazos do governador eleito."
+  },
+  {
+   "camada": "estado",
+   "bloco": "compromissos_governo",
+   "procurado": "Lista oficial de secretarias a serem extintas ou fundidas e os nomes anunciados para o secretariado."
+  },
+  {
+   "camada": "estado",
+   "bloco": "compromissos_governo",
+   "procurado": "Desenho do teto de gastos proposto: instrumento legal, índice e prazo."
+  }
+ ],
+ "uso": [],
+ "diagnostico": [],
+ "modelo": "anthropic/claude-opus-5-5",
+ "data_corte": "08/11/2026",
+ "pesquisado_em": "2026-11-08",
+ "origem": "pesquisa do contexto do Estado feita pelo app em 08/11/2026 (rodada SEPM, SEPOL, SESP), com os links conferidos por código"
+}

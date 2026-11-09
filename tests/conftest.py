@@ -395,6 +395,7 @@ MODULOS = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "c
 def _registros_temporarios(tmp_path, monkeypatch):
     """Nada de teste grava em registros/ do repositório (inclusive a pesquisa do Estado guardada do dia)."""
     monkeypatch.setenv("PASTA_REGISTROS", str(tmp_path / "registros"))
+    monkeypatch.setenv("ESTADO_EMBUTIDO", "0")       # os testes exercitam a pesquisa; o embutido tem teste próprio
 
 
 @pytest.fixture

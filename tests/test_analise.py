@@ -571,3 +571,27 @@ def test_painel_e_calendario_saem_mesmo_sem_data_nem_risco(llm, tmp_path):
     assert wb["Calendário"].cell(2, 1).value.startswith("A secretaria não informou nenhuma data")
     dados = json.loads((tmp_path / "paineis" / "sex_painel.json").read_text(encoding="utf-8"))
     assert dados["pontos_de_decisao"] == [] and dados["janelas"]["Antes da posse"] == 0
+
+
+def test_contexto_do_estado_embutido_sem_custo(llm, tmp_path, monkeypatch):
+    from transicao import analise
+    monkeypatch.setenv("ESTADO_EMBUTIDO", "1")
+    estado = analise.estado_embutido()
+    assert estado and len(estado["itens"]) >= 30 and all(i["camada"] == "estado" for i in estado["itens"])
+    assert estado["data_corte"] == "08/11/2026" and not estado.get("uso")
+    registros = []
+    orgaos = [{"nome": "Secretaria de Exemplo", "texto": RELATORIO}]
+    linhas = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=registros.append)
+    assert linhas[0]["situacao"] == "concluído"
+    assert any("usando o que vem no app" in r for r in registros)
+    pedidos = [json.dumps(c["mensagens"][0]["content"], ensure_ascii=False) for c in llm.chamadas]
+    assert not any("Monte a camada" in p and 'camada\\n\\"Estado\\"' in p for p in pedidos)   # não pesquisou o Estado
+    assert not (tmp_path / "contexto_estado.json").exists()          # nada de novo para guardar
+    # pedindo pesquisa nova: pesquisa, e o resultado sai na pasta, pronto para virar o embutido
+    saida = tmp_path / "nova"
+    analise.rodar_orgaos(orgaos, dict(CFG, pesquisar_estado=True), saida, log=registros.append)
+    assert any(r.startswith("Pesquisando o contexto do Estado") for r in registros)
+    pedidos = [json.dumps(c["mensagens"][0]["content"], ensure_ascii=False) for c in llm.chamadas]
+    assert any("Monte a camada" in p and 'camada\\n\\"Estado\\"' in p for p in pedidos)      # agora pesquisou
+    novo = json.loads((saida / "contexto_estado.json").read_text(encoding="utf-8"))
+    assert novo["itens"] and novo["uso"] == []

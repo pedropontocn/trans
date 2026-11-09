@@ -254,11 +254,13 @@ Em cada bloco:
 
 Além dos blocos:
 - "panorama": 3 ou 4 frases que dizem, a quem nunca ouviu falar da secretaria, o que ela faz, como se organiza e o que
-  mais pesa no seu funcionamento hoje. Só com o que está nos itens; sem número que não esteja neles.
+  mais pesa no seu funcionamento hoje. Só com o que a secretaria informou ou o que está em documento oficial (lei,
+  decreto, LOA, site oficial, decisão de controle); nada que venha só da imprensa. Sem número que não esteja nos itens.
 - "organograma": as unidades da secretaria, até 30, com "unidade" (nome), "sigla", "subordinada_a" (o nome da unidade
   acima; vazio para o topo), "titular" (nome e cargo, "vago", ou vazio se não se sabe), "vinculada" (true para
   autarquia, fundação ou empresa vinculada) e a mesma origem conferível dos itens ("origem", "item", "trecho").
-  Até três níveis abaixo do gabinete. Só unidades que estão no material.
+  Até três níveis abaixo do gabinete. Só unidades que estão no relatório ou em documento oficial (decreto de
+  estrutura, site oficial); nada que venha só da imprensa.
 - "indicadores": até 10 números-chave para a ficha rápida (ex.: orçamento LOA do ano, empenhado, servidores, folha
   mensal, contratos ativos, programas, obras em andamento, municípios atendidos). Cada um com "nome" curto, "valor"
   como está na fonte e a mesma origem conferível dos itens. Só números que estão no material.

@@ -818,3 +818,25 @@ def test_organograma_em_arvore(funcoes):
     doc = docx.Document(io.BytesIO(documentos.gerar_docx("## 2. Como se organiza\n" + md, {"assunto": "x"})))
     fixos = [p for p in doc.paragraphs if p.runs and p.runs[0].font.name == "Consolas"]
     assert [p.text for p in fixos][:2] == ["Gabinete do Secretário — Ana Lima (Secretária)", "└── Subsecretaria A"]
+
+
+def test_dossie_so_com_o_que_a_secretaria_informou_e_fonte_oficial(funcoes):
+    from transicao import documentos
+    it = lambda t, r: {"id": "F1", "texto": t, "rotulo": r, "url": "", "origem_item": ""}
+    diag = {"secoes": [{"titulo": "Programas e ações", "itens": [
+                it("Programa A atende 92 municípios.", "informado pelo órgão"),
+                it("Decreto fixa a meta de 10 mil casas.", "confirmado em fonte oficial"),
+                it("Jornal diz que o programa atrasou.", "fonte pública conferida"),
+                it("Blog diz outra coisa.", "fonte pública não conferida")], "leitura": "x", "nao_se_sabe": []}],
+            "indicadores": [{"nome": "LOA", "valor": "R$ 1 bi", "rotulo": "confirmado em fonte oficial"},
+                            {"nome": "Segundo a imprensa", "valor": "R$ 9 bi", "rotulo": "fonte pública conferida"}],
+            "organograma": [{"unidade": "Gabinete", "sigla": "", "subordinada_a": "", "titular": "", "rotulo": "informado pelo órgão"},
+                            {"unidade": "Unidade da notícia", "sigla": "", "subordinada_a": "Gabinete", "titular": "",
+                             "rotulo": "fonte pública conferida"}]}
+    md = documentos.markdown_capitulos(diag)
+    assert "92 municípios" in md and "10 mil casas" in md
+    assert "Jornal" not in md and "Blog" not in md and "Outros 2 fato(s) deste tema vêm de imprensa" in md
+    assert "Unidade da notícia" not in md and "Gabinete" in md
+    ficha = documentos.ficha_rapida(diag)
+    assert "| LOA | R$ 1 bi |" in ficha and "Segundo a imprensa" not in ficha
+    assert len(diag["secoes"][0]["itens"]) == 4                     # o diagnóstico (que vai aos riscos) segue inteiro

@@ -919,6 +919,21 @@ def _secao_diagnostico(sec):
     return linhas
 
 
+# no dossiê ("como funciona hoje") só entra o que a secretaria informou e o que está em fonte oficial conferida; o
+# que vem de imprensa ou de fonte não oficial fica para os riscos e a contraprova, onde mostra o que vai repercutir
+ROTULOS_DO_DOSSIE = {"informado pelo órgão", "confirmado em fonte oficial"}
+
+
+def _do_dossie(x):
+    return x.get("rotulo") in ROTULOS_DO_DOSSIE
+
+
+def _secao_do_dossie(sec):
+    itens = [i for i in sec["itens"] if _do_dossie(i)]
+    fora = len(sec["itens"]) - len(itens)
+    return dict(sec, itens=itens, leitura=sec.get("leitura") if itens and not fora else ""), fora
+
+
 CAPITULOS = [("1. O que faz", ["O que faz"]), ("2. Como se organiza", ["Como se organiza"]),
              ("3. Programas e ações", ["Programas e ações"]), ("4. Principais contratos", ["Contratos"]),
              ("5. Pessoal", ["Pessoal"]), ("6. Orçamento", ["Orçamento e execução"]),
@@ -929,6 +944,9 @@ CAPITULOS = [("1. O que faz", ["O que faz"]), ("2. Como se organiza", ["Como se 
 def organograma_em_arvore(unidades, orgao="", max_linhas=32):
     """O organograma em texto, em árvore (├── └──), montado por código a partir das unidades conferidas. A
     vinculadas ficam num ramo próprio. Unidade sem chefe conhecido aparece sem nome; "vago" aparece como vago."""
+    if not unidades:
+        return ""
+    unidades = [u for u in unidades if _do_dossie(u)]
     if not unidades:
         return ""
     nomes = {u["unidade"] for u in unidades}
@@ -973,7 +991,7 @@ def organograma_em_arvore(unidades, orgao="", max_linhas=32):
 def ficha_rapida(diag, folha=None, orgao=""):
     """A ficha rápida do topo do dossiê: os números-chave conferidos, a folha (Caderno de RH) e a estrutura."""
     linhas = ["| Item | Valor | Base |", "|---|---|---|"]
-    unidades = (diag or {}).get("organograma") or []
+    unidades = [u for u in (diag or {}).get("organograma") or [] if _do_dossie(u)]
     topo = [u for u in unidades if not u["subordinada_a"] and not u.get("vinculada") and u.get("titular")]
     if topo:
         linhas.append(f"| Titular | {topo[0]['titular']} | {_base_curta(topo[0])} |")
@@ -985,7 +1003,8 @@ def ficha_rapida(diag, folha=None, orgao=""):
         linhas.append(f"| Vínculos ativos (folha do mês) | {folha.get('vinculos', '–')} ({folha.get('folha_mes', '–')}) | "
                       f"Caderno de RH (SEPLAG, {folha.get('competencia', '')}) |")
     for i in (diag or {}).get("indicadores") or []:
-        linhas.append(f"| {i['nome']} | {i['valor']} | {_base_curta(i)} |")
+        if _do_dossie(i):
+            linhas.append(f"| {i['nome']} | {i['valor']} | {_base_curta(i)} |")
     return "\n".join(linhas) if len(linhas) > 2 else ""
 
 
@@ -1020,7 +1039,11 @@ def markdown_capitulos(diag, contratos_criticos=None, ficha=None, folha=None, or
                 continue
             if len(blocos) > 1:
                 linhas.append(f"### {sec['titulo']}")
+            sec, fora = _secao_do_dossie(sec)
             linhas += _secao_diagnostico(sec)
+            if fora:
+                linhas.append(f"_Outros {fora} fato(s) deste tema vêm de imprensa ou de fonte não oficial e ficam no "
+                              "relatório de riscos e na auditoria._")
     return "\n".join(linhas)
 
 

@@ -269,6 +269,14 @@ with st.sidebar:
     st.header("Análise")
     data_corte = st.date_input("Data de corte", value=date.today(), format="DD/MM/YYYY")
     foco = st.text_input("Foco (opcional)", placeholder="ex.: contratos que vencem até março")
+    _estado = analise.estado_embutido()
+    pesquisar_estado = st.checkbox(
+        "Pesquisar de novo o contexto do Estado", value=_estado is None,
+        help=("O app já traz o contexto do Estado (situação fiscal, orçamento, órgãos de controle, prioridades do "
+              f"governo eleito), pesquisado em {_estado.get('data_corte', '?')}, com {len(_estado['itens'])} fatos "
+              "conferidos. Marque para pesquisar de novo (cerca de US$ 0,70); a pesquisa nova sai no .zip como "
+              "contexto_estado.json, pronta para substituir a do app." if _estado else
+              "O app não tem contexto do Estado embutido: ele será pesquisado nesta rodada."))
     with st.expander("Cabeçalho do documento"):
         orgao_emissor = st.text_input("Órgão", value="Equipe de Transição")
         unidade = st.text_input("De (unidade)", value="")
@@ -413,7 +421,8 @@ if not trabalho or trabalho["situacao"] != "rodando":
                            "modelos_agentes": [m.strip() for m in modelos_agentes.split(",") if m.strip()],
                            "familias": familias,
                            "data_corte": data_corte.strftime("%d/%m/%Y"),
-                           "foco": foco.strip(), "orgao_emissor": orgao_emissor, "unidade": unidade, "para": para}
+                           "foco": foco.strip(), "orgao_emissor": orgao_emissor, "unidade": unidade, "para": para,
+                           "pesquisar_estado": pesquisar_estado}
                     try:
                         saida = REGISTROS / f"analise_{datetime.now():%Y%m%d%H%M%S%f}"
                         saida.mkdir(parents=True, exist_ok=True)

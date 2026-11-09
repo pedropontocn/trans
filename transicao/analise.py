@@ -333,7 +333,15 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
         modelo.novo_uso_do_fio()
         estado, reaproveitada = _estado_do_dia(cfg, log)
         custo_estado, _ = modelo.custo_estimado(estado.get("uso") or []) if not reaproveitada else (0.0, False)
-        log(f"Estado: {len(estado.get('itens') or [])} itens" + (" (pesquisa de hoje reaproveitada, sem custo)." if reaproveitada else "."))
+        log(f"Estado: {len(estado.get('itens') or [])} itens" + (" (reaproveitado, sem custo)." if reaproveitada else "."))
+        if not reaproveitada:                # a pesquisa nova sai no .zip, pronta para virar o contexto embutido
+            try:
+                (Path(saida) / "contexto_estado.json").write_text(json.dumps(
+                    dict(estado, uso=[], pesquisado_em=date.today().isoformat(),
+                         origem=f"pesquisa do contexto do Estado feita pelo app em {date.today():%d/%m/%Y}"),
+                    ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+            except OSError:
+                pass
 
         linhas, eventos, descartados, todos_riscos, situacoes, trava = {}, {}, {}, {}, {}, threading.Lock()
         pastas = _pastas_unicas(o["nome"] for o in orgaos)
@@ -423,16 +431,36 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
             log(f"Modo econômico: {fila.enviados} lote(s) enviados à Batch API.")
 
 
+def estado_embutido():
+    """O contexto do Estado que vem com o app (bases_embutidas/contexto_estado.json): a mesma pesquisa serve a todas
+    as secretarias e a todas as rodadas, sem custo. Para atualizar, troque o arquivo pelo contexto_estado.json que sai
+    no .zip de uma rodada com "pesquisar de novo" marcado. None se não houver."""
+    from .folha import PASTA_BASES
+    if os.getenv("ESTADO_EMBUTIDO", "1").strip() == "0":
+        return None
+    arquivo = Path(os.getenv("PASTA_BASES") or PASTA_BASES) / "contexto_estado.json"
+    try:
+        estado = json.loads(arquivo.read_text(encoding="utf-8"))
+        return estado if estado.get("itens") else None
+    except (OSError, ValueError):
+        return None
+
+
 def _estado_do_dia(cfg, log):
-    """A pesquisa do contexto do Estado é a mesma para todos os órgãos e para todas as rodadas do dia com a mesma data
-    de corte, modelo e foco: fica guardada em disco (pasta de registros) e é reaproveitada. Devolve (estado,
-    reaproveitada)."""
+    """O contexto do Estado: o embutido no app, se houver e se a rodada não pedir uma pesquisa nova; senão, a
+    pesquisa de hoje guardada em disco; senão, uma pesquisa nova. Devolve (estado, reaproveitada)."""
+    if not cfg.get("pesquisar_estado"):
+        estado = estado_embutido()
+        if estado:
+            log(f"Contexto do Estado: usando o que vem no app, pesquisado em {estado.get('data_corte', '?')} "
+                "(sem custo).")
+            return estado, True
     pasta = Path(os.getenv("PASTA_REGISTROS") or "registros") / "estado"
     chave = modelo.chave_guardada("estado", VERSAO, pesquisa.PROMPT_PESQUISA, cfg["modelo_pesquisa"], cfg["data_corte"],
                                   cfg.get("foco", ""), date.today().isoformat())[:20]
     arquivo = pasta / f"{date.today():%Y-%m-%d}_{chave}.json"
     try:
-        if arquivo.exists():
+        if arquivo.exists() and not cfg.get("pesquisar_estado"):
             estado = json.loads(arquivo.read_text(encoding="utf-8"))
             if estado.get("itens"):
                 log("Contexto do Estado: reaproveitando a pesquisa de hoje...")

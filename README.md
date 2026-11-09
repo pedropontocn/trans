@@ -73,7 +73,8 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    se organiza (com o organograma, cada unidade conferida na origem e desenhada em árvore pelo código); programas e
    ações; contratos (só o que a secretaria informou); pessoal; orçamento e execução; pendências com controle e
    justiça; sistemas, convênios e parcerias. Mais o panorama e os números da ficha rápida. Primeiro o que a
-   secretaria enviou; só sem isso, os dossiês de base. Cada afirmação cita o dossiê ou um trecho literal do
+   secretaria enviou; só sem isso, os documentos oficiais dos dossiês de base (a imprensa fica para os riscos e a
+   contraprova). Cada afirmação cita o dossiê ou um trecho literal do
    relatório; o que não confere é retirado. Os fatos que pesam na transição entram sem juízo e servem à análise de
    riscos.
 3. **Checklist obrigatório.** Dez temas básicos que toda secretaria precisa ter verificados (contratos a vencer, emergenciais,
