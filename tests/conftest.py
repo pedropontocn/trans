@@ -207,6 +207,7 @@ class LLMFalso:
             {"secao": "3.1.1", "trecho_id": "P33.9", "citacao": "Criação do Calendário Estadual de Turismo"},
             {"secao": "3.1.2", "trecho_id": "P33.9", "citacao": "citação que não está no plano"}]}
         self.fichas_ruins = {}                    # seção → ficha que não passa nas travas
+        self.caderno_material = {"programas": []}  # programas achados no material, quando não há relatório v2
         self.fichas_refeitas = 0
         self.revisao_texto = {"textos": {"R1.decisao": "Destino das licitações adiadas."}}
         self.modelos_que_falham = set()           # modelos (nomes) que respondem como fora do ar
@@ -241,6 +242,8 @@ class LLMFalso:
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.caderno_ligacao or {"fichas": [
                 {"secao": f["secao"], "acoes": ["10010:23.695.0452.4489"], "riscos": ["R1"] if k == 1 else [],
                  "motivo": "teste"} for k, f in enumerate(pedido["fichas"])]}) + "[FIM DO JSON]")
+        if "Você lê o material que uma secretaria" in sistema:
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.caderno_material) + "[FIM DO JSON]")
         if "Você indica, para cada programa" in sistema:
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.caderno_plano) + "[FIM DO JSON]")
         if "Você redige uma ficha do Caderno Executivo" in sistema:
