@@ -295,14 +295,14 @@ def prontos(saida):
     return nomes
 
 
-def _gravar_caderno(saida, pasta, nome, manifesto, r, cfg, log, k):
+def _gravar_caderno(saida, pasta, nome, manifesto, r, cfg, log, k, texto=""):
     """O caderno executivo da secretaria (Word e CSV do quadro-síntese) e a sua auditoria. Um erro aqui não derruba a
     análise da secretaria: fica registrado e a rodada segue. Devolve os campos da linha do resumo."""
     from . import caderno
     try:
         dossie = (r.get("registro") or {}).get("dossie") or {}
         c = caderno.gerar(nome, entrada.sigla(nome) or nome, manifesto, r["riscos"], r["eventos"], cfg,
-                          folha_q=dossie.get("folha"), nome_por_extenso=dossie.get("orgao", ""))
+                          folha_q=dossie.get("folha"), nome_por_extenso=dossie.get("orgao", ""), texto=texto)
     except Exception as e:
         log(f"[{k}] caderno não montado: {type(e).__name__}: {e}"[:300])
         return {"caderno": f"erro: {type(e).__name__}"}
@@ -319,7 +319,8 @@ def _gravar_caderno(saida, pasta, nome, manifesto, r, cfg, log, k):
     (saida / "cadernos" / f"{pasta}_caderno.docx").write_bytes(documentos.gerar_docx(c["md"], meta))
     (saida / "cadernos" / f"{pasta}_quadro.csv").write_bytes(c["csv"])
     log(f"[{k}] Caderno executivo: {c['fichas_geradas']} de {c['fichas']} fichas (US$ {custo:.2f})")
-    return {"caderno": f"{c['fichas_geradas']} de {c['fichas']} fichas", "custo_usd": round(r["custo"] + custo, 3)}
+    resumo = f"{c['fichas_geradas']} de {c['fichas']} fichas" if c["fichas"] else "sem fichas (só o orçamento)"
+    return {"caderno": resumo, "custo_usd": round(r["custo"] + custo, 3)}
 
 
 def _gravar_painel_e_calendario(saida, pasta, nome, riscos_orgao, situacao, eventos_orgao, descartados_orgao, cfg,
@@ -435,7 +436,7 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                     log(f"[{k}] painel/calendário não montados: {type(e).__name__}: {e}"[:300])
                 if cfg.get("caderno"):
                     log(f"[{k}] Montando o caderno executivo...")
-                    linha.update(_gravar_caderno(saida, pasta, nome, manifesto, r, cfg, log, k))
+                    linha.update(_gravar_caderno(saida, pasta, nome, manifesto, r, cfg, log, k, texto))
             except Exception as e:
                 linha["observacao"] = f"{type(e).__name__}: {e}"[:300]
                 custo, _ = modelo.custo_estimado(modelo.uso_do_fio())

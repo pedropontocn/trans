@@ -3,6 +3,7 @@ gerada por scripts/caderno_rh.py). Entra no dossiê de cada secretaria como dado
 dispêndio do mês, remuneração média e quantos são servidores efetivos. O que não é efetivo (cargo em comissão,
 temporário, requisitado e outros) é o que sai ou pode sair na troca de governo: é a medida do risco de apagão."""
 import csv
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -25,16 +26,35 @@ def _bases(pasta):
     return saida
 
 
+@lru_cache(maxsize=4)
+def _sucessoras(pasta):
+    try:
+        return json.loads((Path(pasta) / "siglas_2026.json").read_text(encoding="utf-8"))["sucessoras"]
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
 def linha(sigla, pasta=None):
-    """A linha da folha do órgão no Caderno mais recente em que ele aparece, ou None. Órgão que saiu do Caderno mais
-    recente (extinto, fundido ou renomeado) fica com o último Caderno em que apareceu; nunca se liga sigla a outra."""
+    """A linha da folha do órgão, ou None. Vale sempre o nome mais atualizado: órgão que saiu do Caderno mais recente
+    e tem sucessora conhecida (bases_embutidas/siglas_2026.json, com a fonte) usa a linha da sucessora, marcada em
+    "sucessao"; sem sucessora conhecida, fica com o último Caderno em que apareceu, marcado em "fora_do_mais_recente"."""
     sigla = (sigla or "").strip().upper()
     sigla = APELIDOS.get(sigla, sigla)
-    bases = _bases(str(pasta or os.getenv("PASTA_BASES") or PASTA_BASES))
+    pasta = str(pasta or os.getenv("PASTA_BASES") or PASTA_BASES)
+    bases = _bases(pasta)
+    if not bases:
+        return None
+    suc = _sucessoras(pasta).get(sigla)
+    if sigla not in bases[0][1] and suc and suc["atual"] in bases[0][1]:
+        l = dict(bases[0][1][suc["atual"]])
+        l["fora_do_mais_recente"] = ""
+        l["sucessao"] = dict(suc, antiga=sigla)
+        return l
     for competencia, linhas in bases:
         if sigla in linhas:
             l = dict(linhas[sigla])
             l["fora_do_mais_recente"] = bases[0][0] if competencia != bases[0][0] else ""
+            l["sucessao"] = None
             return l
     return None
 
@@ -67,11 +87,22 @@ def itens(sigla, pasta=None):
             "data_fonte": quando, "url": l["url"], "trecho": "", "tipo_fonte": "dado_oficial", "confianca": "alta",
             "checagem": "conferido"}
     nome = l["sigla"]
-    fatos = [f"Em {quando}, {nome} tinha {_int(l['vinculos_ativos'])} vínculos ativos, com dispêndio de "
+    fatos, aviso = [], []
+    if suc := l["sucessao"]:
+        texto = (f"{suc['antiga']} {suc['como']}; no Caderno de RH de {quando}, a secretaria aparece como {nome}, e os "
+                 f"números da folha são os de toda a {nome}.")
+        if suc.get("oficial"):                   # confirmada na PLOA 2027, base oficial embutida
+            aviso = [dict(base, fonte="Projeto de Lei Orçamentária 2027 (PLOA), Volume II", url=suc.get("fonte", ""),
+                          data_fonte="2026", tipo_fonte="documento_oficial",
+                          afirmacao=f"{texto} {suc['oficial'][0].upper()}{suc['oficial'][1:]}.")]
+        else:                                    # só em notícia: entra com a fonte e o rótulo de imprensa
+            aviso = [dict(base, fonte="Imprensa: " + suc["fonte"].split("/")[2].removeprefix("www."), url=suc["fonte"],
+                          data_fonte="2026", tipo_fonte="imprensa", confianca="media", checagem="", afirmacao=texto)]
+    fatos += [f"Em {quando}, {nome} tinha {_int(l['vinculos_ativos'])} vínculos ativos, com dispêndio de "
              f"R$ {l['dispendio_mes_mi'].replace('.', ',')} milhões na folha do mês e remuneração média de "
              f"{_reais(l['remuneracao_media'])}."]
     if l["efetivos_na_tabela_8"] == "sim":
-        fatos.append(f"Desses vínculos, {_int(l['efetivos'])} são de servidores efetivos/concursados, com idade média de "
+        fatos.append(f"Desses vínculos, {_int(l['efetivos'])} {'é de servidor efetivo/concursado' if l['efetivos'] == '1' else 'são de servidores efetivos/concursados'}, com idade média de "
                      f"{l['idade_media_efetivos']} anos e {l['tempo_exercicio_medio_efetivos']} anos de exercício em média; "
                      f"os outros {_int(l['nao_efetivos'])} ({l['pct_nao_efetivos'].replace('.', ',')}%) são cargos em "
                      "comissão, temporários, requisitados ou de outro vínculo não efetivo.")
@@ -82,7 +113,7 @@ def itens(sigla, pasta=None):
     if l["fora_do_mais_recente"]:
         fatos.append(f"{nome} não aparece no Caderno de RH de {_extenso(l['fora_do_mais_recente'])}, o mais recente; "
                      f"os números acima são os do último Caderno em que aparece, de {quando}.")
-    return [dict(base, afirmacao=f) for f in fatos]
+    return aviso + [dict(base, afirmacao=f) for f in fatos]
 
 
 def quadro(sigla, pasta=None):
@@ -95,4 +126,5 @@ def quadro(sigla, pasta=None):
             "pct_nao_efetivos": f"{l['pct_nao_efetivos'].replace('.', ',')}%",
             "folha_mes": f"R$ {l['dispendio_mes_mi'].replace('.', ',')} mi",
             "remuneracao_media": _reais(l["remuneracao_media"]), "pct": float(l["pct_nao_efetivos"] or 0),
-            "fora_do_mais_recente": _extenso(l["fora_do_mais_recente"]) if l["fora_do_mais_recente"] else ""}
+            "fora_do_mais_recente": _extenso(l["fora_do_mais_recente"]) if l["fora_do_mais_recente"] else "",
+            "sigla": l["sigla"], "sucessao": l["sucessao"]}

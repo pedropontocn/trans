@@ -6,9 +6,13 @@ Dados oficiais que o app usa sozinho, por código, sem passar pelo modelo.
   (https://www.rj.gov.br/gesperj/). Por sigla: vínculos ativos, dispêndio do mês, remuneração média, servidores
   efetivos (com idade e tempo de exercício médios) e os não efetivos (cargo em comissão, temporário, requisitado e
   outros). Órgão que não aparece na tabela de efetivos do Caderno não tem servidor efetivo lotado. Para cada órgão, o
-  app usa o Caderno mais recente em que ele aparece. Hoje: setembro de 2026 e março de 2026. Os órgãos que saíram na
-  reforma administrativa de 2026 (SEAP, SECTI, SEDEICS, SEDIPAF, SEENEMAR, SEIJES e SEM) ficam com março, e o texto
-  diz que eles não aparecem no Caderno de setembro. O app nunca liga uma sigla antiga a uma nova por conta própria.
+  app usa sempre o nome mais atualizado. Hoje há os Cadernos de setembro e de março de 2026.
+- `siglas_2026.json`: (1) a unidade orçamentária principal de cada sigla na LOA 2026, conferida uma a uma; o caderno
+  acha a secretaria por ela, mesmo quando a pasta vem só com a sigla (as vinculadas são as do mesmo órgão). (2) As
+  secretarias que saíram do Caderno de RH na reforma de 2026 e a sucessora: SEAP → SEPPENRJ, SEM → SEMPI e
+  SEDIPAF → SEAPPA, confirmadas na PLOA 2027; SECTI, SEDEICS e SEENEMAR → SEDES e SEIJES → SEDSODH, por notícia
+  (entram com o rótulo de imprensa). A folha usa a sucessora e diz o que aconteceu e que os números são de toda a
+  sucessora. Sem sucessora conhecida, fica com o último Caderno em que aparece. Só entra sucessão com fonte.
 
 Para atualizar a folha, baixe o Caderno do mês e rode:
 

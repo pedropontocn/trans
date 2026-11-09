@@ -179,7 +179,89 @@ def test_caderno_na_rodada(llm, bases, tmp_path):
     assert list((saida / "cadernos").glob("*_caderno.docx")) and list((saida / "cadernos").glob("*_quadro.csv"))
     aud = json.loads(next((saida / "auditoria").glob("*_caderno.json")).read_text(encoding="utf-8"))
     assert aud["situacao"] == "gerado" and aud["uso_tokens"]
-    # sem relatório no modelo v2, o caderno não sai e a rodada segue
+    # sem relatório no modelo v2, o caderno sai do material lido na rodada (aqui, sem programas: só o orçamento)
     orgaos = [{"nome": "Secretaria de Exemplo - SEX", "ler": lambda: (RELATORIO, {"lidos": []})}]
     linhas = analise.rodar_orgaos(orgaos, cfg, tmp_path / "outra", log=lambda *_: None)
-    assert linhas[0]["situacao"] == "concluído" and linhas[0]["caderno"].startswith("não gerado: nenhum Relatório")
+    assert linhas[0]["situacao"] == "concluído" and linhas[0]["caderno"] == "sem fichas (só o orçamento)"
+    aud = json.loads(next((tmp_path / "outra" / "auditoria").glob("*_caderno.json")).read_text(encoding="utf-8"))
+    assert aud["origem_dos_programas"] == "material"
+    material = [c for c in llm.chamadas if "Você lê o material" in str(c["mensagens"][0]["content"])]
+    assert material and RELATORIO[:200] in str(material[-1]["mensagens"][1]["content"])
+
+
+def test_secretaria_achada_na_loa_pela_sigla(llm, monkeypatch):
+    # bases do repositório: a pasta da secretaria pode vir só com a sigla (ex.: "SEIOP"); a unidade sai da tabela
+    # conferida sigla → unidade, sem depender do nome por extenso
+    from transicao import caderno
+    monkeypatch.delenv("PASTA_BASES", raising=False)
+    loa, _ = caderno.orcamento()
+    uos, principal = caderno.unidades_da_secretaria("SEIOP", loa, "SEIOP", "SEIOP")
+    assert principal == "53010" and "53510" in uos                     # a EMOP é vinculada (mesmo órgão, 53)
+    assert caderno.unidades_da_secretaria("SECID", loa, "SECID", "SECID")[1] == "66010"
+    assert caderno.unidades_da_secretaria("SEAPA", loa, "", "SEAPA")[1] == "13010"
+    assert caderno.unidades_da_secretaria("XYZ", loa, "XYZ", "XYZ") == ([], None)
+    from transicao.folha import PASTA_BASES
+    tabela = json.load(open(PASTA_BASES / "siglas_2026.json", encoding="utf-8"))
+    assert all(uo in loa["uos"] for uo in tabela["unidades"].values())   # toda unidade da tabela existe na LOA
+
+
+MATERIAL = ("# ARQUIVO: Controle_Transicao_SEX.xlsx\n\n"
+            "| Programa | Situação | Objetivo | Valor |\n|---|---|---|---|\n"
+            "| Feira Estadual de Artesanato | Em andamento, com 3 edições realizadas em 2026 | Apoiar artesãos do "
+            "interior com feiras regionais e capacitação | R$ 80.000,00 empenhados na ação 4888 |\n"
+            "# ARQUIVO: Oficio_SEX.pdf\n\nO Programa Turismo Rural atende 14 municípios do interior do Estado.")
+
+
+def test_caderno_sem_relatorio_modelo_usa_o_material_enviado(llm, bases):
+    # sem o Relatório de Transição no modelo v2: os programas vêm do material (qualquer formato), com cada campo
+    # copiado literalmente e conferido no arquivo; o que não confere sai
+    from transicao import caderno
+    llm.caderno_material = {"programas": [
+        {"titulo": "Feira Estadual de Artesanato", "tipo": "programa", "campos": {
+            "situacao": "Em andamento, com 3 edições realizadas em 2026",
+            "objetivo": "Apoiar artesãos do interior com feiras regionais e capacitação",
+            "valor": "R$ 80.000,00 empenhados na ação 4888",
+            "metas": "Meta de 10 feiras em 2026 com 500 artesãos atendidos"}},          # não está no material
+        {"titulo": "Turismo Rural", "tipo": "programa", "campos": {
+            "publico": "O Programa Turismo Rural atende 14 municípios do interior do Estado."}},  # um campo só
+        {"titulo": "Programa Inventado", "tipo": "projeto", "campos": {
+            "objetivo": "Construir um teleférico entre a serra e o mar em 2027",
+            "valor": "R$ 300 milhões do Tesouro estadual para a obra completa"}}]}
+    llm.caderno_ligacao = {"fichas": [{"secao": "P1", "acoes": [], "riscos": ["R1"], "motivo": "teste"}]}
+    cfg = {"modelo": "anthropic/claude-opus-5-5", "data_corte": "29/10/2026"}
+    c = caderno.gerar("SEX", "SEX", {"secao3": []}, [{"id": "R1", "titulo": "Feira sem contrato"}], [], cfg, nome_por_extenso="Secretaria de Estado de Exemplo",
+                      texto=MATERIAL)
+    assert c["situacao"] == "gerado", c.get("motivo")
+    aud = c["auditoria"]
+    assert aud["origem_dos_programas"] == "material"
+    assert [f["titulo"] for f in aud["fichas"]] == ["Feira Estadual de Artesanato"]
+    f = aud["fichas"][0]
+    assert f["secao"] == "P1" and f["arquivo"] == "Controle_Transicao_SEX.xlsx" and f["origem"] == "material"
+    assert set(f["campos"]) == {"situacao", "objetivo", "valor"} and f["campos_recusados"] == ["metas"]
+    assert f["acoes"] == ["10010:23.691.0452.4888"] and f["acoes_por"].startswith("código")
+    assert {d["titulo"] for d in aud["programas_descartados"]} == {"Turismo Rural", "Programa Inventado"}
+    md = c["md"]
+    assert "Fonte: Controle_Transicao_SEX.xlsx (material enviado pela secretaria" in md
+    assert "Material enviado pela secretaria (sem Relatório de Transição no modelo v2)" in md
+    assert "\"Programa Inventado\": achado no material, mas sem ficha" in md
+    assert "teleférico" not in md.split("## Notas de fonte")[0]
+    assert aud["verificacao_total"]["confere"]
+
+
+def test_caderno_sem_programas_sai_so_com_o_orcamento(llm, bases):
+    from transicao import caderno
+    c = caderno.gerar("SEX", "SEX", None, [], [], {"modelo": "anthropic/claude-opus-5-5", "data_corte": "29/10/2026"},
+                      nome_por_extenso="Secretaria de Estado de Exemplo", texto="# ARQUIVO: Nada.xlsx\n\nSem programas.")
+    assert c["situacao"] == "gerado" and c["fichas"] == 0
+    assert "| **Total finalístico** | **1.150** |" in c["md"] and "Sem fichas:" in c["md"]
+
+
+def test_quadro_41_sem_linha_com_o_nome_do_orgao():
+    # relatório de órgão único (ex.: SEIOP): os valores vêm logo depois do cabeçalho da tabela
+    from transicao import secao3
+    paginas = ["3.1 Programas e políticas públicas\n4.1 Orçamento e execução financeira\nItem Valor (R$) Observação\n"
+               "Dotação inicial (LOA do exercício) 441.599.773,00\nLiquidado 233.246.325,75 Inclui o crédito\n"
+               "Fonte: SIAFE-Rio, posição em 26/10/2026 (despesa acumulada).\n4.2 Contratos e licitações"]
+    q = secao3.quadro_41(paginas, "r.pdf")
+    assert q == [{"orgao": "", "itens": {"dotacao_inicial": "441.599.773,00", "liquidado": "233.246.325,75"},
+                  "data_base": "26/10/2026", "pagina": 1, "arquivo": "r.pdf"}]

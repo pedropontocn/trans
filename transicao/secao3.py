@@ -112,7 +112,10 @@ def quadro_41(paginas, arquivo):
             blocos.append(atual)
             continue
         if atual is None:
-            continue
+            if not any(linha.startswith(r) for r, _ in ITENS_41):
+                continue
+            atual = {"orgao": "", "itens": {}, "data_base": "", "pagina": pagina, "arquivo": arquivo}  # órgão único,
+            blocos.append(atual)                                                                     # sem linha de nome
         for rotulo, chave in ITENS_41:
             if linha.startswith(rotulo) and chave not in atual["itens"]:
                 if m := RE_VALOR_41.search(linha[len(rotulo):]):

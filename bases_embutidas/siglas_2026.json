@@ -1,0 +1,28 @@
+{
+  "descricao": "Sigla de cada secretaria e a unidade orçamentária principal na LOA 2026 (as vinculadas são as do mesmo órgão, os dois primeiros dígitos). E as secretarias que saíram do Caderno de RH na reforma administrativa de 2026, com a sigla da sucessora no Caderno mais recente e a fonte. Só entra sucessão com fonte.",
+  "unidades": {
+    "SES": "29010", "SEEDUC": "18010", "SECID": "66010", "SECC": "14010", "SECTI": "40010", "SEPM": "51010",
+    "SEAPA": "13010", "SEAPPA": "13010", "SEAS": "24010", "SETRAM": "31010", "SEPOL": "52010", "SEGOV": "57010",
+    "SEDEC": "16010", "SETD": "58010", "SEHIS": "65010", "SEFAZ": "20010", "SEDSODH": "49010", "SEAP": "25010",
+    "SEPPENRJ": "25010", "SECEC": "15010", "SEDCON": "62020", "SEDEICS": "22010", "SEDES": "22010", "SEIOP": "53010",
+    "SEENEMAR": "64010", "SEPLAG": "21010", "SETRAB": "30010", "SEGG": "61010", "SEM": "59010", "SEMPI": "59010",
+    "SESP": "26010", "SEEL": "17010", "SEDIPAF": "27010", "SETUR": "43010", "SEIJES": "60010"
+  },
+  "sucessoras": {
+    "SEAP": {"atual": "SEPPENRJ", "como": "passou a se chamar Secretaria de Estado de Polícia Penal",
+             "oficial": "na PLOA 2027, Volume II, p. 261, a unidade 25010 é a Secretaria de Estado de Polícia Penal"},
+    "SEM": {"atual": "SEMPI", "como": "passou a se chamar Secretaria de Estado da Mulher e de Políticas Inclusivas",
+            "oficial": "na PLOA 2027, Volume II, p. 465, a unidade 59010 é a Secretaria de Estado da Mulher e de Politicas Inclusivas"},
+    "SEDIPAF": {"atual": "SEAPPA", "como": "foi fundida com a Secretaria de Agricultura em julho de 2026",
+                "oficial": "na PLOA 2027, Volume II, p. 68, a unidade 13010 é a Secretaria de Estado de Agricultura, Pecuária, Pesca, Abast e Des Int, e a unidade 27010 não aparece",
+                "fonte": "https://agenciabrasil.ebc.com.br/politica/noticia/2026-07/rio-de-janeiro-funde-secretarias-de-agricultura-e-de-pesca/"},
+    "SEENEMAR": {"atual": "SEDES", "como": "foi extinta em julho de 2026 e incorporada à SEDEICS, que em agosto de 2026 absorveu também a SECTI",
+                 "fonte": "https://www.defesaemfoco.com.br/governo-do-rio-extingue-secretaria-de-energia-e-economia-do-mar-em-reforma-administrativa/"},
+    "SEDEICS": {"atual": "SEDES", "como": "absorveu a SEENEMAR em julho de 2026 e a SECTI em agosto de 2026",
+                "fonte": "https://www.correiodamanha.com.br/colunistas/correio-bastidores/2026/08/309036-couto-unifica-secretarias-de-desenvolvimento-economico-e-ciencia-tecnologia-e-inovacao-do-rj.html"},
+    "SECTI": {"atual": "SEDES", "como": "foi incorporada à SEDEICS em agosto de 2026",
+              "fonte": "https://www.correiodamanha.com.br/colunistas/correio-bastidores/2026/08/309036-couto-unifica-secretarias-de-desenvolvimento-economico-e-ciencia-tecnologia-e-inovacao-do-rj.html"},
+    "SEIJES": {"atual": "SEDSODH", "como": "foi extinta em agosto de 2026, com as atribuições passadas à Secretaria de Estado de Desenvolvimento Social e Direitos Humanos",
+               "fonte": "https://diariodorio.com/ricardo-couto-extingue-secretaria-de-juventude-e-envelhecimento-saudavel-apos-auditoria-apontar-irregularidades-em-contratos"}
+  }
+}
