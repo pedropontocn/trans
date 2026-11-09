@@ -39,7 +39,7 @@ def _recarregar_se_mudou():
     rodando = any(t.get("situacao") == "rodando" for t in (getattr(pacote, "_trabalhos_vivos", None) or {}).values())
     if rodando:
         return
-    ordem = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist",
+    ordem = ["config", "modelo", "imagens", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist",
              "riscos", "revisao", "documentos", "painel", "secao3", "caderno", "lote_api", "analise"]
     for nome in ordem + sorted(n.split(".", 1)[1] for n in list(sys.modules) if n.startswith("transicao.")
                               and n.split(".", 1)[1] not in ordem):
@@ -302,6 +302,12 @@ with st.sidebar:
         caderno_teto = c2.number_input("Teto de fichas", 1, 40, 12, help="Máximo de fichas por secretaria.")
     else:
         caderno_percentual, caderno_teto = 80, 12
+    ler_imagens = st.checkbox(
+        "Ler o que está em imagem", value=True,
+        help="Páginas digitalizadas, slides salvos como figura, prints de tabelas no Word ou no PowerPoint e fotos de "
+             "documentos: o modelo de Extrações transcreve o texto, as tabelas e os números da imagem, que entram no "
+             "material como o resto. Logos e ícones ficam de fora. Até 250 imagens por secretaria; cerca de "
+             "US$ 0,02 por imagem.")
     with st.expander("Cabeçalho do documento"):
         orgao_emissor = st.text_input("Órgão", value="Equipe de Transição")
         unidade = st.text_input("De (unidade)", value="")
@@ -372,8 +378,9 @@ if trabalho:
 
 if not trabalho or trabalho["situacao"] != "rodando":
     if not trabalho:
-        enviados = st.file_uploader("Arquivos das secretarias (.zip, Word, PDF ou Excel)",
-                                    type=["zip", "docx", "pdf", "xlsx", "xls"],
+        enviados = st.file_uploader("Arquivos das secretarias (.zip, Word, PDF, Excel, PowerPoint ou imagens)",
+                                    type=["zip", "docx", "pdf", "xlsx", "xls", "pptx", "png", "jpg", "jpeg", "webp",
+                                          "gif", "bmp", "tif", "tiff"],
                                     accept_multiple_files=True)
         modo = st.radio("Como os arquivos estão organizados?",
                         ["Cada arquivo é o resumo de um órgão", "Cada pasta é um órgão (documentos brutos)"],
@@ -447,7 +454,7 @@ if not trabalho or trabalho["situacao"] != "rodando":
                            "familias": familias,
                            "data_corte": data_corte.strftime("%d/%m/%Y"),
                            "foco": foco.strip(), "orgao_emissor": orgao_emissor, "unidade": unidade, "para": para,
-                           "pesquisar_estado": pesquisar_estado, "caderno": gerar_caderno,
+                           "pesquisar_estado": pesquisar_estado, "caderno": gerar_caderno, "ler_imagens": ler_imagens,
                            "caderno_percentual": caderno_percentual / 100, "caderno_teto": int(caderno_teto)}
                     try:
                         saida = REGISTROS / f"analise_{datetime.now():%Y%m%d%H%M%S%f}"

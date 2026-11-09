@@ -216,6 +216,8 @@ class LLMFalso:
             {"id": "C3", "resposta": "LOA 2026 de R$ 412 milhões.", "itens": ["O1"], "trechos": []},
             {"id": "C5", "resposta": "O TCE-RJ apontou atraso na prestação de contas de convênios.", "itens": ["O4"]}]}
         self.texto_relatorio = RELATORIO           # o que o MarkItDown falso devolve
+        self.transcricao = "| Obra | Valor |\n|---|---|\n| Ponte do Rio | R$ 1.234.567,89 |"  # o que vem da imagem
+        self.imagens_vistas = []
 
     def _resp(self, conteudo="", nome=None, args=None, motivo="stop", entrada=10000, saida=2000, buscas=None):
         chamadas = [NS(function=NS(name=nome, arguments=json.dumps(args)))] if nome else None
@@ -227,9 +229,16 @@ class LLMFalso:
     def __call__(self, model, messages, max_tokens, **kw):
         if model in self.modelos_que_falham:
             raise RuntimeError(f"{model} fora do ar")
-        texto = lambda c: c if isinstance(c, str) else " ".join(p["text"] for p in c)
+        texto = lambda c: c if isinstance(c, str) else " ".join(p.get("text", "") for p in c)
         ultimo = texto(messages[-1]["content"])
         sistema = texto(messages[0]["content"])
+        if "Você transcreve imagens de documentos" in sistema:
+            with self.trava:
+                self.chamadas.append({"modelo": model, "ferramenta": None, "ferramentas": [], "mensagens": messages,
+                                      "kw": kw})
+            imagem = next(p for p in messages[-1]["content"] if p.get("type") == "image_url")
+            self.imagens_vistas.append(imagem["image_url"]["url"])
+            return self._resp(self.transcricao, entrada=1600, saida=300)
         # com o relatório em cache, as instruções da etapa vêm na primeira mensagem do usuário, depois do relatório
         contexto = sistema + " " + (texto(messages[1]["content"]) if len(messages) > 1 else "")
         nomes = [t["function"]["name"] for t in kw.get("tools") or []]
