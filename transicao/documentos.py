@@ -166,6 +166,10 @@ def _ler_markdown(md):
         if fixo is not None:
             fixo.append(linha.rstrip())
             continue
+        if s == "<<<QUEBRA>>>":                 # quebra de página (caderno executivo: cada ficha numa página)
+            fechar_paragrafo()
+            blocos.append(("quebra",))
+            continue
         if not s:
             fechar_paragrafo()
             continue
@@ -230,6 +234,9 @@ def _desenhar_blocos(alvo, blocos):
         elif tipo == "table":
             _desenhar_tabela(alvo, bloco[1])
             alvo.add_paragraph()
+        elif tipo == "quebra":
+            if hasattr(alvo, "add_page_break"):
+                alvo.add_page_break()
         elif tipo == "pre":
             for k, texto in enumerate(bloco[1]):
                 par = alvo.add_paragraph()
@@ -270,7 +277,11 @@ def _desenhar_tabela(alvo, linhas):
         textos = [len(l[c]) if c < len(l) else 0 for l in linhas]
         cabecalho_len = len(linhas[0][c]) if c < len(linhas[0]) else 0
         curta = all(len(l[c]) <= 4 for l in linhas[1:] if c < len(l))      # coluna de ids (C1, R2...): estreita
-        medias.append(max(7 if curta else 12, cabecalho_len + 2, min(60, sum(textos) / len(textos))))
+        palavra = max((len(w) for l in linhas[1:] if c < len(l) for w in re.findall(r"\S+", l[c].strip("*"))), default=0)
+        numerica = any(c < len(l) and l[c].strip("* ") for l in linhas[1:]) and all(
+            re.fullmatch(r"[\d.,%R$ –\-]*", l[c].strip("*")) for l in linhas[1:] if c < len(l))
+        medias.append(max(7 if curta else 12, cabecalho_len + 2, min(60, sum(textos) / len(textos)),
+                          min(26, palavra + 8 if numerica else palavra * 1.5 + 3)))
     total = sum(medias)
     larguras = [Cm(17 * m / total) for m in medias]
     tabela.autofit = False
@@ -340,7 +351,7 @@ def gerar_docx(memorando_md, meta):
         b = blocos[i]
         if b[0] == "h" and b[1] == 2 and _norm(b[2]).startswith(("anexo", "capitulo")) and i > 0:
             doc.add_page_break()
-        if b[0] == "h" and b[1] <= 2 and ("sintese" in _norm(b[2]) or "essencial" in _norm(b[2])):
+        if b[0] == "h" and b[1] <= 2 and _norm(b[2]).startswith(("em sintese", "sintese", "o essencial", "essencial")):
             j = i + 1
             while j < len(blocos) and not (blocos[j][0] == "h" and blocos[j][1] <= 2):
                 j += 1

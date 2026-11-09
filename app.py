@@ -40,7 +40,7 @@ def _recarregar_se_mudou():
     if rodando:
         return
     ordem = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist",
-             "riscos", "revisao", "documentos", "painel", "lote_api", "analise"]
+             "riscos", "revisao", "documentos", "painel", "secao3", "caderno", "lote_api", "analise"]
     for nome in ordem + sorted(n.split(".", 1)[1] for n in list(sys.modules) if n.startswith("transicao.")
                               and n.split(".", 1)[1] not in ordem):
         modulo = sys.modules.get(f"transicao.{nome}")
@@ -290,6 +290,18 @@ with st.sidebar:
               "conferidos. Marque para pesquisar de novo (cerca de US$ 0,70); a pesquisa nova sai no .zip como "
               "contexto_estado.json, pronta para substituir a do app." if _estado else
               "O app não tem contexto do Estado embutido: ele será pesquisado nesta rodada."))
+    gerar_caderno = st.checkbox(
+        "Gerar também o caderno executivo", value=False,
+        help="Uma ficha por programa (seção 3 do Relatório de Transição, modelo v2, em PDF), com o orçamento da LOA "
+             "2026 e da PLOA 2027 por ação e o vínculo com o Plano de Governo. Só sai para a secretaria que tiver o "
+             "relatório no modelo v2. Custo extra estimado: US$ 0,50 a 1,50 por secretaria.")
+    if gerar_caderno:
+        c1, c2 = st.columns(2)
+        caderno_percentual = c1.number_input("Orçamento coberto (%)", 10, 100, 80, step=5,
+                                             help="Regra 3: ações por orçamento até este % do finalístico.")
+        caderno_teto = c2.number_input("Teto de fichas", 1, 40, 12, help="Máximo de fichas por secretaria.")
+    else:
+        caderno_percentual, caderno_teto = 80, 12
     with st.expander("Cabeçalho do documento"):
         orgao_emissor = st.text_input("Órgão", value="Equipe de Transição")
         unidade = st.text_input("De (unidade)", value="")
@@ -435,7 +447,8 @@ if not trabalho or trabalho["situacao"] != "rodando":
                            "familias": familias,
                            "data_corte": data_corte.strftime("%d/%m/%Y"),
                            "foco": foco.strip(), "orgao_emissor": orgao_emissor, "unidade": unidade, "para": para,
-                           "pesquisar_estado": pesquisar_estado}
+                           "pesquisar_estado": pesquisar_estado, "caderno": gerar_caderno,
+                           "caderno_percentual": caderno_percentual / 100, "caderno_teto": int(caderno_teto)}
                     try:
                         saida = REGISTROS / f"analise_{datetime.now():%Y%m%d%H%M%S%f}"
                         saida.mkdir(parents=True, exist_ok=True)

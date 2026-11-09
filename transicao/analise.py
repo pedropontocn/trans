@@ -213,13 +213,13 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
 # --- VÁRIOS ÓRGÃOS ------------------------------------------------------------------------
 
 COLUNAS_RESUMO = ["orgao", "situacao", "dossie", "itens_dossie", "conferidos", "riscos", "riscos_maxima_alta",
-                  "agentes", "datas_calendario", "nao_procurados", "confianca",
+                  "agentes", "datas_calendario", "nao_procurados", "confianca", "caderno",
                   "custo_usd", "minutos", "observacao"]
 
 
 def _gravar_resumo(saida, linhas, custo_estado):
     with open(saida / "resumo.csv", "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=COLUNAS_RESUMO, delimiter=";")
+        w = csv.DictWriter(f, fieldnames=COLUNAS_RESUMO, delimiter=";", extrasaction="ignore")
         w.writeheader()
         w.writerows(linhas)
     total = sum(l["custo_usd"] for l in linhas) + custo_estado
@@ -234,6 +234,9 @@ def _gravar_resumo(saida, linhas, custo_estado):
         "  prioridade, sensibilidade política e revisão dos agentes; informações que faltam).\n"
         "- calendarios/: o calendário de vencimentos de cada secretaria em Excel, só com as datas que ela informou; a\n"
         "  aba Prioridades vem primeiro.\n"
+        "- cadernos/ (se pedido): o caderno executivo de cada secretaria em Word (uma ficha por programa, com o\n"
+        "  orçamento da LOA 2026 e da PLOA 2027 por ação e o vínculo com o Plano de Governo) e o quadro-síntese\n"
+        "  em CSV, para o consolidado. Só sai para a secretaria com o Relatório de Transição (modelo v2) em PDF.\n"
         "- resumo.csv: situação, números e custo de cada órgão.\n"
         "- auditoria/: o registro completo de cada análise em JSON (dossiê e conferências, revisões dos seis agentes,\n"
         "  objeções risco a risco, método, descartes, custo).\n\n"
@@ -292,6 +295,33 @@ def prontos(saida):
     return nomes
 
 
+def _gravar_caderno(saida, pasta, nome, manifesto, r, cfg, log, k):
+    """O caderno executivo da secretaria (Word e CSV do quadro-síntese) e a sua auditoria. Um erro aqui não derruba a
+    análise da secretaria: fica registrado e a rodada segue. Devolve os campos da linha do resumo."""
+    from . import caderno
+    try:
+        dossie = (r.get("registro") or {}).get("dossie") or {}
+        c = caderno.gerar(nome, entrada.sigla(nome) or nome, manifesto, r["riscos"], r["eventos"], cfg,
+                          folha_q=dossie.get("folha"), nome_por_extenso=dossie.get("orgao", ""))
+    except Exception as e:
+        log(f"[{k}] caderno não montado: {type(e).__name__}: {e}"[:300])
+        return {"caderno": f"erro: {type(e).__name__}"}
+    custo, _ = modelo.custo_estimado(c.get("uso") or [])
+    (saida / "auditoria" / f"{pasta}_caderno.json").write_text(
+        json.dumps(dict(c.get("auditoria") or {}, uso_tokens=c.get("uso"), situacao=c["situacao"],
+                        motivo=c.get("motivo", "")), ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    if c["situacao"] != "gerado":
+        log(f"[{k}] Caderno executivo não gerado: {c.get('motivo', '')}")
+        return {"caderno": f"não gerado: {c.get('motivo', '')}"[:200],
+                "custo_usd": round(r["custo"] + custo, 3)}
+    meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""),
+            "tipo": "Caderno executivo", "assunto": f"Caderno executivo – {nome}", "data": cfg.get("data_corte", "")}
+    (saida / "cadernos" / f"{pasta}_caderno.docx").write_bytes(documentos.gerar_docx(c["md"], meta))
+    (saida / "cadernos" / f"{pasta}_quadro.csv").write_bytes(c["csv"])
+    log(f"[{k}] Caderno executivo: {c['fichas_geradas']} de {c['fichas']} fichas (US$ {custo:.2f})")
+    return {"caderno": f"{c['fichas_geradas']} de {c['fichas']} fichas", "custo_usd": round(r["custo"] + custo, 3)}
+
+
 def _gravar_painel_e_calendario(saida, pasta, nome, riscos_orgao, situacao, eventos_orgao, descartados_orgao, cfg,
                                 linha, sobrescrever=True):
     """O calendário da secretaria (Excel) e os dados do painel (JSON, para o painel unificado), montados por código,
@@ -317,7 +347,7 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
     analisado de novo: o lote reaproveita o resultado e só refaz o que faltou."""
     global JUNTAS
     saida = Path(saida)
-    for sub in ("paineis", "dossies", "riscos", "calendarios", "auditoria"):
+    for sub in ("paineis", "dossies", "riscos", "calendarios", "cadernos", "auditoria"):
         (saida / sub).mkdir(parents=True, exist_ok=True)
     fila = None
     if economico:
@@ -403,6 +433,9 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                                                 r["descartados"], cfg, linha)
                 except Exception as e:
                     log(f"[{k}] painel/calendário não montados: {type(e).__name__}: {e}"[:300])
+                if cfg.get("caderno"):
+                    log(f"[{k}] Montando o caderno executivo...")
+                    linha.update(_gravar_caderno(saida, pasta, nome, manifesto, r, cfg, log, k))
             except Exception as e:
                 linha["observacao"] = f"{type(e).__name__}: {e}"[:300]
                 custo, _ = modelo.custo_estimado(modelo.uso_do_fio())

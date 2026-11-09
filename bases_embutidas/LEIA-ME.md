@@ -23,3 +23,13 @@ pelo próprio app em 08/11/2026, com os links conferidos por código.
 
 Para atualizar: rode uma análise com "Pesquisar de novo o contexto do Estado" marcado. O `.zip` sai com um
 `contexto_estado.json` novo; troque o arquivo desta pasta por ele. `ESTADO_EMBUTIDO=0` nos Secrets desliga o uso.
+
+## Orçamento e Plano de Governo (caderno executivo)
+
+- `loa_2026.json` e `ploa_2027.json`: por unidade orçamentária, cada ação do "Demonstrativo da despesa por programa
+  de trabalho" (Volume 2, todas as fontes, R$ 1,00), com as principais atribuições da unidade. Lidos por
+  `scripts/orcamento_loa.py`, que confere a soma das ações contra o total declarado de cada unidade (todas conferem).
+- `plano_governo_2027_2030.json`: os trechos do Plano do Rio Real 2027-2030, com página, eixo e tema; compromissos
+  são os itens de lista. Lido por `scripts/plano_governo.py` (PyMuPDF, leitura por blocos, por causa das duas colunas).
+
+Para atualizar (LOA nova, PLOA retificada, plano revisado), rode o script com o PDF novo e troque o arquivo.

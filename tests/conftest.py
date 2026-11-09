@@ -202,6 +202,12 @@ class LLMFalso:
                                  {"trecho": "Retomar ou cancelar", "por_que": "lista caminhos"},
                                  {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
         self.falhar_neutralidade = False
+        self.caderno_ligacao = None               # None: liga toda ficha à ação 4489 e a 2ª ficha ao R1
+        self.caderno_plano = {"vinculos": [
+            {"secao": "3.1.1", "trecho_id": "P33.9", "citacao": "Criação do Calendário Estadual de Turismo"},
+            {"secao": "3.1.2", "trecho_id": "P33.9", "citacao": "citação que não está no plano"}]}
+        self.fichas_ruins = {}                    # seção → ficha que não passa nas travas
+        self.fichas_refeitas = 0
         self.revisao_texto = {"textos": {"R1.decisao": "Destino das licitações adiadas."}}
         self.modelos_que_falham = set()           # modelos (nomes) que respondem como fora do ar
         self.analises_quebradas = 0               # quantas respostas da análise de riscos vêm com JSON inválido
@@ -230,6 +236,38 @@ class LLMFalso:
         with self.trava:
             self.chamadas.append({"modelo": model, "ferramenta": nome, "ferramentas": nomes, "mensagens": messages, "kw": kw})
 
+        if "Você liga as fichas de programas" in sistema:
+            pedido = json.loads(ultimo)
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.caderno_ligacao or {"fichas": [
+                {"secao": f["secao"], "acoes": ["10010:23.695.0452.4489"], "riscos": ["R1"] if k == 1 else [],
+                 "motivo": "teste"} for k, f in enumerate(pedido["fichas"])]}) + "[FIM DO JSON]")
+        if "Você indica, para cada programa" in sistema:
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.caderno_plano) + "[FIM DO JSON]")
+        if "Você redige uma ficha do Caderno Executivo" in sistema:
+            if "não passou na conferência" in ultimo:
+                self.fichas_refeitas += 1
+            pedido = json.loads(texto(messages[1]["content"]))
+            sec = pedido["programa"].split()[0]
+            tr = pedido["trechos"]
+            if sec in self.fichas_ruins:
+                return self._resp("[INÍCIO DO JSON]" + json.dumps(self.fichas_ruins[sec]) + "[FIM DO JSON]")
+
+            def campo(c):
+                k = f"{sec}:{c}"
+                return {"valor": tr[k].split(": ", 1)[1], "fontes": [k]} if k in tr else \
+                    {"valor": "Não informado pela secretaria", "fontes": []}
+            ficha = {"programa": {"valor": pedido["programa"][len(sec) + 1:], "fontes": [f"{sec}:titulo"]},
+                     "orgao_executor": campo("responsavel"), "objetivo": campo("objetivo"),
+                     "base_legal": {"valor": "Não informado pela secretaria", "fontes": []},
+                     "publico_cobertura": campo("publico"),
+                     "orcamento": {"liquidado": {"valor": "", "data_base": "", "fontes": []},
+                                   "fonte_recurso": {"valor": "", "fontes": []}},
+                     "instrumentos": [], "execucao_fisica": campo("metas"), "situacao": campo("situacao"),
+                     "proximos_marcos": [{"data": "15/01/2027", "descricao": "Encontro com o trade",
+                                          "fontes": [f"{sec}:proximas"]}] if f"{sec}:proximas" in tr else [],
+                     "pendencias_riscos": campo("pontos_criticos"), "responsavel_tecnico": campo("responsavel"),
+                     "lacunas": [], "conflitos": []}
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(ficha) + "[FIM DO JSON]")
         if "Monte a camada" in texto(messages[0]["content"]):
             pedido = texto(messages[0]["content"])
             grupo = re.findall(r"^- ([a-z_]+): ", pedido, re.M)
@@ -388,7 +426,7 @@ def llm(monkeypatch):
 
 
 MODULOS = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist", "riscos", "documentos",
-           "revisao", "painel", "analise"]
+           "revisao", "painel", "secao3", "caderno", "analise"]
 
 
 @pytest.fixture(autouse=True)

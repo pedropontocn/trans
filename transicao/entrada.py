@@ -182,6 +182,17 @@ def _extensao(nome, mime):
     return Path(nome).suffix.lower()
 
 
+def _guardar_secao3(manifesto, origem, nome, dados):
+    """Se o arquivo for um Relatório de Transição (modelo v2) em PDF, guarda no manifesto, lidas por código, as
+    fichas da seção 3 e o quadro 4.1: são a base do caderno executivo. Não interfere na leitura do texto."""
+    if not str(nome).lower().endswith(".pdf"):
+        return
+    from .secao3 import ler_relatorio_pdf
+    lido = ler_relatorio_pdf(origem, dados)
+    if lido["fichas"]:
+        manifesto.setdefault("secao3", []).append(dict(lido, arquivo=origem))
+
+
 def ler_documentos(drive, orgao, converter, limite_total):
     """Baixa e converte os arquivos das pastas do órgão. Devolve (texto, manifesto). O manifesto diz o que foi lido,
     pulado (formato, tamanho ou dados pessoais), cortado para caber no limite e o que deu erro."""
@@ -196,6 +207,7 @@ def ler_documentos(drive, orgao, converter, limite_total):
             return
         if texto.strip():
             textos.append((origem, limpar_dados_pessoais(texto)))
+            _guardar_secao3(manifesto, origem, nome, dados)
         else:
             manifesto["pulados"].append({"arquivo": origem, "motivo": "sem texto (PDF digitalizado?)"})
 
@@ -447,6 +459,7 @@ def orgaos_do_envio(arquivos, cada_pasta=False):
             if texto.strip():
                 partes.append(f"# ARQUIVO: {r['arquivo']}\n\n{texto}")
                 manifesto["lidos"].append({"arquivo": r["arquivo"], "caracteres": len(texto)})
+                _guardar_secao3(manifesto, r["arquivo"], r["arquivo"], r["conteudo"])
             else:
                 manifesto["pulados"].append({"arquivo": r["arquivo"], "motivo": "sem texto (PDF digitalizado?)"})
         return "\n\n".join(partes), manifesto
