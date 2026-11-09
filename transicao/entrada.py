@@ -132,6 +132,29 @@ def limpar_dados_pessoais(texto):
     return RE_TELEFONE.sub("[telefone omitido]", texto)
 
 
+def siglas_conhecidas():
+    """As siglas das secretarias (bases_embutidas/siglas_2026.json) e os apelidos da folha."""
+    import json
+    from .folha import APELIDOS, PASTA_BASES
+    try:
+        tabela = json.loads((Path(os.getenv("PASTA_BASES") or PASTA_BASES) / "siglas_2026.json")
+                            .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set(APELIDOS)
+    return set(tabela.get("unidades", {})) | set(tabela.get("sucessoras", {})) | set(APELIDOS)
+
+
+def sigla_conhecida(nome):
+    """A sigla de secretaria no começo ou no fim do nome ("SEEDUC - apresentação", "Educação - SEEDUC"), se for uma
+    das conhecidas; senão ""."""
+    conhecidas = siglas_conhecidas()
+    for candidata in (re.match(r"\s*([A-Z][A-Z0-9]{1,14})\b", nome or ""), sigla(nome or "")):
+        valor = candidata.group(1) if hasattr(candidata, "group") else candidata
+        if valor and valor in conhecidas:
+            return valor
+    return ""
+
+
 def sigla(nome):
     m = re.search(r"[-–]\s*([A-Z][A-Z0-9]{1,14})\s*$", nome.strip())
     if m:
@@ -470,6 +493,16 @@ def orgaos_do_envio(arquivos, cada_pasta=False):
     grupos = {}
     for r in resumos_do_envio(arquivos):
         grupos.setdefault(r["orgao"], []).append(r)
+    # vários arquivos da mesma secretaria ("SEEDUC - apresentação.pptx", "SEEDUC - ofício.pdf"): uma secretaria só,
+    # pela sigla conhecida no começo ou no fim do nome
+    por_sigla = {}
+    for nome in list(grupos):
+        s = sigla_conhecida(nome)
+        if s:
+            por_sigla.setdefault(s, []).append(nome)
+    for s, nomes in por_sigla.items():
+        if len(nomes) > 1:
+            grupos[s] = [r for n in nomes for r in grupos.pop(n)]
 
     def ler(itens):
         partes, manifesto = [], {"lidos": [], "pulados": [], "erros": [], "cortados": []}

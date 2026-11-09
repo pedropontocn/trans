@@ -265,3 +265,18 @@ def test_quadro_41_sem_linha_com_o_nome_do_orgao():
     q = secao3.quadro_41(paginas, "r.pdf")
     assert q == [{"orgao": "", "itens": {"dotacao_inicial": "441.599.773,00", "liquidado": "233.246.325,75"},
                   "data_base": "26/10/2026", "pagina": 1, "arquivo": "r.pdf"}]
+
+
+def test_so_caderno_nao_roda_dossie_nem_riscos(llm, bases, tmp_path):
+    from transicao import analise, riscos
+    from test_analise import CFG
+    orgaos = [{"nome": "Secretaria de Exemplo - SEX", "ler": lambda: (RELATORIO, _manifesto())}]
+    linhas = analise.rodar_orgaos(orgaos, dict(CFG, produtos=["caderno"]), tmp_path, log=lambda *_: None)
+    assert linhas[0]["situacao"] == "concluído" and linhas[0]["caderno"].endswith("fichas"), linhas[0]
+    assert list((tmp_path / "cadernos").glob("*_caderno.docx"))
+    assert not (tmp_path / "dossies").exists() and not (tmp_path / "riscos").exists()
+    assert not (tmp_path / "paineis").exists() and not (tmp_path / "calendarios").exists()
+    textos = [json.dumps(c["mensagens"], ensure_ascii=False) for c in llm.chamadas]
+    assert not any(json.dumps(riscos.PROMPT_ANALISE[:80], ensure_ascii=False)[1:-1] in t for t in textos)
+    aud = json.loads(next((tmp_path / "auditoria").glob("*_caderno.json")).read_text(encoding="utf-8"))
+    assert aud["situacao"] == "gerado" and all(not f.get("riscos") for f in aud["fichas"])
