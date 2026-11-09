@@ -300,13 +300,14 @@ def test_calendario_em_excel(funcoes):
     wb = load_workbook(io.BytesIO(funcoes.calendario_xlsx(eventos, [{"orgao": "SECID", "data": "x", "evento": "y",
                                                                      "motivo": "z"}])))
     ws = wb["Calendário"]
-    # as três primeiras colunas são para filtrar: secretaria (sigla), janela contada da posse e mês
-    assert [ws.cell(1, j).value for j in (1, 2, 3)] == ["Secretaria", "Janela", "Mês"]
-    assert ws["D2"].value.date() == date(2026, 11, 11) and ws["G3"].value == "SECID" and ws["A3"].value == "SECID"
-    assert ws["B2"].value == "Antes da posse" and ws["B3"].value == "Primeiros 100 dias" and ws["C2"].value == "2026-11"
+    # as três primeiras colunas são para filtrar: janela de decisão (contada da posse), secretaria (sigla) e mês
+    assert [ws.cell(1, j).value for j in (1, 2, 3)] == ["Janela de decisão", "Secretaria", "Mês"]
+    assert ws["D2"].value.date() == date(2026, 11, 11) and ws["G3"].value == "SECID" and ws["B3"].value == "SECID"
+    assert ws["A2"].value == "Antes da posse" and ws["A3"].value == "Primeiros 100 dias" and ws["C2"].value == "2026-11"
+    assert ws["A2"].fill.fgColor.rgb.endswith("C00000")                    # antes da posse em vermelho
     assert ws["P2"].hyperlink.target == "https://alerj.exemplo/emendas" and ws.auto_filter.ref == ws.dimensions
     assert ws["D3"].number_format == "mm/yyyy" and set(wb.sheetnames) == {"Prioridades", "Calendário", "Como ler", "Descartados"}
-    assert wb["Prioridades"].auto_filter.ref and wb["Prioridades"]["B1"].value == "Janela"
+    assert wb["Prioridades"].auto_filter.ref and wb["Prioridades"]["A1"].value == "Janela de decisão"
 
 
 def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
@@ -355,7 +356,7 @@ def test_regua_de_risco_igual_para_todos(funcoes):
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(funcoes.calendario_xlsx([dict(e, orgao="SEX", criticidade="x", so_mes=False,
                                 consequencia="", decisao="", fonte="", trecho="") for e in eventos])))
-    assert wb.sheetnames[0] == "Prioridades" and wb["Prioridades"]["C2"].value == "Máxima" and wb["Prioridades"]["A2"].value == "SEX"
+    assert wb.sheetnames[0] == "Prioridades" and wb["Prioridades"]["C2"].value == "Máxima" and wb["Prioridades"]["B2"].value == "SEX"
 
 
 
@@ -414,9 +415,10 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     # produto 3: o relatório de riscos, em ordem de prazo e sem anexo
     riscos = funcoes.relatorio_riscos(resultado, cobertura, nota)
     ordem = [riscos.index(t) for t in ["## Situação", "**Lacunas: 1 de 10", "## Decisões urgentes, em ordem de prazo",
-                                       "| # | Decisão (risco) | Agir até |", "**R1. ", "## Decisões em aberto",
-                                       "## Pedir à secretaria", "_Apoio à decisão gerado com IA (registro abc"]]
+                                       "| # | Ponto de decisão (risco) | Agir até |", "**R1. ",
+                                       "## Informações que faltam", "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
+    assert "Decisões em aberto" not in riscos and "Pedir à secretaria" not in riscos and "Quem decide" not in riscos
     assert len(re.findall(r"^\| R\d ", riscos, re.M)) == len(resultado["riscos"][:8])   # todos na tabela, até 8
     assert "Anexo" not in riscos and "aditivo irregular" not in riscos and "1. Contratos" not in riscos
     datas = [d for d in re.findall(r"^\| R\d+ \| [^|]+ \| (\d\d/\d\d/\d{4}|–) \|", riscos, re.M)]
@@ -458,7 +460,7 @@ def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):
     assert sem_base["firmeza"] == "sem comprovação" and sem_base["nota"] <= 5 and sem_base["categoria"] == "Continuidade de serviço"
     assert sem_base["agir_ate"] == date(2026, 12, 31) and sem_base["horizonte"] == "Antes da posse"   # "antes da posse"
     assert not sem_base["prazo_de_fato"] and r["riscos"][0]["prazo_de_fato"]          # vencimento é fato; janela é opinião
-    assert len(r["decisoes"]) == 1 and r["decisoes"][0]["riscos"] == ["R1"]         # decisão com uma opção só sai
+    assert r["decisoes"] == []                                                     # sem opções: o relatório não sugere caminho
     assert r["pedir"][0]["serve_a"].startswith("R1 e R")
     c = funcoes.confianca(funcoes.resumo_dossie(d), r["riscos"])
     assert c["nivel"] in ("baixa", "média") and any("riscos apoiados" in m for m in c["motivos"])
@@ -637,7 +639,7 @@ def test_agente_de_outra_familia_que_falha_roda_no_principal(funcoes, llm):
     assert all(r["modelo_previsto"] == "gemini/gemini-3.8-flash" and "fora do ar" in r["erro_do_previsto"] for r in trocados)
     nota = funcoes.nota_final("x", {"auxiliar": "a", "debate": "b"}, {"nivel": "média", "motivos": []}, "04/11/2026",
                               None, revisoes)
-    assert "6 agente(s) independente(s)" in nota and "todos na mesma família" in nota
+    assert "6 agentes de IA" in nota and "todos no mesmo modelo" in nota
     assert "3 rodaram no modelo principal porque o previsto falhou (Controle e jurídico" in nota
     # se o principal também falha, o agente fica sem resposta, como antes
     llm.modelos_que_falham = {"gemini/gemini-3.8-flash", "anthropic/claude-opus-5-5"}
@@ -745,3 +747,41 @@ def test_quadro_antes_de_ler_diz_o_que_e_a_confianca_e_os_cortes(funcoes):
     assert "só o que a secretaria informou" in md and md.rstrip().endswith("confira antes de usar.")
     baixa = funcoes.confianca(None, [], None)
     assert "não houve dossiê" in funcoes.antes_de_ler(baixa, "", []) and "não para afirmar" in funcoes.antes_de_ler(baixa, "", [])
+
+
+def test_encurtar_nao_corta_frase_no_meio(funcoes):
+    from transicao import documentos
+    texto = "Firewall termina em 18/11/2026 (V3, V14). Seguro vence em 06/12/2026 (F6). Telefonia em 31/12/2026."
+    assert documentos._curto(texto, 60) == "Firewall termina em 18/11/2026 (V3, V14)"
+    assert documentos._curto(texto, 90) == "Firewall termina em 18/11/2026 (V3, V14). Seguro vence em 06/12/2026 (F6)"
+    longa = "Uma frase só, bem longa, com referências no fim que não podem sumir (F1, F2, F3, F4, F5)."
+    assert documentos._curto(longa, 30) == longa.rstrip(".")                 # a primeira frase fica inteira
+    assert "…" not in documentos._curto(texto, 20)
+
+
+def test_revisao_do_texto_reescreve_no_tom_de_analise_com_travas(funcoes, llm):
+    from transicao import revisao
+    resultado = {"situacao": ["A secretaria deve renovar 3 contratos (F1)."],
+                 "riscos": [{"id": "R1", "titulo": "Viaturas", "causa": "Sete contratos de R$ 55,2 mi terminam (V1).",
+                             "consequencia": "Dívida (F2).", "decisao": "Aditivar ou encerrar? Cabe ao secretário.",
+                             "motivo_sensibilidade": "", "em_curso": ""}],
+                 "pedir": [{"o_que": "É preciso pedir a execução por ação.", "serve_a": "R1"}]}
+    assert revisao.alertas(resultado["situacao"][0]) == ['recomendação: "deve"']
+    llm.revisao_texto = {"textos": {
+        "situacao.0": "A secretaria tem 3 contratos a renovar (F1).",                 # aceita: mesmos números e refs
+        "R1.decisao": "Destino dos sete contratos de viaturas.",                        # aceita
+        "R1.causa": "Sete contratos de R$ 60 mi terminam (V1).",                        # recusada: mudou o valor
+        "pedido.9": "campo que não existe",                                             # ignorada
+        "pedir.0": "Recomenda-se a execução por ação."}}                                # recusada: recomendação
+    reg = revisao.revisar_texto("anthropic/claude-opus-5-5", resultado, [], pistas=[])
+    assert resultado["situacao"][0] == "A secretaria tem 3 contratos a renovar (F1)."
+    assert resultado["riscos"][0]["decisao"] == "Destino dos sete contratos de viaturas."
+    assert resultado["riscos"][0]["causa"].startswith("Sete contratos de R$ 55,2 mi")
+    motivos = {r["campo"]: r["motivo"] for r in reg["recusados"]}
+    assert motivos == {"R1.causa": "mudou número, data ou referência", "pedir.0": "manteve palavra de recomendação"}
+    assert set(reg["alertas_depois"]) == {"pedir.0"}                              # o que sobrou fica registrado
+    # sem resposta legível do modelo, o texto fica como estava
+    llm.revisao_texto = None
+    antes = dict(resultado["riscos"][0])
+    revisao.revisar_texto("anthropic/claude-opus-5-5", resultado, [], pistas=[])
+    assert resultado["riscos"][0] == antes

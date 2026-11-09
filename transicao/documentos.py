@@ -436,6 +436,18 @@ def _sigla_orgao(nome):
     return partes[-1] if len(partes) == 2 and partes[-1].isupper() else nome
 
 
+CORES_JANELA = {"Antes da posse": "C00000", "Primeiras 72 horas": "F4B183", "Primeiros 100 dias": "FFE699",
+                "Depois dos 100 dias": "E2EFDA"}
+
+
+def _pintar_janela(celula):
+    from openpyxl.styles import Font, PatternFill
+    cor = CORES_JANELA.get(celula.value)
+    if cor:
+        celula.fill = PatternFill("solid", fgColor=cor)
+        celula.font = Font(bold=True, color="FFFFFF" if cor == "C00000" else "000000")
+
+
 def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimentos críticos", data_corte=""):
     """Planilha do calendário: uma linha por evento, ordenada por data, com filtro, criticidade colorida e as
     instruções de leitura numa aba própria. Serve para um órgão ou para o consolidado do lote."""
@@ -448,24 +460,25 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
     ws.title = "Calendário"
     colunas = [("Data", 12), ("Dias até a data", 9), ("Criticidade", 20), ("Órgão", 30), ("Tipo", 16), ("Evento", 45),
                ("Objeto", 35), ("Valor (R$)", 16), ("Valor como informado", 18), ("O que acontece se nada for feito", 45),
-               ("Decisão necessária", 40), ("Origem da informação", 20), ("Fonte", 40), ("Trecho conferido", 60),
+               ("Ponto de decisão", 40), ("Origem da informação", 20), ("Fonte", 40), ("Trecho conferido", 60),
                ("Prioridade", 11), ("Nota (impacto × urgência)", 10), ("Impacto", 9), ("Categoria", 24),
                ("Serviço essencial", 10), ("Agir até", 12), ("Sem tempo para nova licitação", 12)]
-    # as três primeiras colunas são para filtrar: secretaria (sigla), janela contada da posse e mês
-    colunas = [("Secretaria", 12), ("Janela", 18), ("Mês", 10)] + colunas
+    # as três primeiras colunas são para filtrar: janela de decisão (contada da posse), secretaria (sigla) e mês
+    colunas = [("Janela de decisão", 18), ("Secretaria", 12), ("Mês", 10)] + colunas
     ws.append([c for c, _ in colunas])
     cores_prioridade = {"Máxima": "C00000", "Alta": "F4B183", "Média": "FFE699", "Baixa": "E2EFDA"}
     cores = {"Vencido": "C00000", "Crítico (até 30 dias)": "F4B183", "Atenção (31 a 90 dias)": "FFE699",
              "Acompanhar": "E2EFDA"}
     o = 3                                                   # deslocamento das colunas originais
     for e in sorted(eventos, key=lambda x: (x["data"], -(x["valor"] or 0))):
-        ws.append([_sigla_orgao(e["orgao"]), horizonte(e.get("agir_ate") or e["data"]), f"{e['data']:%Y-%m}",
+        ws.append([horizonte(e.get("agir_ate") or e["data"]), _sigla_orgao(e["orgao"]), f"{e['data']:%Y-%m}",
                    e["data"], e["dias"], e["criticidade"], e["orgao"], e["tipo"], e["evento"], e["objeto"], e["valor"],
                    e["valor_texto"], e["consequencia"], e["decisao"], e["origem"], e["fonte"], e["trecho"],
                    e.get("prioridade", ""), e.get("prioridade_nota"), e.get("impacto", ""), e.get("categoria", ""),
                    "sim" if e.get("essencial") else "não", e.get("agir_ate"),
                    "sim" if e.get("sem_tempo_licitar") else "não"])
         linha = ws.max_row
+        _pintar_janela(ws.cell(linha, 1))
         ws.cell(linha, o + 20).number_format = "dd/mm/yyyy"
         if e.get("prioridade") in cores_prioridade:
             ws.cell(linha, o + 15).fill = PatternFill("solid", fgColor=cores_prioridade[e["prioridade"]])
@@ -491,16 +504,17 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
     ws.freeze_panes = "D2"
     ws.auto_filter.ref = ws.dimensions
     prioridades = wb.create_sheet("Prioridades", 0)        # a primeira aba: o que tratar primeiro, em todos os órgãos
-    cab = ["Secretaria", "Janela", "Prioridade", "Agir até", "Vence em", "Órgão", "Categoria", "Serviço essencial", "Evento",
+    cab = ["Janela de decisão", "Secretaria", "Prioridade", "Agir até", "Vence em", "Órgão", "Categoria", "Serviço essencial", "Evento",
            "Valor (R$)", "Sem tempo para nova licitação", "Fonte"]
     prioridades.append(cab)
     from .produtos import ordem_de_prioridade
     for e in sorted([e for e in eventos if e["dias"] >= -30], key=ordem_de_prioridade)[:500]:
-        prioridades.append([_sigla_orgao(e["orgao"]), horizonte(e.get("agir_ate") or e["data"]), e.get("prioridade", ""),
+        prioridades.append([horizonte(e.get("agir_ate") or e["data"]), _sigla_orgao(e["orgao"]), e.get("prioridade", ""),
                             e.get("agir_ate"), e["data"], e["orgao"], e.get("categoria", ""),
                             "sim" if e.get("essencial") else "não", e["evento"], e["valor"],
                             "sim" if e.get("sem_tempo_licitar") else "não", e["fonte"]])
         linha = prioridades.max_row
+        _pintar_janela(prioridades.cell(linha, 1))
         for col in (4, 5):
             prioridades.cell(linha, col).number_format = "dd/mm/yyyy"
         prioridades.cell(linha, 10).number_format = '#,##0.00'
@@ -517,6 +531,10 @@ def calendario_xlsx(eventos, descartados=None, titulo="Calendário de vencimento
     for texto in [titulo, f"Data de corte: {data_corte}" if data_corte else "",
                   "Cada linha é um evento com data escrita nos documentos: vencimento de contrato ou convênio, prazo "
                   "legal, orçamentário ou de órgão de controle, marco de obra.",
+                  "Janela de decisão (primeira coluna, com filtro): quando o ponto precisa estar decidido, contado da "
+                  "posse em 01/01/2027, pela data-limite para agir (contrato: 30 dias antes do fim). Antes da posse: "
+                  "até 31/12/2026. Primeiras 72 horas: 01 a 03/01/2027. Primeiros 100 dias: até 10/04/2027. Depois "
+                  "dos 100 dias. Use a seta do filtro no cabeçalho para ver uma janela de cada vez.",
                   "Conferência: o trecho de onde a data foi tirada foi procurado por código no relatório do órgão ou "
                   "no item do dossiê, e a data foi procurada dentro do trecho. Eventos que não passaram ficam na aba "
                   "\"Descartados\".",
@@ -634,21 +652,13 @@ def markdown_riscos(resultado, limite_detalhe=5, cobre_siga=False):
         linhas.append("- " + " · ".join(d for d in detalhes if d))
         if r.get("revisao"):
             linhas.append("- " + _linha_revisao(r["revisao"]))
-        linhas.append(f"- **Decisão:** {r['decisao']}" + (f" — {r['quem_decide']}" if r.get("quem_decide") else ""))
+        linhas.append(f"- **Ponto de decisão:** {r['decisao']}")
     if len(riscos) > limite_detalhe:
         linhas += ["### Outros riscos a acompanhar", "| Risco | Categoria | Prioridade | Prazo | Base |", "|---|---|---|---|---|"]
         linhas += [f"| {r['id']}. {r['titulo']} | {r['categoria']} | {r['prioridade']} | {_agir(r)} | {r['firmeza']} |"
                    for r in riscos[limite_detalhe:]]
-    if decisoes:
-        linhas += ["## Decisões em aberto", "As opções têm o mesmo peso. O que cada olhar de gestão teme e valoriza em "
-                   "cada opção está no Anexo."]
-        for q in decisoes:
-            linhas.append(f"**{q['id']}. {q['pergunta']}**" + (f" _(ligada a {', '.join(q['riscos'])})_" if q["riscos"] else ""))
-            linhas += [f"- **{o['nome']}:** {o.get('o_que_e', '')}" for o in q["opcoes"]]
-            if q.get("o_que_falta_saber"):
-                linhas.append(f"- _Falta saber:_ {q['o_que_falta_saber']}")
     if resultado.get("pedir"):
-        linhas.append("## Pedir à secretaria")
+        linhas.append("## Informações que faltam")
         linhas += [f"{k}. {p['o_que']}" + (f" _(serve a {p['serve_a']})_" if p.get("serve_a") else "")
                    for k, p in enumerate(resultado["pedir"], 1)]
     return "\n".join(linhas)
@@ -704,6 +714,17 @@ def markdown_visoes(resultado):
     return "\n".join(linhas)
 
 
+O_QUE_E_CONFIANCA = ("A confiança mede o quanto o documento se apoia em informação conferida; não mede a gravidade "
+                     "dos riscos nem a qualidade das decisões. Ela olha três pontos e fica no nível do mais fraco")
+
+
+def explicar_confianca(confianca):
+    """A confiança em uma frase que se lê sozinha: o nível, o que ela mede e a conta de cada ponto."""
+    pontos = confianca.get("pontos") or confianca.get("motivos") or []
+    return (f"Confiança da análise: {confianca['nivel']}. {O_QUE_E_CONFIANCA}"
+            + (": " + "; ".join(pontos) + "." if pontos else "."))
+
+
 FRASE_CONFIANCA = {"alta": "Pode servir de base; confira os pontos marcados como \"órgão\".",
                    "média": "Confirme os pontos marcados como \"órgão\" ou \"sem comprovação\" antes de usar.",
                    "baixa": "Use para saber o que perguntar à secretaria, não para afirmar."}
@@ -715,11 +736,12 @@ def antes_de_ler(confianca, data_corte, cortes=None):
     bases = "do dossiê de fontes públicas e dos dados da SEPLAG"
     linhas = ["## Antes de ler",
               f"- **O que é:** apoio à decisão gerado com IA a partir do que a secretaria enviou, {bases}, com data de "
-              f"corte {data_corte or 'não informada'}. Expõe riscos e opções; não recomenda decisões."]
+              f"corte {data_corte or 'não informada'}. Analisa riscos e pontos de decisão; não recomenda nem sugere."]
     if confianca:
         nivel = confianca["nivel"]
         por_que = "; ".join(confianca.get("por_que") or [])
-        texto = f"- **Confiança desta análise: {nivel.upper()}**" + (f", porque {por_que}." if por_que else ".")
+        texto = (f"- **Confiança desta análise: {nivel.upper()}**" + (f", porque {por_que}." if por_que else ".")
+                 + f" {O_QUE_E_CONFIANCA}: " + "; ".join(confianca.get("pontos") or confianca.get("motivos") or []) + ".")
         if confianca.get("lacuna_checklist"):
             texto += " Silêncio do documento sobre esses temas não quer dizer que não haja risco."
         linhas.append(f"{texto} {FRASE_CONFIANCA[nivel]}")
@@ -814,12 +836,30 @@ def _juntar_contratos(contratos, limite=15):
 
 
 def _curto(texto, n):
+    """Encurta sem cortar frase no meio: fica com as frases inteiras que cabem em n caracteres. Se a primeira frase
+    sozinha passar de n, ela fica inteira (texto cortado no meio perde o sentido e as referências)."""
     texto = re.sub(r"\s+", " ", str(texto or "")).strip(" .;")
-    return texto if len(texto) <= n else texto[:n - 1].rstrip() + "…"
+    if len(texto) <= n:
+        return texto
+    frases = re.split(r"(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ0-9\"(])", texto)
+    saida = frases[0]
+    for f in frases[1:]:
+        if len(saida) + 1 + len(f) > n:
+            break
+        saida += " " + f
+    return saida.strip(" .;")
+
+
+def _rotulo(texto, n):
+    """Para nomes em célula de tabela (contrato, objeto): corta na palavra, com reticências."""
+    texto = re.sub(r"\s+", " ", str(texto or "")).strip(" .;")
+    if len(texto) <= n:
+        return texto
+    return texto[:n].rsplit(" ", 1)[0].rstrip(" ,;-") + "…"
 
 
 def _nome(texto, n):
-    texto = _curto(texto, n)
+    texto = _rotulo(texto, n)
     return texto.title() if texto.isupper() else texto
 
 
@@ -833,7 +873,7 @@ def markdown_contratos_criticos(contratos, limite=15):
               "|---|---|---|---|---|---|---|"]
     for c in linhas_c:
         motivo = ", ".join(c["motivos"]) + (f". {_curto(c['observacao'], 90)}" if c.get("observacao") else "")
-        linhas.append(f"| {_curto(c['contrato'], 28)} | {_nome(c.get('objeto'), 60) or '–'} | "
+        linhas.append(f"| {_rotulo(c['contrato'], 28)} | {_nome(c.get('objeto'), 60) or '–'} | "
                       f"{_nome(c.get('contratado'), 36) or '–'} | {c.get('valor') or '–'} | {c.get('vigencia') or '–'} | "
                       f"{motivo} | {_base_curta(c)} |")
     nota = (f"{len(contratos)} contrato(s) apontados; os {len(linhas_c)} mais críticos acima. Todos no calendário "
@@ -993,9 +1033,9 @@ def _divergencias(r):
 
 
 def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedir=5, antes_md=""):
-    """Produto 3, o relatório de riscos, em até 3 páginas: situação; tabela de todos os riscos (prazo, janela,
-    prioridade, sensibilidade política, base, revisão); cada risco em três linhas; decisões em aberto com as opções numa
-    linha; o que pedir à secretaria. Sem anexo: as visões e objeções completas ficam no registro de auditoria."""
+    """Produto 3, o relatório de riscos, em até 3 páginas: situação; tabela dos pontos de decisão (prazo, janela,
+    prioridade, repercussão política, base); cada risco em um parágrafo; as informações que faltam. Analisa; não
+    recomenda, não sugere caminho nem responsável. As visões e objeções completas ficam no registro de auditoria."""
     from .checklist import linha_essencial
     riscos = sorted((resultado.get("riscos") or [])[:limite_riscos], key=lambda r: (r.get("agir_ate") or date.max, -r["nota"]))
     md = ([antes_md] if antes_md else []) + ["## Situação"] + [f"- {_curto(x, 260)}" for x in (resultado.get("situacao") or [])[:4]]
@@ -1008,7 +1048,7 @@ def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedi
                ("_Impacto, janela e repercussão política foram votados, item a item, pelos seis agentes independentes "
                 "(a contagem diz quantos votaram no resultado; ⚠ marca divergência). Data que está no documento prevalece "
                 "sobre o voto de janela. Prioridade: impacto × urgência, por código._" if votado else ""),
-               "| # | Decisão (risco) | Agir até | Janela | Impacto | Repercussão política | Prioridade | Base |",
+               "| # | Ponto de decisão (risco) | Agir até | Janela | Impacto | Repercussão política | Prioridade | Base |",
                "|---|---|---|---|---|---|---|---|"]
         for r in riscos:
             agir = f"{r['agir_ate']:%d/%m/%Y}" if r.get("agir_ate") else "–"
@@ -1017,8 +1057,7 @@ def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedi
                       f"{_voto(r, 'sensibilidade', r.get('sensibilidade'))} | {r['prioridade']} | "
                       f"{BASE_CURTA.get(r['firmeza'], r['firmeza'])} |")
         for r in riscos:
-            md.append(f"**{r['id']}. {_curto(r.get('decisao') or r['titulo'], 180)}**"
-                      + (f" — {_curto(r['quem_decide'], 60)}" if r.get("quem_decide") else ""))
+            md.append(f"**{r['id']}. {_curto(r.get('decisao') or r['titulo'], 180)}**")
             linha = f"Risco: {r['titulo']}. {_curto(r['causa'], 180)} → {_curto(r['consequencia'], 180)}"
             if r.get("motivo_sensibilidade"):
                 linha += f". Repercussão: {_curto(r['motivo_sensibilidade'], 130)}"
@@ -1029,17 +1068,9 @@ def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedi
             if contra:
                 linha += f". Advogado do diabo contesta: {contra}"
             md.append(f"- {linha}.")
-    decisoes = resultado.get("decisoes") or []
-    if decisoes:
-        md += ["## Decisões em aberto", "_As opções têm o mesmo peso._"]
-        for q in decisoes:
-            opcoes = "; ".join(f"**{o['nome']}**" + (f" ({_curto(o.get('o_que_e'), 110)})" if o.get("o_que_e") else "")
-                               for o in q["opcoes"])
-            md.append(f"- **{q['id']}. {_curto(q['pergunta'], 160)}** {opcoes}."
-                      + (f" _Falta saber: {_curto(q['o_que_falta_saber'], 140)}_" if q.get("o_que_falta_saber") else ""))
     pedir = (resultado.get("pedir") or [])[:limite_pedir]
     if pedir:
-        md.append("## Pedir à secretaria")
+        md.append("## Informações que faltam")
         md += [f"{k}. {_curto(p['o_que'], 170)}" + (f" _({p['serve_a']})_" if p.get("serve_a") else "")
                for k, p in enumerate(pedir, 1)]
     md.append(nota_md)
@@ -1140,20 +1171,38 @@ def ids_citados(diag, resultado, contratos_criticos=None):
     return ids
 
 
-def nota_final(registro_id, modelos, confianca, data_corte, neutralidade=None, revisoes=None):
+NEUTRALIDADE = {"neutro": "sem recomendação no texto", "levemente_enviesado": "com trechos que induzem uma opção",
+                "enviesado": "texto enviesado"}
+
+
+def _linha_tom(neutralidade, revisao_texto):
+    """A revisão de tom em uma frase: o que a revisão de neutralidade apontou e o que a revisão do texto reescreveu."""
+    if revisao_texto is not None:
+        n = len(revisao_texto.get("aceitos") or [])
+        sobra = len(revisao_texto.get("alertas_depois") or {})
+        return ("Revisão de tom: texto conferido por código e por IA para não recomendar nem atribuir responsável"
+                + (f"; {n} trecho(s) reescrito(s)" if n else "")
+                + (f"; {sobra} trecho(s) ainda a conferir (ver auditoria)" if sobra else "") + ".")
+    if neutralidade and not neutralidade.get("erro") and neutralidade.get("avaliacao_geral") in NEUTRALIDADE:
+        return f"Revisão de neutralidade: {NEUTRALIDADE[neutralidade['avaliacao_geral']]}."
+    return ""
+
+
+def nota_final(registro_id, modelos, confianca, data_corte, neutralidade=None, revisoes=None, revisao_texto=None):
     """Uma linha de proveniência no fim do documento. O método completo fica na auditoria."""
     agentes = sum(1 for r in revisoes or [] if not r.get("erro"))
     familias = {r["modelo"].split("/")[0] for r in revisoes or [] if not r.get("erro") and r.get("modelo")}
     substitutos = [r["papel"] for r in revisoes or [] if r.get("substituto")]
     partes = [f"Apoio à decisão gerado com IA (registro {registro_id}; {modelos.get('auxiliar')} e {modelos.get('debate')}) "
               f"a partir do dossiê de fontes públicas e do que a secretaria informou, com data de "
-              f"corte {data_corte or 'não informada'}. Não recomenda decisões. Confiança da análise: {confianca['nivel']} "
-              f"({'; '.join(confianca['motivos'])}).",
-              (f"{agentes} agente(s) independente(s) revisaram a análise"
-               + (f", em {len(familias)} famílias de modelos" if len(familias) > 1 else ", todos na mesma família de modelos")
+              f"corte {data_corte or 'não informada'}. Analisa; não recomenda decisões.",
+              explicar_confianca(confianca),
+              (f"{agentes} agentes de IA, cada um com um olhar diferente ("
+               + ", ".join(r["papel"].lower() for r in revisoes or [] if not r.get("erro") and r.get("papel"))
+               + "), revisaram a análise"
+               + (f", em {len(familias)} famílias de modelos" if len(familias) > 1 else ", todos no mesmo modelo")
                + (f"; {len(substitutos)} rodaram no modelo principal porque o previsto falhou ({', '.join(substitutos)})"
                   if substitutos else "") + ".") if revisoes else "",
-              f"Revisão de neutralidade: {neutralidade['avaliacao_geral'].replace('_', ' ')}."
-              if neutralidade and not neutralidade.get("erro") and neutralidade.get("avaliacao_geral") else "",
+              _linha_tom(neutralidade, revisao_texto),
               "Método, conferências por código e revisões completas no arquivo de auditoria."]
     return "_" + " ".join(p for p in partes if p) + "_"

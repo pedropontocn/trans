@@ -3,8 +3,8 @@
 Aplicação em Streamlit que apoia a equipe de transição do governo do Estado do Rio de Janeiro. Para cada secretaria,
 ela monta um diagnóstico a partir do dossiê de fontes públicas e dos documentos enviados, identifica riscos e decisões
 urgentes, submete a análise a cinco agentes independentes com olhares de gestão diferentes e entrega um documento
-curto, um painel de urgências e um calendário. **Não decide e não recomenda**: expõe riscos e escolhas, com
-as fontes conferidas por código.
+curto, um calendário e os dados do painel. **Não decide, não recomenda, não sugere caminho nem responsável**:
+analisa riscos e pontos de decisão, com as fontes conferidas por código.
 
 ## O que sai
 
@@ -12,9 +12,9 @@ Um `.zip` com:
 
 | Arquivo | O que é |
 |---|---|
-| `paineis/<sigla>_painel.docx` | **1. Painel de urgências, por secretaria:** as decisões com prazo antes da posse, nas primeiras 72 horas e nos primeiros 100 dias, e as de repercussão política alta. Em ordem de prazo; cada linha com a decisão a tomar, quem decide, a repercussão política votada pelos seis agentes (e quem reage), a prioridade e a base. Montado por código |
+| `paineis/<sigla>_painel.json` | **1. Dados do painel, por secretaria:** os pontos de decisão com janela (antes da posse, 72 horas, 100 dias, depois), prazo, prioridade e repercussão política votada pelos seis agentes, na mesma régua para todas; prontos para o painel unificado. O painel em Word por secretaria saiu: repetia a tabela do relatório de riscos |
 | `dossies/<secretaria>_dossie.docx` | **2. Dossiê da secretaria, atualizado com o que ela informou**: em resumo (situação, números-chave, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. O que a secretaria informou e o que as fontes mostram; 6. Cobertura do checklist; anexo de fontes citadas e prazos que não são contratos |
-| `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, até 3 páginas e sem anexo: situação; as decisões urgentes em ordem de prazo, com janela, impacto e repercussão política votados item a item pelos seis agentes (contagem dos votos e divergências), prioridade e base; decisões em aberto com opções de mesmo peso; o que pedir à secretaria |
+| `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, até 3 páginas e sem anexo: situação; os pontos de decisão urgentes em ordem de prazo, com janela, impacto e repercussão política votados item a item pelos seis agentes (contagem dos votos e divergências), prioridade e base; as informações que faltam. Tom de análise: sem recomendação, sem caminho sugerido, sem responsável |
 | `auditoria/<secretaria>.json` | **5. Auditoria**: o registro completo de cada análise: dossiê e conferências, análise inicial, revisões e votos dos seis agentes, consolidação, objeções risco a risco, método, descartes, custo |
 | `calendarios/<sigla>_calendario.xlsx` | **4. Calendário, por secretaria:** os vencimentos com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro. Só as datas que a secretaria informou |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
@@ -84,7 +84,7 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
 4. **Vencimentos.** Régua de risco por código: serviço essencial, impacto, data-limite para agir, tempo para nova
    licitação e prioridade (impacto × urgência).
 5. **Análise de riscos.** Uma análise lê o diagnóstico e os vencimentos e propõe riscos (causa → consequência),
-   decisões em aberto e o que pedir à secretaria.
+   o ponto de decisão de cada um (descrito, sem caminhos) e as informações que faltam.
 6. **Seis agentes independentes** revisam a análise sem ver uns aos outros: Fazenda e orçamento; controle e jurídico;
    área-fim e usuário do serviço; operação e servidores; nova gestão (prioridades e articulação); e o **advogado do
    diabo**, que tenta derrubar cada risco com o material. Apontam riscos que faltaram, riscos exagerados ou
@@ -105,8 +105,11 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    **repercussão política** (alta, média, baixa, dizendo quem reage e como). O código apura: maioria, com empate indo
    para o nível mais grave (janela: o mais urgente); data que está no documento prevalece sobre o voto de janela; a
    divergência entre agentes fica registrada e aparece no relatório.
-9. **Documento e painel.** O documento é montado por código, sempre na mesma estrutura. O painel estadual junta os
-   riscos de todas as secretarias; o modelo só aponta os temas que se repetem.
+9. **Revisão do texto.** Antes de montar os documentos: a revisão de neutralidade (outro modelo) aponta trechos que
+   recomendam; a revisão do texto (IA) reescreve cada campo no tom de análise; o código só aceita a reescrita que
+   mantém todos os números, datas e referências e não traz palavra de recomendação ("deve", "é preciso", "cabe
+   a"...). O que sobrar fica marcado na auditoria e no resumo.
+10. **Documento.** Montado por código, sempre na mesma estrutura, sem cortar frase no meio.
 
 ## Código
 

@@ -24,7 +24,8 @@ Regras:
 - "data": a data como aparece, normalizada para dd/mm/aaaa (ou mm/aaaa, se o texto só traz mês e ano).
 - "objeto": o contrato, convênio, obra ou norma (com número, se houver). "valor": como aparece no texto, ou vazio.
 - "consequencia": o que acontece se nada for feito até a data, em 1 frase, só se o texto disser ou for óbvio pela
-  natureza do evento (ex.: contrato vencido para de cobrir o serviço). "decisao": que decisão a data cobra, em 1 frase.
+  natureza do evento (ex.: contrato vencido para de cobrir o serviço). "decisao": o ponto que a data deixa pendente,
+  em 1 frase neutra; sem dizer o que fazer nem quem faz.
 - Até 40 eventos, priorizando os de maior valor e os mais próximos da data de corte. Seja breve em cada campo.
 
 Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:

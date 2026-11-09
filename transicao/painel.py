@@ -57,20 +57,19 @@ SENS_ORDEM = {"Alta": 0, "Média": 1, "Baixa": 2}
 
 
 def _linha_demanda(r):
-    """Uma decisão na tabela do painel: a decisão a tomar, o risco que a motiva, prazo, quem decide, repercussão
-    política (intensidade e quem reage), prioridade e base."""
+    """Uma linha da tabela do painel: o ponto de decisão, o risco que o motiva, prazo, repercussão política
+    (intensidade e quem reage), prioridade e base. Sem responsável: o painel não atribui quem faz."""
     agir = f"{r['agir_ate']:%d/%m/%Y}" if r.get("agir_ate") else "–"
     decisao = f"**{r.get('decisao') or r['titulo']}**" + (f" _({r['titulo']})_" if r.get("decisao") else "")
     rep = documentos._voto(r, "sensibilidade", r.get("sensibilidade"))
     if r.get("motivo_sensibilidade"):
         rep += f": {documentos._curto(r['motivo_sensibilidade'], 120)}"
-    quem = r.get("quem_decide") or "–"
-    return (f"| {agir} | {_sigla(r['orgao'])} | {decisao} | {quem} | {rep} | {r['prioridade']} | "
+    return (f"| {agir} | {_sigla(r['orgao'])} | {decisao} | {rep} | {r['prioridade']} | "
             f"{documentos.BASE_CURTA.get(r['firmeza'], r['firmeza'])} |")
 
 
-CABECALHO = ["| Agir até | Secretaria | Decisão a tomar (risco) | Quem decide | Repercussão política | Prioridade | Base |",
-             "|---|---|---|---|---|---|---|"]
+CABECALHO = ["| Agir até | Secretaria | Ponto de decisão (risco) | Repercussão política | Prioridade | Base |",
+             "|---|---|---|---|---|---|"]
 
 
 def markdown_apagao(eventos, limite_lista=25):
@@ -182,3 +181,19 @@ def painel_estadual(riscos, situacoes, eventos, cfg, linhas=None, orgao=None):
             "tipo": "Painel de urgências" if orgao else "Painel estadual",
             "data": documentos._data_extenso(date.today()), "rodape_extra": "apoio de IA, processamento automático"}
     return documentos.gerar_docx(md, meta), uso
+
+
+CAMPOS_PAINEL = ["id", "titulo", "decisao", "categoria", "agir_ate", "horizonte", "prazo_de_fato", "impacto",
+                 "sensibilidade", "motivo_sensibilidade", "prioridade", "nota", "firmeza", "em_jogo", "em_curso", "fatos"]
+
+
+def dados_do_painel(orgao, riscos, situacao, data_corte):
+    """Os dados do painel de uma secretaria, para juntar depois no painel unificado: cada ponto de decisão com a
+    janela, o prazo, a prioridade e a repercussão política votada, mais a situação da secretaria."""
+    return {"orgao": orgao, "sigla": _sigla(orgao), "data_corte": data_corte, "situacao": situacao,
+            "janelas": {j: sum(r.get("horizonte") == j for r in riscos) for j in
+                        ("Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias", "Depois dos 100 dias", "Sem prazo")},
+            "pontos_de_decisao": [dict({c: r.get(c) for c in CAMPOS_PAINEL},
+                                       votos={eixo: {"nivel": v.get("nivel"), "contagem": v.get("contagem")}
+                                              for eixo, v in (r.get("votos") or {}).items()})
+                                  for r in riscos]}

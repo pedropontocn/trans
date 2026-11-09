@@ -187,9 +187,10 @@ class LLMFalso:
                              "decisoes_desequilibradas": [],
                              "trade_offs": [{"id": "T1", "equilibrio": "pende_para_a", "motivo": "o polo A tem o dobro do espaço"}],
                              "recomendacoes_implicitas": [
-                                 {"trecho": "Retomar as licitações agora ou esperar", "por_que": "soa como ordem"},
+                                 {"trecho": "Retomar ou cancelar", "por_que": "lista caminhos"},
                                  {"trecho": "é imprescindível retomar todas as obras imediatamente", "por_que": "inventado"}]}
         self.falhar_neutralidade = False
+        self.revisao_texto = {"textos": {"R1.decisao": "Destino das licitações adiadas."}}
         self.modelos_que_falham = set()           # modelos (nomes) que respondem como fora do ar
         self.analises_quebradas = 0               # quantas respostas da análise de riscos vêm com JSON inválido
         self.checklist = {"respostas": [
@@ -297,6 +298,10 @@ class LLMFalso:
         if "TEMAS TRANSVERSAIS" in sistema:
             self.pedido_temas = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.temas) + "[FIM DO JSON]")
+        if "Você revisa o TEXTO de um relatório" in sistema:
+            if self.revisao_texto is None:
+                return self._resp("sem JSON")
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.revisao_texto) + "[FIM DO JSON]")
         if "revisor de neutralidade" in sistema:
             if self.falhar_neutralidade:
                 raise RuntimeError("serviço indisponível")
@@ -371,7 +376,7 @@ def llm(monkeypatch):
 
 
 MODULOS = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist", "riscos", "documentos",
-           "painel", "analise"]
+           "revisao", "painel", "analise"]
 
 
 @pytest.fixture(autouse=True)

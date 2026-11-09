@@ -114,7 +114,7 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert not any(t.startswith(("Riscos por prioridade", "Sobre este documento", "Anexo 3")) for t in textos)
     # produto 3: o relatório de riscos, focado nas decisões urgentes, sem anexo
     riscos_txt = [p.text for p in docx.Document(io.BytesIO(r["riscos_docx"])).paragraphs]
-    for titulo in ["Situação", "Decisões urgentes, em ordem de prazo", "Decisões em aberto", "Pedir à secretaria"]:
+    for titulo in ["Situação", "Decisões urgentes, em ordem de prazo", "Informações que faltam"]:
         assert titulo in riscos_txt, titulo
     assert not any(t.startswith(("1. Contratos", "Anexo")) for t in riscos_txt)
     # produto 5: a auditoria é só o registro JSON, com a versão legível dentro dele
@@ -140,8 +140,11 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert riscos[0]["revisao"] == {"origem": "análise", "objecoes": [], "agentes": 6, "sem_objecao": 6, "contestado": False}
     assert reg["modelos"]["neutralidade"] == CFG["modelo_auxiliar"] and len(reg["modelos"]["agentes"]) == 6
     # o olhar de cada agente fica no registro (visões montadas do que o agente disse, não da paráfrase)
-    q1 = reg["riscos"]["decisoes"][0]
-    assert {"papel": "Fazenda e orçamento", "teme": "**Retomar:** custo", "valoriza": "**Retomar:** rapidez"} in q1["visoes"]
+    assert reg["riscos"]["decisoes"] == []                 # sem opções nem caminhos: o relatório não sugere
+    assert "revisao_do_texto" in reg["verificacao"] and "Revisão de tom" in r["riscos_md"]
+    # a revisão do texto reescreveu o ponto de decisão no tom de análise (sem listar caminhos)
+    assert "Destino das licitações adiadas" in r["riscos_md"] and "Retomar ou cancelar" not in r["riscos_md"]
+    assert reg["verificacao"]["revisao_do_texto"]["aceitos"][0]["campo"].endswith(".decisao")
     assert "Advogado do diabo contesta: o risco inventado não tem fato no material" in r["riscos_md"]
     assert "- Fazenda e orçamento vê exagero: sem base" in r["auditoria_md"]
     # votação item a item: seis votantes; o código apurou impacto, janela e repercussão de cada risco
@@ -193,7 +196,7 @@ def test_agente_fora_do_ar_nao_derruba_a_analise(llm):
     from transicao import analise
     llm.agentes_que_falham = {"Operação e servidores"}
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
-    assert r["agentes"] == 5 and "5 agente(s) independente(s)" in r["riscos_md"]
+    assert r["agentes"] == 5 and "5 agentes de IA" in r["riscos_md"]
     assert "sem resposta: Operação e servidores" in r["registro"]["metodo_md"]
 
 
@@ -230,7 +233,7 @@ def test_varios_orgaos_gravam_documentos_calendario_e_resumo(llm, tmp_path):
     assert len(list((tmp_path / "riscos").glob("*_riscos.docx"))) == 2
     assert not list((tmp_path / "auditoria").glob("*.docx"))                        # auditoria só em JSON
     assert len(list((tmp_path / "calendarios").glob("*_calendario.xlsx"))) == 2 and (tmp_path / "LEIA-ME.txt").exists()
-    assert len(list((tmp_path / "paineis").glob("*_painel.docx"))) == 2
+    assert len(list((tmp_path / "paineis").glob("*_painel.json"))) == 2
     assert not (tmp_path / "calendario_consolidado.xlsx").exists() and not (tmp_path / "painel_estadual.docx").exists()
     assert len(list((tmp_path / "auditoria").glob("*_arquivos_lidos.json"))) == 2
     assert [r["situacao"] for r in _resumo(tmp_path)] == ["concluído", "concluído"]
@@ -264,7 +267,7 @@ def test_modo_economico_passa_tudo_pela_batch_api(llm, tmp_path):
     assert any(sum("Você revisa a análise de riscos" in texto(p) for p in batches.pedidos
                    if p["custom_id"] in {x["custom_id"] for x in lote}) >= 5 for lote in batches.lotes.values())
     assert analise.JUNTAS is False                                           # volta ao normal depois
-    assert list((tmp_path / "paineis").glob("*_painel.docx"))
+    assert list((tmp_path / "paineis").glob("*_painel.json"))
 
 
 def test_prazo_esgotado_libera_quem_espera(llm):
@@ -422,34 +425,22 @@ def test_dossie_sem_fatos_avisa(llm, tmp_path):
     assert linhas[0]["situacao"] == "erro" and "dossiê insuficiente" in linhas[0]["observacao"]
 
 
-def test_painel_de_cada_secretaria(llm, tmp_path):
-    import docx
+def test_dados_do_painel_de_cada_secretaria(llm, tmp_path):
     from transicao import analise
     orgaos = [{"nome": n, "texto": RELATORIO} for n in ("Secretaria de Exemplo - SEX", "Secretaria de Ypsilon - SEY")]
     linhas = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=lambda *_: None)
     assert [l["situacao"] for l in linhas] == ["concluído", "concluído"] and linhas[0]["riscos"] == 2
     assert sorted(p.name for p in (tmp_path / "paineis").iterdir()) == [
-        "secretaria_de_exemplo_sex_painel.docx", "secretaria_de_ypsilon_sey_painel.docx"]
-    doc = docx.Document(tmp_path / "paineis" / "secretaria_de_exemplo_sex_painel.docx")
-    textos = [p.text for p in doc.paragraphs] + [c.text.split("\n")[0] for t in doc.tables for c in t._cells]
-    assert "Temas que se repetem entre secretarias" not in textos and not hasattr(llm, "pedido_temas")
-    for titulo in ["O ESSENCIAL", "Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias"]:
-        assert titulo in textos, titulo
-    assert "Mapa de calor" not in textos and "Cronograma: quando agir" not in textos
-    texto = "\n".join(p.text for p in doc.paragraphs)
-    assert "secretaria(s) analisada(s)" not in texto and "Contratos vencendo" not in texto     # sem temas
-    celulas = [c.text for t in doc.tables for c in t._cells]
-    k = celulas.index("Agir até")
-    assert celulas[k:k + 7] == ["Agir até", "Secretaria", "Decisão a tomar (risco)", "Quem decide", "Repercussão política",
-                                "Prioridade", "Base"]
-    assert "SEX" in celulas and "SEY" not in celulas
+        "secretaria_de_exemplo_sex_painel.json", "secretaria_de_ypsilon_sey_painel.json"]
+    dados = json.loads((tmp_path / "paineis" / "secretaria_de_exemplo_sex_painel.json").read_text(encoding="utf-8"))
+    assert dados["sigla"] == "SEX" and len(dados["pontos_de_decisao"]) == 2 and sum(dados["janelas"].values()) == 2
+    p1 = dados["pontos_de_decisao"][0]
+    assert {"decisao", "horizonte", "agir_ate", "sensibilidade", "prioridade", "votos"} <= set(p1)
+    assert "quem_decide" not in p1
     # a repercussão política vem da votação dos seis agentes: R1 teve 5 votos "Alta" (Fazenda votou Baixa)
-    assert any(c.startswith("Alta 5/6") and "TCE apontou" in c for c in celulas)
-    # as decisões das primeiras 72 horas, votadas, estão na janela certa; em ordem de prazo
-    datas = [c for c in celulas if c[:2].isdigit() and c[2:3] == "/"]
-    from datetime import datetime
-    assert datas and all(datetime.strptime(d, "%d/%m/%Y") for d in datas)
-    assert "paineis/" in (tmp_path / "LEIA-ME.txt").read_text(encoding="utf-8")
+    assert any(p["votos"]["sensibilidade"]["nivel"] == "Alta" and p["votos"]["sensibilidade"]["contagem"]["Alta"] == 5
+               for p in dados["pontos_de_decisao"])
+    assert not hasattr(llm, "pedido_temas") and "paineis/" in (tmp_path / "LEIA-ME.txt").read_text(encoding="utf-8")
 
 
 def test_dossie_casado_pelo_conteudo_quando_o_nome_do_arquivo_nao_diz(llm):
@@ -486,7 +477,7 @@ def test_rodar_de_novo_na_mesma_pasta_pula_os_prontos(llm, tmp_path):
     chamadas_antes = len(llm.chamadas)
     # simula a queda: o segundo órgão não terminou (sem resultado gravado) e o painel se perdeu
     (tmp_path / "auditoria" / "secretaria_de_ypsilon_sey_resultado.json").unlink()
-    (tmp_path / "paineis" / "secretaria_de_exemplo_sex_painel.docx").unlink()
+    (tmp_path / "paineis" / "secretaria_de_exemplo_sex_painel.json").unlink()
     (tmp_path / "calendarios" / "secretaria_de_exemplo_sex_calendario.xlsx").unlink()
     registros = []
     linhas2 = analise.rodar_orgaos(orgaos, CFG, tmp_path, log=registros.append)
@@ -495,9 +486,8 @@ def test_rodar_de_novo_na_mesma_pasta_pula_os_prontos(llm, tmp_path):
     pedidos_sex = [c for c in llm.chamadas[chamadas_antes:] if "Secretaria de Exemplo" in str(c["mensagens"])]
     assert not any("Você é analista de riscos" in str(c["mensagens"][0]["content"]) for c in pedidos_sex)
     # o painel e o calendário de quem estava pronto foram remontados por código, sem chamar o modelo
-    doc = docx.Document(tmp_path / "paineis" / "secretaria_de_exemplo_sex_painel.docx")
-    celulas = [c.text for t in doc.tables for c in t._cells]
-    assert "SEX" in celulas and "SEY" not in celulas and sum("(Licitações adiadas)" in c for c in celulas) == 1
+    dados = json.loads((tmp_path / "paineis" / "secretaria_de_exemplo_sex_painel.json").read_text(encoding="utf-8"))
+    assert dados["sigla"] == "SEX" and dados["pontos_de_decisao"]
     import openpyxl
     for sigla in ("exemplo_sex", "ypsilon_sey"):
         planilha = openpyxl.load_workbook(tmp_path / "calendarios" / f"secretaria_de_{sigla}_calendario.xlsx")
@@ -505,7 +495,7 @@ def test_rodar_de_novo_na_mesma_pasta_pula_os_prontos(llm, tmp_path):
     # sem retomar, refaz tudo; e um resultado de outra versão do app não é reaproveitado
     linhas3 = analise.rodar_orgaos(orgaos[:1], CFG, tmp_path, log=lambda *_: None, retomar=False)
     assert linhas3[0]["situacao"] == "concluído" and not any("já estava pronto" in r for r in registros[-1:])
-    import json
+
     caminho = tmp_path / "auditoria" / "secretaria_de_exemplo_sex_resultado.json"
     dados = json.loads(caminho.read_text(encoding="utf-8"))
     caminho.write_text(json.dumps(dict(dados, versao="0.0")), encoding="utf-8")
@@ -569,5 +559,5 @@ def test_painel_e_calendario_saem_mesmo_sem_data_nem_risco(llm, tmp_path):
                                         {"data_corte": "08/11/2026"}, linha)
     wb = openpyxl.load_workbook(tmp_path / "calendarios" / "sex_calendario.xlsx")
     assert wb["Calendário"].cell(2, 1).value.startswith("A secretaria não informou nenhuma data")
-    textos = [p.text for p in docx.Document(tmp_path / "paineis" / "sex_painel.docx").paragraphs]
-    assert any("Nenhuma decisão" in t for t in textos)
+    dados = json.loads((tmp_path / "paineis" / "sex_painel.json").read_text(encoding="utf-8"))
+    assert dados["pontos_de_decisao"] == [] and dados["janelas"]["Antes da posse"] == 0

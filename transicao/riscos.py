@@ -53,18 +53,23 @@ PAPEIS = [
 ]
 PAPEL_CONTRA = "Advogado do diabo"
 
-LINGUAGEM = """LINGUAGEM: português claro, de gestão pública; frases de até 25 palavras. Não use: trade-off, persona,
-baseline, dossiê, autodeclaração, nível de evidência. Não recomende: nada de "deve", "é preciso", "recomenda-se",
-"o ideal é". Decisões são perguntas; opções têm o mesmo peso. Não invente números, datas ou nomes: use só o que está
-no material, citando os ids (F1, V2, O3). Valores arredondados (R$ 2,49 bi, R$ 998 mi)."""
+LINGUAGEM = """LINGUAGEM: português claro, de gestão pública; frases completas de até 25 palavras. Não use: trade-off,
+persona, baseline, dossiê, autodeclaração, nível de evidência.
+TOM: o documento ANALISA; não aconselha. Descreva fatos, causas, consequências e o que está pendente. NÃO recomende,
+NÃO sugira caminho nem opção, NÃO proponha providência, NÃO diga quem deve fazer, decidir ou ser responsável por algo.
+Proibido: "deve", "deveria", "é preciso", "é necessário", "precisa ser", "recomenda-se", "sugere-se", "convém", "o
+ideal", "cabe a", "é importante que", "a melhor saída", "quem decide".
+Não invente números, datas ou nomes: use só o que está no material, citando os ids (F1, V2, O3). Valores arredondados
+(R$ 2,49 bi, R$ 998 mi)."""
 
 ESQUEMA_RISCO = ('{"titulo": "até 10 palavras", "categoria": "' + "|".join(CATEGORIAS) + '", '
                  '"causa": "...", "consequencia": "...", "em_jogo": "valor, serviço ou obra", '
                  '"prazo": "dd/mm/aaaa, antes da posse, nas primeiras 72 horas, nos primeiros 100 dias ou vazio", '
                  '"impacto": "Alto|Médio|Baixo", "chance": "Alta|Média|Baixa", '
                  '"sensibilidade_politica": "Alta|Média|Baixa", "motivo_sensibilidade": "o que a torna sensível, ou vazio", '
-                 '"em_curso": "providência já publicada ou informada, ou vazio", "decisao": "a pergunta", '
-                 '"quem_decide": "...", "fatos": ["F3", "V1"]}')
+                 '"em_curso": "providência já publicada ou informada, ou vazio", '
+                 '"decisao": "o ponto pendente de decisão, em frase afirmativa e neutra, sem listar caminhos", '
+                 '"fatos": ["F3", "V1"]}')
 
 PROMPT_ANALISE = """Você é analista de riscos da Equipe de Transição do governo do Estado do Rio de Janeiro. A partir
 do DIAGNÓSTICO da secretaria, dos VENCIMENTOS PRIORITÁRIOS e das CONTRADIÇÕES entre o que a secretaria informou e as
@@ -84,15 +89,12 @@ Entregue:
   Média quando pode chegar lá; Baixa quando fica restrita à máquina. "motivo_sensibilidade" diz quem reage e como.
 - Em cada risco, "prazo": a data em que a decisão precisa estar tomada. Sem data no material, diga se é "antes da
   posse", "nas primeiras 72 horas" (o que não pode esperar a primeira semana de governo) ou "nos primeiros 100 dias".
-- "decisoes": as 2 ou 3 decisões mais difíceis, que não se resolvem só cumprindo um prazo. Cada uma com 2 ou 3
-  opções de mesmo peso ("nome" com verbo; "o_que_e" em uma frase), "o_que_falta_saber" e os riscos ligados ("riscos":
-  ["R1"]).
-- "pedir": até 6 documentos ou dados a pedir à secretaria, cada um dizendo a que risco ou decisão serve. Se houver
-  CHECKLIST OBRIGATÓRIO com pontos NÃO PROCURADOS, eles entram aqui antes dos demais (cite o id, ex.: "C5").
+- "pedir": até 6 informações que faltam no material, em frase nominal (ex.: "Execução orçamentária por ação e
+  fonte"), cada uma dizendo a que risco se liga. Se houver CHECKLIST OBRIGATÓRIO com temas SEM INFORMAÇÃO, eles entram
+  aqui antes dos demais (cite o id, ex.: "C5").
 
-Numere os riscos R1, R2... e as decisões Q1, Q2... Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
-{"situacao": ["..."], "riscos": [{"id": "R1", ...}], "decisoes": [{"id": "Q1", "pergunta": "...", "opcoes": [{"nome":
-"...", "o_que_e": "..."}], "o_que_falta_saber": "...", "riscos": ["R1"]}], "pedir": [{"o_que": "...", "serve_a": "R1"}]}
+Numere os riscos R1, R2... Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
+{"situacao": ["..."], "riscos": [{"id": "R1", ...}], "pedir": [{"o_que": "...", "serve_a": "R1"}]}
 Cada risco segue este formato: """ + ESQUEMA_RISCO
 
 PROMPT_AGENTE = """Você revisa a análise de riscos da transição de uma secretaria do Estado do Rio de Janeiro com um
@@ -102,13 +104,11 @@ Leia o material e a análise. Pelo seu olhar:
 1. "faltando": até 3 riscos que a análise não viu e que o material sustenta (cite os ids em "fatos"). Não repita
    riscos que já estão na análise. Se não faltar nada, devolva lista vazia.
 2. "exagerados": riscos da análise que o material não sustenta ou cujo impacto está superestimado, com o motivo.
-3. "decisoes": para cada decisão (Q1, Q2...), o que você teme e o que você valoriza em cada opção, em uma frase cada.
 
 """ + LINGUAGEM + """
 
 Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
-{{"faltando": [{esquema}], "exagerados": [{{"risco": "R2", "motivo": "..."}}],
-"decisoes": [{{"decisao": "Q1", "opcao": 1, "teme": "...", "valoriza": "..."}}]}}"""
+{{"faltando": [{esquema}], "exagerados": [{{"risco": "R2", "motivo": "..."}}]}}"""
 
 PROMPT_CONTRA = """Você é o ADVOGADO DO DIABO na análise de riscos da transição de uma secretaria do Estado do Rio de
 Janeiro. Seu trabalho é tentar DERRUBAR cada risco da análise: o que no material mostra que ele está errado, exagerado,
@@ -120,13 +120,11 @@ Leia o material e a análise. Entregue:
    frases, com os fatos) e "fatos" (ids do material que sustentam a contestação). Risco que você não consegue
    contestar com o material NÃO entra aqui.
 2. "sustentados": os ids dos riscos que resistiram, em uma lista.
-3. "decisoes": para cada decisão (Q1, Q2...), o que você teme em cada opção, em uma frase (o que pode dar errado).
 
 """ + LINGUAGEM + """
 
 Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
-{"contestados": [{"risco": "R2", "motivo": "...", "fatos": ["F4"]}], "sustentados": ["R1", "R3"],
-"decisoes": [{"decisao": "Q1", "opcao": 1, "teme": "...", "valoriza": ""}]}"""
+{"contestados": [{"risco": "R2", "motivo": "...", "fatos": ["F4"]}], "sustentados": ["R1", "R3"]}"""
 
 PROMPT_CONSOLIDACAO = """Você consolida a análise de riscos da transição de uma secretaria do Estado do Rio de Janeiro
 com as revisões de agentes independentes, cada um com um olhar de gestão, e de um ADVOGADO DO DIABO, que tentou
@@ -135,20 +133,16 @@ derrubar cada risco.
 - Inclua um risco apontado como faltando só se ele citar fatos do material; junte riscos repetidos.
 - Ajuste ou retire um risco apontado como exagerado ou contestado só se o motivo se apoiar no material. Contestação
   sem fato não retira risco.
-- Mantenha 5 a 8 riscos, numerados de novo (R1, R2...), e 2 ou 3 decisões (Q1, Q2...).
+- Mantenha 5 a 8 riscos, numerados de novo (R1, R2...).
 - Em cada risco, preencha "id_anterior": o id que ele tinha na ANÁLISE (ex.: "R3"); se veio de um agente como
   faltando, escreva "novo: " e o nome do agente (ex.: "novo: Fazenda e orçamento").
 - "respostas_as_revisoes": para CADA risco apontado como faltando, exagerado ou contestado, diga o que fez:
   {"agente": "...", "risco": "R2" ou o título do faltando, "decisao": "acatado|parcial|não acatado", "motivo": "uma
   frase, com os fatos"}. Nenhuma revisão fica sem resposta.
-- Em cada decisão, acrescente "visoes": para cada agente que opinou, o que ele teme e valoriza, sem dizer qual opção
-  é melhor. Mantenha o peso igual entre as opções.
-
 """ + LINGUAGEM + """
 
 Responda SOMENTE com JSON, no mesmo formato da análise, entre [INÍCIO DO JSON] e [FIM DO JSON], mais a lista
-"respostas_as_revisoes". Em cada decisão, inclua "visoes": [{"papel": "Fazenda e orçamento", "teme": "...",
-"valoriza": "..."}]. Cada risco segue este formato, mais "id_anterior": """ + ESQUEMA_RISCO
+"respostas_as_revisoes". Cada risco segue este formato, mais "id_anterior": """ + ESQUEMA_RISCO
 
 
 # --- MATERIAL ------------------------------------------------------------------------------
@@ -408,7 +402,7 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
         if firmeza == "sem comprovação":
             nota = min(nota, 5)
         riscos.append({**{c: str(r.get(c) or "").strip() for c in ("titulo", "causa", "consequencia", "em_jogo", "prazo",
-                                                                  "em_curso", "decisao", "quem_decide")},
+                                                                  "em_curso", "decisao")},
                        "id_original": str(r.get("id") or f"R{k}"), "id_anterior": str(r.get("id_anterior") or "").strip(),
                        "categoria": r.get("categoria")
                        if r.get("categoria") in CATEGORIAS else "Continuidade de serviço",
@@ -420,20 +414,11 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
     novo_id = {r["id_original"]: f"R{k}" for k, r in enumerate(riscos, 1)}
     for r in riscos:
         r["id"] = novo_id[r["id_original"]]
-    decisoes = []
-    for k, q in enumerate([q for q in resultado.get("decisoes") or [] if isinstance(q, dict)][:3], 1):
-        opcoes = [o for o in q.get("opcoes") or [] if isinstance(o, dict) and str(o.get("nome") or "").strip()][:3]
-        if len(opcoes) < 2:
-            continue
-        decisoes.append({"id": f"Q{k}", "pergunta": str(q.get("pergunta") or "").strip(), "opcoes": opcoes,
-                         "o_que_falta_saber": str(q.get("o_que_falta_saber") or "").strip(),
-                         "riscos": [novo_id[x] for x in q.get("riscos") or [] if x in novo_id],
-                         "visoes": [v for v in q.get("visoes") or [] if isinstance(v, dict) and v.get("papel")][:6]})
     pedir = [{"o_que": str(p.get("o_que") or "").strip(),
               "serve_a": re.sub(r"\bR\d+\b", lambda m: novo_id.get(m.group(0), m.group(0)), str(p.get("serve_a") or ""))}
              for p in resultado.get("pedir") or [] if isinstance(p, dict) and str(p.get("o_que") or "").strip()][:6]
     situacao = [str(x).strip() for x in resultado.get("situacao") or [] if str(x).strip()][:5]
-    return {"situacao": situacao, "riscos": riscos, "decisoes": decisoes, "pedir": pedir}
+    return {"situacao": situacao, "riscos": riscos, "decisoes": [], "pedir": pedir}
 
 
 # --- VOTAÇÃO ITEM A ITEM ---------------------------------------------------------------------------
@@ -626,25 +611,31 @@ def confianca(resumo_dossie, riscos, cobertura=None):
     cobertura do checklist (tema sem informação derruba a confiança: alta só sem nenhum em branco). Devolve também, em
     português, o que derrubou a nota ("por_que"), para a abertura do documento."""
     criterios = []                                   # (nível, motivo técnico, motivo em português)
+    pontos = []                                      # cada critério em palavras simples, com a conta
     if cobertura:
         em_branco = [c for c in cobertura if c["estado"] == "não procurado"]
         nivel = 0 if len(em_branco) > len(cobertura) / 2 else 1 if em_branco else 2
+        pontos.append(f"temas básicos com informação: {len(cobertura) - len(em_branco)} de {len(cobertura)}")
         criterios.append((nivel, f"{len(cobertura) - len(em_branco)} de {len(cobertura)} temas do checklist com informação"
                           + (f" (sem informação: {', '.join(c['id'] for c in em_branco)})" if em_branco else ""),
                           f"dos {len(cobertura)} temas básicos que toda secretaria precisa ter verificados, {len(em_branco)} "
                           f"ficaram sem informação ({', '.join(c.get('tema', c['id']).lower() for c in em_branco)})"))
     if resumo_dossie and resumo_dossie.get("itens"):
         c = resumo_dossie["conferidos"] / resumo_dossie["itens"]
+        pontos.append(f"fatos das fontes públicas conferidos na fonte: {resumo_dossie['conferidos']} de "
+                      f"{resumo_dossie['itens']}")
         criterios.append((0 if c < 0.4 else 1 if c < 0.7 else 2,
                           f"{resumo_dossie['conferidos']} de {resumo_dossie['itens']} fatos do dossiê conferidos na fonte",
                           f"só {resumo_dossie['conferidos']} dos {resumo_dossie['itens']} fatos do dossiê puderam ser "
                           "conferidos na fonte"))
     else:
         criterios.append((0, "sem dossiê de fontes independentes", "não houve dossiê de fontes independentes"))
+        pontos.append("fatos das fontes públicas conferidos na fonte: não houve dossiê")
     if riscos:
         fracos = [r for r in riscos if r["firmeza"] in ("informado pelo órgão", "sem comprovação",
                                                         "fonte pública não conferida", "só na imprensa")]
         p = len(fracos) / len(riscos)
+        pontos.append(f"riscos apoiados em fonte oficial ou conferida: {len(riscos) - len(fracos)} de {len(riscos)}")
         criterios.append((0 if p > 0.6 else 1 if p > 0.3 else 2,
                           f"{len(riscos) - len(fracos)} de {len(riscos)} riscos apoiados em fonte oficial ou conferida",
                           f"{len(fracos)} dos {len(riscos)} riscos se apoiam só no que a secretaria informou ou em fonte "
@@ -652,4 +643,5 @@ def confianca(resumo_dossie, riscos, cobertura=None):
     nivel = min(c[0] for c in criterios)
     por_que = [c[2] for c in criterios if c[0] == nivel] if nivel < 2 else []
     return {"nivel": ["baixa", "média", "alta"][nivel], "motivos": [c[1] for c in criterios], "por_que": por_que,
+            "pontos": pontos,
             "lacuna_checklist": any(m.startswith("dos ") for m in por_que)}
