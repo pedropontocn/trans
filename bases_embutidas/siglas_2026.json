@@ -1,0 +1,17 @@
+{
+  "descricao": "Secretarias que saíram do Caderno de RH na reforma administrativa de 2026 e a sigla com que a sucessora aparece no Caderno mais recente. A folha usa a sucessora e diz o que aconteceu.",
+  "sucessoras": {
+    "SEAP": {"atual": "SEPPENRJ", "como": "passou a se chamar Secretaria de Estado de Polícia Penal",
+             "fonte": "https://diariodorio.com/governo-do-rio-reorganiza-secretaria-de-policia-penal-e-cria-servico-de-transporte-em-saude-prisional"},
+    "SEENEMAR": {"atual": "SEDES", "como": "foi extinta em julho de 2026 e incorporada à SEDEICS, que em agosto de 2026 absorveu também a SECTI",
+                 "fonte": "https://www.defesaemfoco.com.br/governo-do-rio-extingue-secretaria-de-energia-e-economia-do-mar-em-reforma-administrativa/"},
+    "SEDEICS": {"atual": "SEDES", "como": "absorveu a SEENEMAR em julho de 2026 e a SECTI em agosto de 2026",
+                "fonte": "https://www.correiodamanha.com.br/colunistas/correio-bastidores/2026/08/309036-couto-unifica-secretarias-de-desenvolvimento-economico-e-ciencia-tecnologia-e-inovacao-do-rj.html"},
+    "SECTI": {"atual": "SEDES", "como": "foi incorporada à SEDEICS em agosto de 2026",
+              "fonte": "https://www.correiodamanha.com.br/colunistas/correio-bastidores/2026/08/309036-couto-unifica-secretarias-de-desenvolvimento-economico-e-ciencia-tecnologia-e-inovacao-do-rj.html"},
+    "SEIJES": {"atual": "SEDSODH", "como": "foi extinta em agosto de 2026, com as atribuições passadas à Secretaria de Estado de Desenvolvimento Social e Direitos Humanos",
+               "fonte": "https://diariodorio.com/ricardo-couto-extingue-secretaria-de-juventude-e-envelhecimento-saudavel-apos-auditoria-apontar-irregularidades-em-contratos"},
+    "SEDIPAF": {"atual": "SEAPPA", "como": "foi fundida com a Secretaria de Agricultura em julho de 2026",
+                "fonte": "https://agenciabrasil.ebc.com.br/politica/noticia/2026-07/rio-de-janeiro-funde-secretarias-de-agricultura-e-de-pesca/"}
+  }
+}
