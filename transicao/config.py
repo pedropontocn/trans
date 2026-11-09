@@ -1,5 +1,5 @@
 """Configuração: modelos, preços e limites."""
-VERSAO = "5.1"
+VERSAO = "6.0"  # suba a cada mudança de método: a retomada não reaproveita resultado de versão antiga
 MARCA_JSON_INI, MARCA_JSON_FIM = "[INÍCIO DO JSON]", "[FIM DO JSON]"
 
 MODELOS = [

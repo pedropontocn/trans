@@ -53,6 +53,19 @@ def _recarregar_se_mudou():
 _recarregar_se_mudou()
 
 from transicao import VERSAO, analise, entrada, modelo  # noqa: E402
+
+
+def _commit():
+    """O commit do código que está rodando: confere se o Streamlit pegou a última versão do GitHub."""
+    import subprocess
+    try:
+        return subprocess.run(["git", "log", "-1", "--format=%h de %cd", "--date=format-local:%d/%m %H:%M"], capture_output=True,
+                              text=True, timeout=5, cwd=Path(__file__).parent).stdout.strip() or "?"
+    except Exception:
+        return "?"
+
+
+_COMMIT = _commit()
 from transicao.config import FAMILIAS, MODELOS, esquema_de_modelos, familias_disponiveis  # noqa: E402
 
 load_dotenv()
@@ -281,7 +294,7 @@ with st.sidebar:
         orgao_emissor = st.text_input("Órgão", value="Equipe de Transição")
         unidade = st.text_input("De (unidade)", value="")
         para = st.text_input("Para", value="")
-    st.caption(f"Versão {VERSAO}")
+    st.caption(f"Versão {VERSAO} · código {_COMMIT}")
 
 trabalho = trabalho_atual()
 
