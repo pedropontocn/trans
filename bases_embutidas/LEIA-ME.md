@@ -7,10 +7,12 @@ Dados oficiais que o app usa sozinho, por código, sem passar pelo modelo.
   efetivos (com idade e tempo de exercício médios) e os não efetivos (cargo em comissão, temporário, requisitado e
   outros). Órgão que não aparece na tabela de efetivos do Caderno não tem servidor efetivo lotado. Para cada órgão, o
   app usa sempre o nome mais atualizado. Hoje há os Cadernos de setembro e de março de 2026.
-- `siglas_2026.json`: as secretarias que saíram do Caderno na reforma administrativa de 2026 e a sigla da sucessora,
-  com a fonte (SEAP → SEPPENRJ; SECTI, SEDEICS e SEENEMAR → SEDES; SEIJES → SEDSODH; SEDIPAF → SEAPPA). A folha usa
-  a sucessora e diz o que aconteceu e que os números são de toda a sucessora. Quem não tem sucessora conhecida (SEM)
-  fica com o último Caderno em que aparece, e o texto diz. Só entra aqui sucessão com fonte.
+- `siglas_2026.json`: (1) a unidade orçamentária principal de cada sigla na LOA 2026, conferida uma a uma; o caderno
+  acha a secretaria por ela, mesmo quando a pasta vem só com a sigla (as vinculadas são as do mesmo órgão). (2) As
+  secretarias que saíram do Caderno de RH na reforma de 2026 e a sucessora: SEAP → SEPPENRJ, SEM → SEMPI e
+  SEDIPAF → SEAPPA, confirmadas na PLOA 2027; SECTI, SEDEICS e SEENEMAR → SEDES e SEIJES → SEDSODH, por notícia
+  (entram com o rótulo de imprensa). A folha usa a sucessora e diz o que aconteceu e que os números são de toda a
+  sucessora. Sem sucessora conhecida, fica com o último Caderno em que aparece. Só entra sucessão com fonte.
 
 Para atualizar a folha, baixe o Caderno do mês e rode:
 

@@ -183,3 +183,19 @@ def test_caderno_na_rodada(llm, bases, tmp_path):
     orgaos = [{"nome": "Secretaria de Exemplo - SEX", "ler": lambda: (RELATORIO, {"lidos": []})}]
     linhas = analise.rodar_orgaos(orgaos, cfg, tmp_path / "outra", log=lambda *_: None)
     assert linhas[0]["situacao"] == "concluído" and linhas[0]["caderno"].startswith("não gerado: nenhum Relatório")
+
+
+def test_secretaria_achada_na_loa_pela_sigla(llm, monkeypatch):
+    # bases do repositório: a pasta da secretaria pode vir só com a sigla (ex.: "SEIOP"); a unidade sai da tabela
+    # conferida sigla → unidade, sem depender do nome por extenso
+    from transicao import caderno
+    monkeypatch.delenv("PASTA_BASES", raising=False)
+    loa, _ = caderno.orcamento()
+    uos, principal = caderno.unidades_da_secretaria("SEIOP", loa, "SEIOP", "SEIOP")
+    assert principal == "53010" and "53510" in uos                     # a EMOP é vinculada (mesmo órgão, 53)
+    assert caderno.unidades_da_secretaria("SECID", loa, "SECID", "SECID")[1] == "66010"
+    assert caderno.unidades_da_secretaria("SEAPA", loa, "", "SEAPA")[1] == "13010"
+    assert caderno.unidades_da_secretaria("XYZ", loa, "XYZ", "XYZ") == ([], None)
+    from transicao.folha import PASTA_BASES
+    tabela = json.load(open(PASTA_BASES / "siglas_2026.json", encoding="utf-8"))
+    assert all(uo in loa["uos"] for uo in tabela["unidades"].values())   # toda unidade da tabela existe na LOA

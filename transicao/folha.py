@@ -88,11 +88,16 @@ def itens(sigla, pasta=None):
             "checagem": "conferido"}
     nome = l["sigla"]
     fatos, aviso = [], []
-    if suc := l["sucessao"]:                     # a sucessão vem de notícia: entra com a fonte e o rótulo de imprensa
-        aviso = [dict(base, fonte="Imprensa: " + suc["fonte"].split("/")[2].removeprefix("www."), url=suc["fonte"],
-                      data_fonte="2026", tipo_fonte="imprensa", confianca="media", checagem="",
-                      afirmacao=f"{suc['antiga']} {suc['como']}; no Caderno de RH de {quando}, a secretaria aparece "
-                                f"como {nome}, e os números da folha são os de toda a {nome}.")]
+    if suc := l["sucessao"]:
+        texto = (f"{suc['antiga']} {suc['como']}; no Caderno de RH de {quando}, a secretaria aparece como {nome}, e os "
+                 f"números da folha são os de toda a {nome}.")
+        if suc.get("oficial"):                   # confirmada na PLOA 2027, base oficial embutida
+            aviso = [dict(base, fonte="Projeto de Lei Orçamentária 2027 (PLOA), Volume II", url=suc.get("fonte", ""),
+                          data_fonte="2026", tipo_fonte="documento_oficial",
+                          afirmacao=f"{texto} {suc['oficial'][0].upper()}{suc['oficial'][1:]}.")]
+        else:                                    # só em notícia: entra com a fonte e o rótulo de imprensa
+            aviso = [dict(base, fonte="Imprensa: " + suc["fonte"].split("/")[2].removeprefix("www."), url=suc["fonte"],
+                          data_fonte="2026", tipo_fonte="imprensa", confianca="media", checagem="", afirmacao=texto)]
     fatos += [f"Em {quando}, {nome} tinha {_int(l['vinculos_ativos'])} vínculos ativos, com dispêndio de "
              f"R$ {l['dispendio_mes_mi'].replace('.', ',')} milhões na folha do mês e remuneração média de "
              f"{_reais(l['remuneracao_media'])}."]
