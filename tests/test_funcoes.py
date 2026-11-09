@@ -316,7 +316,11 @@ def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
     diag = funcoes.extrair_diagnostico("anthropic/claude-sonnet-5-5", d, rel, "Secretaria de Exemplo")
     assert [s["titulo"] for s in diag["secoes"]] == funcoes.SECOES_DIAGNOSTICO   # sempre os mesmos blocos
     com_itens = {s["titulo"]: s for s in diag["secoes"] if s["itens"]}
-    assert list(com_itens) == ["Orçamento e execução", "Estrutura e dirigentes"] and diag["descartados"] == 2
+    assert list(com_itens) == ["Como se organiza", "Orçamento e execução"] and diag["descartados"] == 2
+    # organograma: só as unidades com origem conferida; panorama vem junto
+    assert [u["unidade"] for u in diag["organograma"]] == ["Gabinete do Secretário", "Subsecretaria de Obras",
+                                                            "Superintendência de Projetos", "EMOP"]
+    assert diag["organograma"][3]["vinculada"] and diag["panorama"][0].startswith("A Secretaria de Exemplo")
     assert [(i["nome"], i["rotulo"]) for i in diag["indicadores"]] == [("LOA 2026", "confirmado em fonte oficial"),
                                                                         ("Empenhado", "informado pelo órgão")]
     rotulos = [i["rotulo"] for i in com_itens["Orçamento e execução"]["itens"]]
@@ -324,10 +328,12 @@ def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
     ids = [i["id"] for s in diag["secoes"] for i in s["itens"]]
     assert ids == [f"F{k}" for k in range(1, len(ids) + 1)]                     # numerados para os riscos citarem
     md = funcoes.markdown_capitulos(diag)
-    assert md.startswith("## 1. Contratos") and "### Orçamento e execução" in md and "### Estrutura e dirigentes" in md
+    titulos = [l for l in md.splitlines() if l.startswith("## ")]
+    assert titulos == ["## 1. O que faz", "## 2. Como se organiza", "## 3. Programas e ações", "## 4. Principais contratos",
+                       "## 5. Pessoal", "## 6. Orçamento", "## 7. Pendências com controle e justiça",
+                       "## 8. Sistemas, convênios e parcerias"]
     assert "_Não se sabe:_ Organograma atualizado" in md and "40 subsecretarias" not in md
-    assert "A secretaria tem pendências de controle." in md
-    assert md.index("## 1. Contratos") < md.index("## 2. Pessoal") < md.index("## 3. Passivos") < md.index("## 4. Orçamento")
+    assert "A secretaria tem pendências de controle." in md and "└── Subsecretaria de Obras" in md
 
 
 def test_regua_de_risco_igual_para_todos(funcoes):
@@ -402,12 +408,13 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     texto = funcoes.dossie_secretaria(resultado, diag, [("Contratos que vencem em até 180 dias", "3")], [], d, None,
                                       "## Cobertura – o que foi procurado\n| tabela |", nota,
                                       cobertura=cobertura, contratos_criticos=criticos)
-    ordem = [texto.index(t) for t in ["## Em resumo", "**Números-chave**", "**Lacunas: 1 de 10", "## 1. Contratos",
-                                      "**Contratos críticos**", "| Contrato 1/2026 |", "## 2. Pessoal", "## 3. Passivos",
-                                      "## 4. Orçamento, obras e estrutura", "### Estrutura e dirigentes",
-                                      "## 6. Cobertura do checklist obrigatório", "| tabela |", "## Anexo – Fontes",
+    ordem = [texto.index(t) for t in ["## Panorama", "**Ficha rápida**", "| LOA 2026 | R$ 412 mi |",
+                                      "**Lacunas: 1 de 10", "## 1. O que faz", "## 2. Como se organiza",
+                                      "## 4. Principais contratos", "| Contrato 1/2026 |", "## 5. Pessoal",
+                                      "## 8. Sistemas, convênios e parcerias", "## Anexo – Fontes",
                                       "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
+    assert "| tabela |" not in texto and "Cobertura do checklist" not in texto   # a cobertura vai para a auditoria
     assert texto.count("| Contrato 1/2026 |") == 1                                  # o repetido da planilha não entra duas vezes
     assert "_Não se sabe:_ Organograma atualizado" in texto
     for fora in ("Riscos por prioridade", "### R1.", "Sobre este documento", "Como este documento foi feito", "teme aditivo"):
@@ -697,7 +704,7 @@ def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes):
     q = funcoes.quadro("SECID")
     md = funcoes.markdown_capitulos({"secoes": []}, None, None, q)
     assert "| 145 | 0 | 145 (100,0%) | R$ 1,17 mi | R$ 8.082,93 |" in md and "pode sair na troca de governo" in md
-    assert md.index("## 2. Pessoal") < md.index("**Folha de pessoal**") < md.index("## 3. Passivos")
+    assert md.index("## 5. Pessoal") < md.index("**Folha de pessoal**") < md.index("## 6. Orçamento")
     # no dossiê: id novo, conferido, firmeza de fonte oficial; o checklist C9 sai por código
     d = {"itens": [], "origem": "arquivo", "nao_encontrado": []}
     funcoes.acrescentar_itens(d, secid)
@@ -785,3 +792,29 @@ def test_revisao_do_texto_reescreve_no_tom_de_analise_com_travas(funcoes, llm):
     antes = dict(resultado["riscos"][0])
     revisao.revisar_texto("anthropic/claude-opus-5-5", resultado, [], pistas=[])
     assert resultado["riscos"][0] == antes
+
+
+def test_organograma_em_arvore(funcoes):
+    from transicao import documentos
+    u = lambda nome, pai="", **k: dict({"unidade": nome, "sigla": "", "subordinada_a": pai, "titular": "",
+                                         "vinculada": False, "rotulo": "informado pelo órgão"}, **k)
+    unidades = [u("Gabinete do Secretário", titular="Ana Lima (Secretária)"), u("Subsecretaria A", "Gabinete do Secretário"),
+                u("Superintendência A1", "Subsecretaria A"), u("Subsecretaria B", "Gabinete do Secretário", titular="vago"),
+                u("Fundação X", vinculada=True, sigla="FX")]
+    md = documentos.organograma_em_arvore(unidades, "Secretaria de Exemplo")
+    assert md.splitlines() == ["```", "Secretaria de Exemplo",
+                               "├── Gabinete do Secretário — Ana Lima (Secretária)",
+                               "│   ├── Subsecretaria A",
+                               "│   │   └── Superintendência A1",
+                               "│   └── Subsecretaria B — vago",
+                               "└── Vinculadas",
+                               "    └── Fundação X (FX)", "```"]
+    # sem vinculadas e com um topo só, a árvore começa nele
+    md = documentos.organograma_em_arvore(unidades[:3])
+    assert md.splitlines()[1] == "Gabinete do Secretário — Ana Lima (Secretária)"
+    # no Word, o bloco sai em fonte fixa, uma linha por parágrafo
+    import io
+    import docx
+    doc = docx.Document(io.BytesIO(documentos.gerar_docx("## 2. Como se organiza\n" + md, {"assunto": "x"})))
+    fixos = [p for p in doc.paragraphs if p.runs and p.runs[0].font.name == "Consolas"]
+    assert [p.text for p in fixos][:2] == ["Gabinete do Secretário — Ana Lima (Secretária)", "└── Subsecretaria A"]

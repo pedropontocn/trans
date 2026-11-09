@@ -165,11 +165,11 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     antes = documentos.antes_de_ler(confianca, cfg["data_corte"], documentos.cortes_de_leitura(manifesto, avisos))
     texto_dossie = documentos.dossie_secretaria(
         resultado, diagnostico, None, eventos, dossie, confronto, checklist.markdown(cobertura), nota,
-        cobertura=cobertura, contratos_criticos=contratos_criticos, antes_md=antes)
+        cobertura=cobertura, contratos_criticos=contratos_criticos, antes_md=antes, orgao=nome)
     texto_riscos = documentos.relatorio_riscos(resultado, cobertura, nota, antes_md=antes)
     revisao_texto["alertas_no_documento"] = revisao.alertas_do_documento(texto_riscos)   # a última conferência
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
-            "assunto": nome, "tipo": "Dossiê da secretaria, atualizado com o que ela informou",
+            "assunto": nome, "tipo": "Dossiê da secretaria: como funciona hoje",
             "data": documentos._data_extenso(date.today()),
             "rodape_extra": f"apoio de IA, processamento automático, reg. {registro_id}"}
     para_json = lambda x: json.loads(json.dumps(x, ensure_ascii=False, default=str))
@@ -188,7 +188,8 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
                         "revisao_do_texto": revisao_texto, "confianca": confianca},
         "uso_tokens": uso_total, "custo_estimado_usd": round(custo, 4), "custo_parcial": parcial,
     }
-    texto_auditoria = documentos.auditoria_secretaria(resultado, dossie, confronto, registro["metodo_md"])
+    texto_auditoria = documentos.auditoria_secretaria(resultado, dossie, confronto, registro["metodo_md"],
+                                                      checklist.markdown(cobertura), diagnostico)
     registro["auditoria_md"] = texto_auditoria
     return {"dossie_docx": documentos.gerar_docx(texto_dossie, meta), "dossie_md": texto_dossie,
             "riscos_docx": documentos.gerar_docx(texto_riscos, dict(meta, tipo="Relatório de riscos e decisões urgentes")),

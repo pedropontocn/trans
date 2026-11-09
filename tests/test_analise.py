@@ -107,10 +107,18 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
     # produto 2: o dossiê da secretaria, atualizado com o que ela informou
     textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
-    for titulo in ["Em resumo", "1. Contratos", "2. Pessoal", "3. Passivos jurídicos e de controle",
-                   "4. Orçamento, obras e estrutura", "5. O que a secretaria informou e o que as fontes mostram",
-                   "6. Cobertura do checklist obrigatório", "Anexo – Fontes"]:
+    for titulo in ["Panorama", "Ficha rápida", "1. O que faz", "2. Como se organiza", "3. Programas e ações",
+                   "4. Principais contratos", "5. Pessoal", "6. Orçamento", "7. Pendências com controle e justiça",
+                   "8. Sistemas, convênios e parcerias", "Anexo – Fontes"]:
         assert titulo in textos, titulo
+    # o organograma em árvore, em fonte fixa, só com as unidades conferidas
+    assert "│   └── Subsecretaria de Obras (SUBOB) — vago" in textos and "│       └── Superintendência de Projetos" in textos
+    assert "└── Vinculadas" in textos and "    └── EMOP" in textos
+    assert not any("Inventada" in t for t in textos)
+    # riscos, confronto e cobertura não ficam no dossiê: vão para o relatório de riscos e a auditoria
+    for fora in ("Riscos por prioridade", "6. Cobertura do checklist obrigatório",
+                 "5. O que a secretaria informou e o que as fontes mostram"):
+        assert fora not in textos, fora
     assert not any(t.startswith(("Riscos por prioridade", "Sobre este documento", "Anexo 3")) for t in textos)
     # produto 3: o relatório de riscos, focado nas decisões urgentes, sem anexo
     riscos_txt = [p.text for p in docx.Document(io.BytesIO(r["riscos_docx"])).paragraphs]
@@ -122,10 +130,12 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     for titulo in ["Revisão dos agentes, risco a risco", "Todas as fontes do dossiê", "Anexo 3 – Como este documento foi feito"]:
         assert titulo in r["registro"]["auditoria_md"], titulo
     md = r["dossie_md"]
-    assert md.index("## Em resumo") < md.index("## 1. Contratos") < md.index("## 5. O que a secretaria") < md.index("## 6. Cobertura")
+    assert md.index("## Panorama") < md.index("## 1. O que faz") < md.index("## 4. Principais contratos") < md.index("## Anexo")
     assert "| LOA 2026 | R$ 412 mi |" in md and "| Empenhado | R$ 398,75 mi |" in md and "Inventado" not in md
     assert "| Contrato 99/2026 |" in md and "Contrato 7/2025" not in md and "Contrato sem origem" not in md
-    assert "**As fontes mostram:**" in md or "Não mencionado pela secretaria" in md
+    auditoria = r["registro"]["auditoria_md"]                   # o confronto e a cobertura ficam na auditoria
+    assert "**As fontes mostram:**" in auditoria or "Não mencionado pela secretaria" in auditoria
+    assert "Cobertura" in auditoria and "## Organograma completo" in auditoria
     assert "Anexo 3 – Como este documento foi feito" in r["registro"]["metodo_md"]       # o método fica na auditoria
     reg = r["registro"]
     assert len(reg["revisoes_dos_agentes"]) == 6 and r["agentes"] == 6                 # cinco olhares e o advogado do diabo
@@ -405,7 +415,7 @@ def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
     pedidos = [json.dumps(c["mensagens"][0]["content"], ensure_ascii=False) for c in llm.chamadas]
     assert not any("Monte a camada" in p and 'camada\\n\\"Estado\\"' not in p for p in pedidos)   # só o Estado
     texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "dossies").glob("*_dossie.docx"))).paragraphs)
-    assert "Cobertura do checklist obrigatório" in texto and "Contratos críticos" in texto
+    assert "4. Principais contratos" in texto and "Cobertura do checklist obrigatório" not in texto
     import openpyxl
     calendarios = list((tmp_path / "calendarios").glob("*_calendario.xlsx"))
     celulas = [str(c.value) for f in calendarios for ws in openpyxl.load_workbook(f).worksheets

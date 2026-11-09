@@ -144,8 +144,9 @@ def _texto_inline(par, texto, tamanho=Pt(10.5), cor=TEXTO, negrito=False):
 
 
 def _ler_markdown(md):
-    """Divide o Markdown em blocos: título, parágrafo, lista e tabela."""
+    """Divide o Markdown em blocos: título, parágrafo, lista, tabela e bloco em fonte fixa (entre ```)."""
     blocos, paragrafo = [], []
+    fixo = None
 
     def fechar_paragrafo():
         if paragrafo:
@@ -154,6 +155,17 @@ def _ler_markdown(md):
 
     for linha in md.splitlines():
         s = linha.strip()
+        if s.startswith("```"):
+            fechar_paragrafo()
+            if fixo is None:
+                fixo = []
+            else:
+                blocos.append(("pre", fixo))
+                fixo = None
+            continue
+        if fixo is not None:
+            fixo.append(linha.rstrip())
+            continue
         if not s:
             fechar_paragrafo()
             continue
@@ -218,6 +230,15 @@ def _desenhar_blocos(alvo, blocos):
         elif tipo == "table":
             _desenhar_tabela(alvo, bloco[1])
             alvo.add_paragraph()
+        elif tipo == "pre":
+            for k, texto in enumerate(bloco[1]):
+                par = alvo.add_paragraph()
+                par.paragraph_format.space_after = Pt(6 if k == len(bloco[1]) - 1 else 0)
+                par.paragraph_format.space_before = Pt(0)
+                par.paragraph_format.line_spacing = 1.0
+                run = par.add_run(texto or " ")
+                run.font.name = "Consolas"
+                run.font.size = Pt(9)
 
 
 def _desenhar_tabela(alvo, linhas):
@@ -767,16 +788,19 @@ def cortes_de_leitura(manifesto=None, avisos=None):
     return cortes
 
 
-def resumo_do_dossie(resultado, cobertura=None, indicadores=None):
-    """A abertura do dossiê: a situação da secretaria em poucas frases, os números-chave e as lacunas do checklist."""
+def resumo_do_dossie(resultado, cobertura=None, indicadores=None, diag=None, folha=None, orgao=""):
+    """A abertura do dossiê: o panorama da secretaria em poucas frases, a ficha rápida e, numa linha, os temas
+    básicos que ficaram sem informação. Sem riscos: eles ficam no relatório de riscos."""
     from .checklist import linha_essencial
-    linhas = ["## Em resumo"] + [f"- {x}" for x in resultado.get("situacao") or []]
-    if indicadores:
-        linhas += ["**Números-chave**", "| Indicador | Valor | Base |", "|---|---|---|"]
-        linhas += [f"| {i['nome']} | {i['valor']} | {_base_curta(i)} |" for i in indicadores]
+    diag = diag if diag is not None else {"indicadores": indicadores or []}
+    panorama = diag.get("panorama") or []
+    linhas = ["## Panorama"] + [f"- {x}" for x in panorama]
+    ficha = ficha_rapida(diag, folha, orgao)
+    if ficha:
+        linhas += ["**Ficha rápida**", ficha]
     lacunas = linha_essencial(cobertura) if cobertura else ""
     if lacunas:
-        linhas.append(lacunas.replace("Ver a tabela de cobertura no Capítulo 1.", "Tabela no capítulo 6."))
+        linhas.append(lacunas.replace(" Ver a tabela de cobertura no Capítulo 1.", " A tabela está na auditoria."))
     return "\n".join(linhas)
 
 
@@ -869,7 +893,7 @@ def markdown_contratos_criticos(contratos, limite=15):
     linhas_c = _juntar_contratos(contratos, limite)
     if not linhas_c:
         return ""
-    linhas = ["| Contrato | Objeto | Contratado | Valor | Vigência | Por que é crítico | Base |",
+    linhas = ["| Contrato | Objeto | Contratado | Valor | Vigência | Destaques | Base |",
               "|---|---|---|---|---|---|---|"]
     for c in linhas_c:
         motivo = ", ".join(c["motivos"]) + (f". {_curto(c['observacao'], 90)}" if c.get("observacao") else "")
@@ -895,9 +919,74 @@ def _secao_diagnostico(sec):
     return linhas
 
 
-CAPITULOS = [("1. Contratos", ["Contratos"]), ("2. Pessoal", ["Pessoal"]),
-             ("3. Passivos jurídicos e de controle", ["Passivos jurídicos e de controle"]),
-             ("4. Orçamento, obras e estrutura", ["Orçamento e execução", "Obras e entregas", "Estrutura e dirigentes"])]
+CAPITULOS = [("1. O que faz", ["O que faz"]), ("2. Como se organiza", ["Como se organiza"]),
+             ("3. Programas e ações", ["Programas e ações"]), ("4. Principais contratos", ["Contratos"]),
+             ("5. Pessoal", ["Pessoal"]), ("6. Orçamento", ["Orçamento e execução"]),
+             ("7. Pendências com controle e justiça", ["Pendências com controle e justiça"]),
+             ("8. Sistemas, convênios e parcerias", ["Sistemas, convênios e parcerias"])]
+
+
+def organograma_em_arvore(unidades, orgao="", max_linhas=32):
+    """O organograma em texto, em árvore (├── └──), montado por código a partir das unidades conferidas. A
+    vinculadas ficam num ramo próprio. Unidade sem chefe conhecido aparece sem nome; "vago" aparece como vago."""
+    if not unidades:
+        return ""
+    nomes = {u["unidade"] for u in unidades}
+    filhos = {}
+    for u in unidades:
+        pai = u["subordinada_a"] if u["subordinada_a"] in nomes and u["subordinada_a"] != u["unidade"] else ""
+        if u.get("vinculada") and not pai:
+            pai = "__vinculadas__"
+        filhos.setdefault(pai, []).append(u)
+
+    def rotulo(u):
+        nome = u["unidade"] + (f" ({u['sigla']})" if u.get("sigla") and u["sigla"] not in u["unidade"] else "")
+        return nome + (f" — {u['titular']}" if u.get("titular") else "")
+
+    linhas = []
+
+    def descer(pai, prefixo, nivel, vistos):
+        lista = filhos.get(pai, [])
+        for k, u in enumerate(lista):
+            if u["unidade"] in vistos or len(linhas) >= max_linhas:
+                continue
+            ultimo = k == len(lista) - 1
+            linhas.append(prefixo + ("└── " if ultimo else "├── ") + rotulo(u))
+            if nivel < 3:
+                descer(u["unidade"], prefixo + ("    " if ultimo else "│   "), nivel + 1, vistos | {u["unidade"]})
+
+    topo = filhos.get("", [])
+    if len(topo) == 1 and not filhos.get("__vinculadas__"):
+        linhas.append(rotulo(topo[0]))
+        descer(topo[0]["unidade"], "", 1, {topo[0]["unidade"]})
+    else:
+        linhas.append(orgao or "Secretaria")
+        filhos[" topo "] = topo + ([{"unidade": "Vinculadas", "sigla": "", "titular": ""}] if filhos.get("__vinculadas__") else [])
+        filhos["Vinculadas"] = filhos.get("__vinculadas__", [])
+        descer(" topo ", "", 1, set())
+    sobra = len(unidades) - (len(linhas) - 1)
+    if sobra > 0 and len(linhas) >= max_linhas:
+        linhas.append(f"… e mais {sobra} unidade(s) no registro de auditoria")
+    return "\n".join(["```"] + linhas + ["```"])
+
+
+def ficha_rapida(diag, folha=None, orgao=""):
+    """A ficha rápida do topo do dossiê: os números-chave conferidos, a folha (Caderno de RH) e a estrutura."""
+    linhas = ["| Item | Valor | Base |", "|---|---|---|"]
+    unidades = (diag or {}).get("organograma") or []
+    topo = [u for u in unidades if not u["subordinada_a"] and not u.get("vinculada") and u.get("titular")]
+    if topo:
+        linhas.append(f"| Titular | {topo[0]['titular']} | {_base_curta(topo[0])} |")
+    if unidades:
+        vinc = sum(bool(u.get("vinculada")) for u in unidades)
+        linhas.append(f"| Estrutura | {len(unidades) - vinc} unidade(s)" + (f" e {vinc} vinculada(s)" if vinc else "")
+                      + " no organograma | conferido no material |")
+    if folha:
+        linhas.append(f"| Vínculos ativos (folha do mês) | {folha.get('vinculos', '–')} ({folha.get('folha_mes', '–')}) | "
+                      f"Caderno de RH (SEPLAG, {folha.get('competencia', '')}) |")
+    for i in (diag or {}).get("indicadores") or []:
+        linhas.append(f"| {i['nome']} | {i['valor']} | {_base_curta(i)} |")
+    return "\n".join(linhas) if len(linhas) > 2 else ""
 
 
 def _quadro_folha(q):
@@ -911,20 +1000,20 @@ def _quadro_folha(q):
             "de governo._"] if q["pct"] >= 50 else []))
 
 
-def markdown_capitulos(diag, contratos_criticos=None, ficha=None, folha=None):
-    """Os capítulos de dados, na ordem do que mais pesa: contratos (com a tabela dos críticos), pessoal, passivos,
-    e por fim orçamento, obras e estrutura. Cada afirmação traz a origem conferida."""
+def markdown_capitulos(diag, contratos_criticos=None, ficha=None, folha=None, orgao=""):
+    """Os capítulos do dossiê, que respondem "como essa secretaria funciona hoje?": o que faz, como se organiza (com
+    o organograma em árvore), programas e ações, principais contratos, pessoal, orçamento, pendências com controle e
+    justiça, e sistemas, convênios e parcerias. Cada afirmação traz a origem conferida."""
     por_titulo = {_norm(s["titulo"]): s for s in (diag or {}).get("secoes") or []}
     linhas = []
     for titulo, blocos in CAPITULOS:
         linhas.append(f"## {titulo}")
-        if titulo.startswith("1.") and contratos_criticos:
-            linhas += ["**Contratos críticos**", markdown_contratos_criticos(contratos_criticos)]
-        if titulo.startswith("2.") and folha:
+        if titulo.startswith("2.") and (diag or {}).get("organograma"):
+            linhas.append(organograma_em_arvore(diag["organograma"], orgao))
+        if titulo.startswith("4.") and contratos_criticos:
+            linhas.append(markdown_contratos_criticos(contratos_criticos, limite=10))
+        if titulo.startswith("5.") and folha:
             linhas.append(_quadro_folha(folha))
-        if titulo.startswith("1.") and ficha:
-            linhas += ["| Carteira que vence | Contratos (valor) |", "|---|---|"]
-            linhas += [f"| {a} | {b} |" for a, b in ficha]
         for bloco in blocos:
             sec = por_titulo.get(_norm(bloco))
             if not sec:
@@ -988,19 +1077,18 @@ def _papeis():
 
 
 def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
-                      contratos_criticos=None, antes_md=""):
-    """Produto 2, o dossiê da secretaria atualizado com o que ela informou: resumo e números-chave; 1. Contratos (com
-    a tabela dos críticos); 2. Pessoal; 3. Passivos; 4. Orçamento, obras e estrutura; 5. o confronto entre o que a
-    secretaria informou e o que as fontes mostram; 6. a cobertura do checklist; anexos com fontes citadas e prazos que
-    não são contratos. Só dados, cada um com a origem conferida."""
-    outros = [e for e in eventos or [] if not e.get("origem", "").startswith("Contratos")]
-    venc = markdown_vencimentos(outros, limite=10)
-    venc = ("## Anexo – Prazos de controle, convênios e outros vencimentos\n" + venc.split("\n", 1)[1]) if venc else ""
-    partes = [antes_md, resumo_do_dossie(resultado, cobertura, (diag or {}).get("indicadores")),
-              markdown_capitulos(diag, contratos_criticos, ficha, (dossie or {}).get("folha")),
-              markdown_confronto(dossie, confronto),
-              markdown_fontes(dossie, None, ids_citados(diag, resultado, contratos_criticos), cobertura_md),
-              venc, nota_md]
+                      contratos_criticos=None, antes_md="", orgao=""):
+    """Produto 2, o dossiê: responde "como essa secretaria funciona hoje?", em até 5 páginas. Panorama e ficha
+    rápida; os oito capítulos (o que faz, organização com organograma, programas, contratos, pessoal, orçamento,
+    pendências, sistemas e parcerias); o anexo de fontes. Só dados, cada um com a origem conferida; primeiro o que a
+    secretaria enviou, depois as fontes públicas. O confronto e a cobertura dos temas ficam na auditoria; os riscos,
+    no relatório de riscos; os prazos, no calendário."""
+    orgao = orgao or (dossie or {}).get("orgao", "")
+    folha = (dossie or {}).get("folha")
+    partes = [antes_md, resumo_do_dossie(resultado, cobertura, None, diag or {}, folha, orgao),
+              markdown_capitulos(diag, contratos_criticos, None, folha, orgao),
+              markdown_fontes(dossie, None, ids_citados(diag, resultado, contratos_criticos)),
+              nota_md]
     return "\n\n".join(p for p in partes if p)
 
 
@@ -1077,11 +1165,16 @@ def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedi
     return "\n".join(m for m in md if m)
 
 
-def auditoria_secretaria(resultado, dossie, confronto, metodo_md):
+def auditoria_secretaria(resultado, dossie, confronto, metodo_md, cobertura_md="", diag=None):
     """Produto 5, a auditoria legível: as objeções de cada agente risco a risco com a resposta da consolidação, todas as
     fontes do dossiê com as conferências, e o método (modelos, confiança, números conferidos, neutralidade). O registro
     completo, em JSON, fica ao lado."""
-    partes = [markdown_objecoes(resultado),
+    unidades = (diag or {}).get("organograma") or []
+    organo = ("## Organograma completo\n" + "\n".join(
+        f"- {u['unidade']}" + (f" ({u['sigla']})" if u.get("sigla") else "")
+        + (f", subordinada a {u['subordinada_a']}" if u.get("subordinada_a") else "")
+        + (f" — {u['titular']}" if u.get("titular") else "") + f" _({u['rotulo']})_" for u in unidades)) if unidades else ""
+    partes = [markdown_confronto(dossie, confronto), cobertura_md, organo, markdown_objecoes(resultado),
               "## Todas as fontes do dossiê\n" + markdown_fontes(dossie, confronto).split("\n", 1)[1],
               metodo_md]
     return "\n\n".join(p for p in partes if p)

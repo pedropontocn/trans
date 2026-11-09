@@ -123,11 +123,23 @@ class LLMFalso:
                  "item": "", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
                 {"texto": "A Secretaria tem 40 subsecretarias.", "origem": "relatorio", "item": "",
                  "trecho": "a Secretaria tem 40 subsecretarias"}]},
-            {"titulo": "Estrutura e dirigentes", "itens": [
+            {"titulo": "Como se organiza", "itens": [
                 {"texto": "Item que não existe.", "origem": "dossie", "item": "O999", "trecho": ""},
                 {"texto": "O TCE-RJ apontou atraso na prestação de contas de convênios.", "origem": "dossie",
                  "item": "O4", "trecho": ""}],
              "leitura": "A secretaria tem pendências de controle.", "nao_se_sabe": ["Organograma atualizado"]}],
+            "panorama": ["A Secretaria de Exemplo cuida de obras e tem 40 subsecretarias."],
+            "organograma": [
+                {"unidade": "Gabinete do Secretário", "sigla": "GAB", "subordinada_a": "", "titular": "",
+                 "origem": "relatorio", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+                {"unidade": "Subsecretaria de Obras", "sigla": "SUBOB", "subordinada_a": "Gabinete do Secretário",
+                 "titular": "vago", "origem": "relatorio", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+                {"unidade": "Superintendência de Projetos", "sigla": "", "subordinada_a": "Subsecretaria de Obras",
+                 "titular": "", "origem": "relatorio", "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
+                {"unidade": "Subsecretaria Inventada", "subordinada_a": "Gabinete do Secretário",
+                 "origem": "relatorio", "trecho": "frase que não existe no relatório"},
+                {"unidade": "EMOP", "sigla": "EMOP", "subordinada_a": "", "vinculada": True, "origem": "dossie",
+                 "item": "O1"}],
             "indicadores": [
                 {"nome": "LOA 2026", "valor": "R$ 412 mi", "origem": "dossie", "item": "O1", "trecho": ""},
                 {"nome": "Empenhado", "valor": "R$ 398,75 mi", "origem": "relatorio", "item": "",
@@ -236,10 +248,10 @@ class LLMFalso:
         if "Você confronta o que um órgão declarou" in contexto:
             self.mensagem_confronto = ultimo
             return self._resp(json.dumps(self.confronto))
-        if "Você escreve o DIAGNÓSTICO" in contexto:
+        if "Você escreve o DOSSIÊ de uma secretaria" in contexto:
             self.mensagem_diagnostico_orgao = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.diagnostico_orgao) + "[FIM DO JSON]")
-        if "Você lista os CONTRATOS CRÍTICOS" in contexto:
+        if "Você lista os PRINCIPAIS CONTRATOS" in contexto:
             self.mensagem_contratos = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.contratos_criticos) + "[FIM DO JSON]")
         if "Você responde ao CHECKLIST obrigatório" in contexto:

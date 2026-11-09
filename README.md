@@ -13,7 +13,7 @@ Um `.zip` com:
 | Arquivo | O que é |
 |---|---|
 | `paineis/<sigla>_painel.json` | **1. Dados do painel, por secretaria:** os pontos de decisão com janela (antes da posse, 72 horas, 100 dias, depois), prazo, prioridade e repercussão política votada pelos seis agentes, na mesma régua para todas; prontos para o painel unificado. O painel em Word por secretaria saiu: repetia a tabela do relatório de riscos |
-| `dossies/<secretaria>_dossie.docx` | **2. Dossiê da secretaria, atualizado com o que ela informou**: em resumo (situação, números-chave, lacunas); 1. Contratos (tabela dos contratos críticos); 2. Pessoal; 3. Passivos jurídicos e de controle; 4. Orçamento, obras e estrutura; 5. O que a secretaria informou e o que as fontes mostram; 6. Cobertura do checklist; anexo de fontes citadas e prazos que não são contratos |
+| `dossies/<secretaria>_dossie.docx` | **2. Dossiê: como a secretaria funciona hoje**, até 5 páginas: panorama e ficha rápida; 1. O que faz; 2. Como se organiza (organograma em árvore); 3. Programas e ações; 4. Principais contratos; 5. Pessoal (Caderno de RH); 6. Orçamento; 7. Pendências com controle e justiça; 8. Sistemas, convênios e parcerias; anexo de fontes. Primeiro o que a secretaria enviou; sem isso, os dossiês de base. Descritivo: os riscos ficam no relatório de riscos; o confronto e a cobertura dos temas, na auditoria |
 | `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, até 3 páginas e sem anexo: situação; os pontos de decisão urgentes em ordem de prazo, com janela, impacto e repercussão política votados item a item pelos seis agentes (contagem dos votos e divergências), prioridade e base; as informações que faltam. Tom de análise: sem recomendação, sem caminho sugerido, sem responsável |
 | `auditoria/<secretaria>.json` | **5. Auditoria**: o registro completo de cada análise: dossiê e conferências, análise inicial, revisões e votos dos seis agentes, consolidação, objeções risco a risco, método, descartes, custo |
 | `calendarios/<sigla>_calendario.xlsx` | **4. Calendário, por secretaria:** os vencimentos com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro. Só as datas que a secretaria informou |
@@ -69,12 +69,13 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    código. Contratos: só o que a secretaria informou.
    Por padrão, todas as etapas usam o modelo mais forte (Opus): qualidade primeiro; o modo econômico (Batch API)
    só muda o tempo, não o modelo.
-2. **Diagnóstico.** Seis blocos fixos, na ordem do que mais pesa na transição: contratos (valores altos, objetos
-   questionáveis, vigência acabando, paralisados, passivo); pessoal (tamanho e custo da folha, folha inchada, cargos
-   que vagam, risco de apagão de equipe); passivos jurídicos e de controle; orçamento e execução; obras e entregas;
-   estrutura e dirigentes. Mais os números-chave do resumo executivo e a **tabela de contratos críticos** (os que
-   a secretaria informou, apontados no material e conferidos). Cada afirmação, número e contrato cita o dossiê
-   ou um trecho literal do relatório da secretaria; o que não confere é retirado.
+2. **Dossiê (diagnóstico).** Responde "como essa secretaria funciona hoje?", em oito blocos fixos: o que faz; como
+   se organiza (com o organograma, cada unidade conferida na origem e desenhada em árvore pelo código); programas e
+   ações; contratos (só o que a secretaria informou); pessoal; orçamento e execução; pendências com controle e
+   justiça; sistemas, convênios e parcerias. Mais o panorama e os números da ficha rápida. Primeiro o que a
+   secretaria enviou; só sem isso, os dossiês de base. Cada afirmação cita o dossiê ou um trecho literal do
+   relatório; o que não confere é retirado. Os fatos que pesam na transição entram sem juízo e servem à análise de
+   riscos.
 3. **Checklist obrigatório.** Dez temas básicos que toda secretaria precisa ter verificados (contratos a vencer, emergenciais,
    execução, restos a pagar, TCE-RJ, judicialização, convênios federais, obras, pessoal, sistemas críticos). Cada um
    sai com estado conferido por código: **encontrado** (com os fatos), **procurado e não encontrado** (a pesquisa
