@@ -68,7 +68,8 @@ def campos(resultado):
     for k, s in enumerate(resultado.get("situacao") or []):
         saida[f"situacao.{k}"] = s
     for r in resultado.get("riscos") or []:
-        for campo in ("titulo", "causa", "consequencia", "decisao", "motivo_sensibilidade", "em_curso"):
+        for campo in ("titulo", "o_que_e", "situacao_atual", "causa", "consequencia", "decisao", "motivo_sensibilidade",
+                      "em_curso"):
             if str(r.get(campo) or "").strip():
                 saida[f"{r['id']}.{campo}"] = r[campo]
     for k, p in enumerate(resultado.get("pedir") or []):

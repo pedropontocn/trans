@@ -423,24 +423,21 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     riscos = funcoes.relatorio_riscos(resultado, cobertura, nota, confianca={"nivel": "média", "por_que": ["x"]},
                                       data_corte="04/11/2026")
     ordem = [riscos.index(t) for t in ["- **O que é:**", "- **Confiança: MÉDIA**", "- **Como ler:**",
-                                       "## Pontos de decisão, em ordem de prazo",
-                                       "| # | Ponto de decisão | Prazo | Janela | Prioridade | Base |",
-                                       "## Os riscos, um a um", "**R1. ", "- **Fato:**", "- **Consequência:**",
-                                       "- **Ponto de decisão:**", "- **Prazo:**", "- **Peso:**",
+                                       "pontos de decisão, por janela:", "## ", "**R", "- **Problema:**",
+                                       "- **Consequência:**", "- **Ponto de decisão:**", "- **Prazo:**",
                                        "## Informações que faltam: a pauta de investigação",
                                        "| # | O que falta | Para que serve | Onde procurar | Risco | Quem apontou |",
                                        "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
     assert "## Situação" not in riscos and "## Antes de ler" not in riscos                 # direto ao ponto
     assert "Decisões em aberto" not in riscos and "Pedir à secretaria" not in riscos and "Quem decide" not in riscos
-    assert len(re.findall(r"^\| R\d+ ", riscos, re.M)) == len(resultado["riscos"][:10])  # todos na tabela, até 10
+    titulos = re.findall(r"^\*\*(R\d+) · ", riscos, re.M)
+    assert len(titulos) == len(resultado["riscos"][:10]) and len(set(titulos)) == len(titulos)   # todos, uma vez só
     assert "Anexo" not in riscos and "aditivo irregular" not in riscos and "1. Contratos" not in riscos
     assert not re.search(r"\((?:[FVO]\d+(?:, )?)+\)", riscos)                              # sem códigos soltos no texto
-    datas = [d for d in re.findall(r"^\| R\d+ \| [^|]+ \| (\d\d/\d\d/\d{4}|sem data) \|", riscos, re.M)]
-    from datetime import datetime
-    assert len(datas) == len(resultado["riscos"][:10])
-    assert [datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "sem data"] == sorted(
-        datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "sem data")           # em ordem de prazo
+    # agrupado por janela, na ordem das janelas
+    janelas = re.findall(r"^## (.+)$", riscos.split("## Informações que faltam")[0], re.M)
+    assert janelas and janelas == [j for j in funcoes.JANELAS_DO_RELATORIO if j in janelas]
     # produto 5: a auditoria legível
     auditoria = funcoes.auditoria_secretaria(resultado, d, None, "## Anexo 3 – Como este documento foi feito\nx")
     assert "## Todas as fontes do dossiê" in auditoria and auditoria.rstrip().endswith("x")

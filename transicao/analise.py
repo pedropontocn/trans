@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-from . import checklist, confronto as conf, revisao, documentos, entrada, folha, imagens, modelo, painel, pesquisa, produtos, riscos, verificacao
+from . import checklist, confronto as conf, revisao, documentos, entrada, folha, imagens, modelo, painel, pesquisa, produtos, riscos, tce, verificacao
 from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO, esquema_de_modelos
 
 JUNTAS = False          # no modo econômico, as etapas independentes vão juntas para a mesma fila da Batch API
@@ -164,10 +164,15 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
                        {"secoes": [], "descartados": 0, "uso": []}),
                _seguro(lambda: checklist.responder(auxiliar, dossie, relatorio, nome), {"respostas": {}, "uso": []}),
                _seguro(lambda: produtos.extrair_contratos_criticos(auxiliar, dossie, relatorio, nome),
-                       {"contratos": [], "descartados": 0, "uso": []})]
+                       {"contratos": [], "descartados": 0, "uso": []}),
+               # o que alarga o funil da análise de riscos: os pontos críticos que a secretaria informou (todos os
+               # tipos de questão urgente, não só contratos), cada um com o trecho conferido no material
+               _seguro(lambda: riscos.pontos_criticos(auxiliar, relatorio, manifesto, dossie) if precisa["riscos"]
+                       else {"pontos": {}, "descartados": 0, "uso": []}, {"pontos": {}, "descartados": 0, "uso": []})]
     feitos = modelo._em_paralelo(tarefas) if JUNTAS else [t() for t in tarefas]
-    confronto, calendario, diagnostico, respostas_checklist, criticos = feitos
-    for parte, rotulo in zip(feitos, ("confronto", "calendário", "diagnóstico", "checklist", "contratos críticos")):
+    confronto, calendario, diagnostico, respostas_checklist, criticos, pontos = feitos
+    for parte, rotulo in zip(feitos, ("confronto", "calendário", "diagnóstico", "checklist", "contratos críticos",
+                                      "pontos críticos")):
         uso.extend(parte.pop("uso", None) or [])
         if parte.get("erro"):
             problemas.append(f"{rotulo}: {parte['erro']}")
@@ -189,35 +194,54 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     cobertura = checklist.conferir(respostas_checklist.get("respostas") or {}, dossie, relatorio, eventos)
 
     vencimentos = riscos.vencimentos_numerados(eventos)
-    material = riscos.material(nome, diagnostico, vencimentos, conf.texto_confronto(confronto), cfg["data_corte"],
-                               checklist.texto_para_analise(cobertura))
     esquema = esquema_de_modelos(principal, auxiliar, cfg.get("modelos_agentes"), cfg.get("familias"))
     modelos_agentes = esquema["agentes"]
+    # as multas e os débitos que o TCE-RJ aplicou em processos da secretaria, cruzados com o material (por código)
+    cruzamento_tce = None
+    if precisa["riscos"] and tce.ligado():
+        progresso("Cruzando com as multas e os débitos do TCE-RJ...")
+        cruzamento_tce = tce.cruzar(entrada.sigla_conhecida(nome.upper()) or entrada.sigla(nome) or nome, relatorio,
+                                    cfg["data_corte"])
+    fatos_tce = tce.fatos(cruzamento_tce)
+
+    def extras():
+        return {**pontos["pontos"], **{t["id"]: t for t in fatos_tce}}
+
+    def montar_material():
+        return riscos.material(nome, diagnostico, vencimentos, conf.texto_confronto(confronto), cfg["data_corte"],
+                               checklist.texto_para_analise(cobertura), pontos["pontos"], fatos_tce)
+    material = montar_material()
     analise, revisoes, final, votacoes = {}, [], {}, []
     conferencia_final = {"apontados": [], "corrigidos": [], "recusados": []}
+    trechos_da_analise = []
     resultado = {"riscos": [], "decisoes": [], "situacao": [], "pedir": []}   # sem a análise de riscos nesta rodada
     if precisa["riscos"]:
         progresso("Analisando riscos e decisões...")
-        analise = riscos.analisar(principal, material, uso)
+        analise = riscos.analisar(principal, material, uso, relatorio)
         if not analise.get("riscos"):
             falha = modelo.ultima_falha()
             detalhe = (f" (motivo de parada: {falha[1]}; início da resposta: \"{falha[2]}\")" if falha
                        else " (o JSON veio sem a lista de riscos)")
             raise ErroAnalise("a análise de riscos não devolveu riscos legíveis" + detalhe)
+        # os trechos que a análise citou do material completo viram fatos (conferidos) para os agentes
+        trechos_da_analise = riscos.incorporar_trechos(analise, relatorio, pontos["pontos"])
+        material = montar_material()
         progresso("Seis agentes revisando a análise (cinco olhares e o advogado do diabo)...")
         revisoes = riscos.revisar_por_agentes(principal, material, analise, uso, modelos_agentes)
         progresso("Consolidando...")
         final = riscos.consolidar(principal, material, analise, revisoes, uso)
-        resultado = riscos.conferir_e_ordenar(final, diagnostico, vencimentos, dossie, cfg["data_corte"], eventos)
+        resultado = riscos.conferir_e_ordenar(final, diagnostico, vencimentos, dossie, cfg["data_corte"], eventos, extras())
         # os seis agentes votam cada risco final: impacto, janela e sensibilidade política; o código apura
         progresso("Seis agentes votando, item a item, impacto, janela e sensibilidade política...")
         votacoes = riscos.votar_por_agentes(principal, material, resultado, uso, modelos_agentes)
         riscos.apurar_votos(resultado, votacoes, cfg["data_corte"])
         # a pauta de investigação: o que a análise e cada agente disseram que falta, com quem apontou
         riscos.juntar_lacunas(resultado, analise, revisoes, cobertura)
+        resultado["pedir"] = (tce.para_a_pauta(cruzamento_tce) + resultado["pedir"])[:riscos.LIMITE_LACUNAS]
         # a conferência final: cada risco ao lado do texto dos fatos que cita; o que não tem apoio é corrigido ou marcado
         progresso("Conferindo cada risco com os fatos que ele cita...")
-        conferencia_final = riscos.conferir_afirmacoes(principal, resultado, diagnostico, vencimentos, dossie, uso)
+        conferencia_final = riscos.conferir_afirmacoes(principal, resultado, diagnostico, vencimentos, dossie, uso,
+                                                       extras())
         riscos.proveniencia(resultado["riscos"], revisoes, analise, final)   # quem apontou e quem contestou cada risco
         riscos.visoes_por_codigo(resultado["decisoes"], analise, revisoes)   # o que cada agente teme e valoriza, do bruto
     confianca = riscos.confianca(resumo_dos, resultado["riscos"], cobertura)
@@ -262,7 +286,8 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     texto_riscos = documentos.relatorio_riscos(
         resultado, cobertura, documentos.nota_riscos(registro_id, modelos, revisoes, conferencia_final, revisao_texto),
         diag=diagnostico, dossie=dossie, data_corte=cfg["data_corte"], confianca=confianca,
-        cortes=cortes) if "riscos" in escolha else ""
+        cortes=cortes, vencimentos=vencimentos, extras=extras(),
+        tce_md=tce.markdown(cruzamento_tce)) if "riscos" in escolha else ""
     revisao_texto["alertas_no_documento"] = revisao.alertas_do_documento(texto_riscos)   # a última conferência
     if "dossie" not in escolha:
         texto_dossie = ""
@@ -279,6 +304,8 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
         "votacao_dos_agentes": votacoes, "conferencia_final": conferencia_final,
+        "pontos_criticos": pontos, "trechos_citados_pela_analise": trechos_da_analise,
+        "cruzamento_tce": para_json(cruzamento_tce) if cruzamento_tce else None,
         "lacunas_brutas": [{"quem": q, **l} for q, l in riscos.lacunas_brutas(analise, revisoes)],
         "riscos": para_json(resultado), "checklist": cobertura, "contratos_criticos": contratos_criticos,
         "metodo_md": documentos.markdown_metodo(registro_id, modelos, resumo_dos, confianca, numeros, neutralidade,
@@ -326,9 +353,11 @@ LEIA_ME_PRODUTOS = {
               "  repercussão política, na mesma régua para todas), prontos para o painel unificado.",
     "dossie": "- dossies/: o dossiê de cada secretaria: como ela funciona hoje (panorama, organograma, programas,\n"
               "  contratos, pessoal, orçamento, passivos), primeiro o que ela informou, depois as fontes oficiais.",
-    "riscos": "- riscos/: o relatório de riscos de cada secretaria: a tabela dos pontos de decisão em ordem de prazo,\n"
-              "  cada risco em linhas (fato, consequência, ponto de decisão, prazo, o que está contestado, fontes) e a\n"
-              "  pauta de investigação (informações que faltam, com para que servem, onde procurar e quem apontou).",
+    "riscos": "- riscos/: o relatório de riscos de cada secretaria: os riscos agrupados pela janela de decisão (prazo\n"
+              "  vencido, antes da posse, 72 horas, 100 dias), cada um em linhas (o que é, valor, em que pé está, os\n"
+              "  contratos do calendário, problema, consequência, ponto de decisão, prazo, o que está contestado,\n"
+              "  fontes); o cruzamento com as multas e os débitos do TCE-RJ; e a pauta de investigação (informações\n"
+              "  que faltam, com para que servem, onde procurar e quem apontou).",
     "calendario": "- calendarios/: o calendário de vencimentos de cada secretaria em Excel, só com as datas que ela\n"
                   "  informou; a aba Prioridades vem primeiro.",
     "caderno": "- cadernos/: o caderno executivo de cada secretaria em Word (uma ficha por programa, com o orçamento da\n"

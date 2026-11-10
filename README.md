@@ -25,7 +25,7 @@ Um `.zip` com os produtos pedidos:
 |---|---|
 | `paineis/<sigla>_painel.json` | **1. Dados do painel, por secretaria:** os pontos de decisão com janela (antes da posse, 72 horas, 100 dias, depois), prazo, prioridade e repercussão política votada pelos seis agentes, na mesma régua para todas; prontos para o painel unificado. O painel em Word por secretaria saiu: repetia a tabela do relatório de riscos |
 | `dossies/<secretaria>_dossie.docx` | **2. Dossiê: como a secretaria funciona hoje**, até 5 páginas: panorama e ficha rápida; 1. O que faz; 2. Como se organiza (organograma em árvore); 3. Programas e ações; 4. Principais contratos; 5. Pessoal (Caderno de RH); 6. Orçamento; 7. Pendências com controle e justiça; 8. Sistemas, convênios e parcerias; anexo de fontes. Primeiro o que a secretaria enviou; sem isso, os dossiês de base. Descritivo: os riscos ficam no relatório de riscos; o confronto e a cobertura dos temas, na auditoria |
-| `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, direto ao ponto e sem anexo: abertura em três linhas (o que é, confiança, como ler); a tabela dos pontos de decisão em ordem de prazo (prazo, janela, prioridade, base); cada risco em linhas rotuladas (fato, consequência, ponto de decisão, prazo, peso, repercussão possível, ponto contestado, fontes por extenso); e a **pauta de investigação**: até 15 informações que faltam, com para que servem, onde procurar, o risco a que servem e quem apontou (a análise, cada um dos seis agentes ou o checklist obrigatório). Um assunto e uma data por risco. A janela vem da data do documento (prazo já passado aparece como vencido); sem data, do voto dos agentes, e o texto diz. Contestação já acatada e corrigida não aparece: só o que continua em disputa, com a resposta. Tom de análise: sem recomendação, sem caminho sugerido, sem responsável, repercussão sempre no condicional |
+| `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, direto ao ponto e sem anexo: abertura em três linhas (o que é, confiança, como ler); os riscos **agrupados pela janela de decisão** (prazo vencido, antes da posse, primeiras 72 horas, primeiros 100 dias, depois), em ordem de prazo dentro de cada janela. Cada risco diz **do que se trata**: o que é (instrumento, número, a outra parte), o valor, em que pé está e, escritos por código, os contratos e prazos do calendário da secretaria que ele cita (data, objeto, valor); depois o problema, a consequência, o ponto de decisão, o prazo, o processo, a repercussão possível, o ponto contestado e as fontes por extenso. Além de contratos que vencem, cobre programas em fase crítica, concessões e PPPs, decisões pendentes em tribunal, acordos com órgãos de controle, recursos federais com marco, obras, eventos, pessoal e atos pendentes. Depois, o **cruzamento com o TCE-RJ** (multas e débitos em processos da secretaria e das vinculadas, com a marca de citado ou não no material) e a **pauta de investigação**: até 15 informações que faltam, com para que servem, onde procurar, o risco a que servem e quem apontou (a análise, cada um dos seis agentes, o checklist obrigatório ou o cruzamento com o TCE-RJ). A janela vem da data do documento (prazo já passado aparece como vencido); sem data, do voto dos agentes, e o texto diz. Contestação já acatada e corrigida não aparece: só o que continua em disputa, com a resposta. Tom de análise: sem recomendação, sem caminho sugerido, sem responsável, repercussão sempre no condicional |
 | `auditoria/<secretaria>.json` | **5. Auditoria**: o registro completo de cada análise: dossiê e conferências, análise inicial, revisões e votos dos seis agentes, consolidação, objeções risco a risco, método, descartes, custo |
 | `calendarios/<sigla>_calendario.xlsx` | **4. Calendário, por secretaria:** os vencimentos com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro. Só as datas que a secretaria informou |
 | `cadernos/<sigla>_caderno.docx` e `_quadro.csv` | **Caderno executivo** (opcional): o que a secretaria entrega, para quem, com quanto e em que pé está. Página-resumo; quadro-síntese por ação orçamentária (LOA 2026 e PLOA 2027), com os programas sob cada ação e o total conferido com o finalístico da LOA; uma ficha por programa (14 campos, cada valor com a fonte); notas de fonte e lacunas. Fonte: a seção 3 do Relatório de Transição (modelo v2) em PDF, lida por código; sem ele, os programas achados no material enviado, com cada campo copiado e conferido no arquivo; sem programas, só o orçamento. Seleção por código: riscos e painel, Plano de Governo, ações por orçamento até 80% do finalístico, teto de 12 fichas (editáveis na tela) |
@@ -100,8 +100,29 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    A pesquisa do app recebe os pontos como obrigatórios e registra os que não achou.
 4. **Vencimentos.** Régua de risco por código: serviço essencial, impacto, data-limite para agir, tempo para nova
    licitação e prioridade (impacto × urgência).
-5. **Análise de riscos.** Uma análise lê o diagnóstico e os vencimentos e propõe riscos (causa → consequência),
-   o ponto de decisão de cada um (descrito, sem caminhos) e as informações que faltam.
+5. **Análise de riscos.** Antes dela, o funil é alargado: (a) os **pontos críticos** que a secretaria informou (até
+   20), de todos os tipos de questão urgente e não só contratos (concessão ou PPP em andamento, decisão pendente em
+   tribunal, acordo com órgão de controle, auditoria em curso, recurso federal com marco, programa em fase crítica,
+   obra, evento, contingência sazonal, pessoal, ato pendente, obrigação fiscal), cada um com o trecho literal
+   conferido por código no material; (b) as **multas e débitos do TCE-RJ** (ver abaixo). A análise recebe os fatos
+   com id (diagnóstico F, vencimentos V, dossiê O, pontos críticos P, TCE-RJ T) e, depois deles, **o material inteiro
+   da secretaria**. Propõe de 5 a 10 riscos (causa → consequência), cada um identificado (o que é, valor, em que pé
+   está, marco, processo), o ponto de decisão (descrito, sem caminhos) e as informações que faltam. Tudo que o risco
+   afirma tem de estar num fato com id; o que só está no material completo vem como trecho literal, que o código
+   confere e transforma em fato (o que não confere cai e fica no registro). Agentes e consolidação trabalham com os
+   fatos com id.
+
+   **Cruzamento com o TCE-RJ.** Por código, sem modelo, a partir dos dados abertos do Tribunal
+   (https://dados.tcerj.tc.br/api/v1/docs), baixados uma vez por dia. Só entram **decisões do próprio Tribunal**:
+   multas e débitos, com processo, sessão e número da condenação. Os outros conjuntos do portal (obras paralisadas,
+   contratos, convênios, dotação) são declarados pelos órgãos e ficam de fora. O app acha a secretaria, as antecessoras
+   extintas e as vinculadas pelo nome que o TCE usa (tabela conferida em `bases_embutidas/siglas_2026.json` e nomes da
+   LOA) e diz, de cada processo, se o número aparece no material enviado. O que o TCE tem e a secretaria não citou
+   abre a pauta de investigação. Nome antigo de secretaria que pode ser antecessora, mas sem ligação confirmada, não
+   entra na contagem: o relatório diz que ficou de fora, com os processos. **Valores não entram**: a base não informa a unidade (R$ ou UFIR-RJ) e repete a mesma
+   condenação em uma linha por responsável; o app conta condenações e processos, e o valor fica, como publicado, só no
+   registro de auditoria. Sem acesso ao portal, o relatório diz que o cruzamento não foi feito. `TCE_DESLIGADO=1` nos
+   Secrets desliga.
 6. **Seis agentes independentes** revisam a análise sem ver uns aos outros: Fazenda e orçamento; controle e jurídico;
    área-fim e usuário do serviço; operação e servidores; nova gestão (prioridades e articulação); e o **advogado do
    diabo**, que tenta derrubar cada risco com o material. Apontam riscos que faltaram, riscos exagerados ou

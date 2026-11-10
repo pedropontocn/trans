@@ -13,6 +13,16 @@ Dados oficiais que o app usa sozinho, por código, sem passar pelo modelo.
   SEDIPAF → SEAPPA, confirmadas na PLOA 2027; SECTI, SEDEICS e SEENEMAR → SEDES e SEIJES → SEDSODH, por notícia
   (entram com o rótulo de imprensa). A folha usa a sucessora e diz o que aconteceu e que os números são de toda a
   sucessora. Sem sucessora conhecida, fica com o último Caderno em que aparece. Só entra sucessão com fonte.
+  (3) `"tce"`: como o TCE-RJ nomeia cada secretaria nos dados abertos ("SEC EST EDUCACAO",
+  "SEC EST INFRAESTRUTURA E OBRAS (EXTINTA)"), copiado da própria base em 10/11/2026. É por essa tabela que o
+  cruzamento de multas e débitos acha a secretaria e as antecessoras extintas; as vinculadas são casadas pelo nome na
+  LOA. (4) `"tce_vinculadas"`: as entidades que o TCE abrevia de um jeito que o código não casa com a LOA (CEPERJ,
+  Rioprevidência, AGETRANSP, UERJ, PRODERJ, Corpo de Bombeiros), com a unidade orçamentária de cada uma. (5)
+  `"tce_a_confirmar"`: nomes antigos de secretarias que aparecem na base de multas e débitos e a secretaria atual de
+  que podem ser antecessoras ("SEC EST INFRAESTRUTURA E CIDADES" → SEIOP e SECID, por exemplo). Enquanto a ligação
+  não for confirmada com fonte, os processos não entram na contagem, e o relatório da secretaria diz que ficaram de
+  fora. Confirmada, o nome passa para `"tce"`. Secretaria nova ou renomeada no TCE: inclua o nome exato em `"tce"`.
+  Os nomes usados em cada rodada saem no relatório de riscos ("Unidades consideradas"), para conferência.
 
 Para atualizar a folha, baixe o Caderno do mês e rode:
 
