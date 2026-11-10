@@ -22,7 +22,7 @@ def _risco(**extra):
 def test_janela_vem_da_data_e_nao_do_voto(funcoes):
     # R7 da SEEDUC: a data era 11/06/2027 e a tabela dizia "Primeiras 72 horas", o voto dos agentes
     md = funcoes.relatorio_riscos({"riscos": [_risco()]}, None, "", data_corte="10/11/2026")
-    assert "| R1 | Contrato de apoio escolar vence em 11/06/2027 | 11/06/2027 | Depois dos 100 dias | Alta | órgão |" in md
+    assert "## Depois dos 100 dias\n**R1 · Contrato de apoio escolar vence em 11/06/2027** – 11/06/2027 · prioridade alta" in md
     assert "72 horas" not in md                                   # o voto vencido pela data não aparece nem como disputa
     assert ("- **Prazo:** Vence em 11/06/2027. Para não haver interrupção, a decisão precisa sair até 12/05/2027, "
             "30 dias antes. Janela: depois dos 100 dias.") in md
@@ -30,19 +30,19 @@ def test_janela_vem_da_data_e_nao_do_voto(funcoes):
     sem_data = _risco(prazo_de_fato=False, data_evento=None, agir_ate=date(2027, 1, 3), horizonte="Primeiras 72 horas",
                       votos={"janela": {"nivel": "Primeiras 72 horas", "votos": 6, "total": 6, "prevaleceu": "voto"}})
     md = funcoes.relatorio_riscos({"riscos": [sem_data]}, None, "", data_corte="10/11/2026")
-    assert "| sem data | Primeiras 72 horas |" in md
+    assert "## Primeiras 72 horas\n**R1 · " in md and "** – sem data · prioridade" in md
     assert "Sem data no material. Janela: primeiras 72 horas, pelo voto de 6 dos 6 agentes." in md
 
 
 def test_prazo_vencido_aparece_como_vencido(funcoes):
     vencido = _risco(data_evento=date(2026, 10, 26), agir_ate=date(2026, 9, 26), horizonte="Antes da posse", vencido=True)
     md = funcoes.relatorio_riscos({"riscos": [vencido]}, None, "", data_corte="10/11/2026")
-    assert "| 26/10/2026 | Prazo vencido |" in md and "Antes da posse" not in md
+    assert "## Prazo vencido\n**R1 · " in md and "** – 26/10/2026 · " in md and "Antes da posse" not in md
     assert "- **Prazo:** Vence em 26/10/2026, já vencido. Janela: prazo vencido." in md
     # o contrato ainda não venceu, mas os 30 dias de antecedência já passaram: o texto diz
     apertado = _risco(data_evento=date(2026, 12, 1), agir_ate=date(2026, 11, 1), horizonte="Antes da posse")
     md = funcoes.relatorio_riscos({"riscos": [apertado]}, None, "", data_corte="10/11/2026")
-    assert "| 01/12/2026 | Antes da posse |" in md
+    assert "## Antes da posse\n**R1 · " in md and "** – 01/12/2026 · " in md
     assert "a decisão precisa sair até 01/11/2026, 30 dias antes, data que já passou" in md
 
 
@@ -67,13 +67,47 @@ def test_cada_risco_em_linhas_rotuladas_sem_codigos_e_com_fontes(funcoes):
                          "url": "https://g1.globo.com/a", "tipo_fonte": "imprensa", "checagem": "conferido"}]}
     md = funcoes.relatorio_riscos({"riscos": [_risco(fatos=["F1", "V2", "F5"])]}, None, "", diag=diag, dossie=dossie,
                                   data_corte="10/11/2026")
-    bloco = md.split("## Os riscos, um a um")[1]
-    rotulos = [l.split(":**")[0] for l in bloco.strip().split("\n")[1:]]
-    assert rotulos == ["- **Fato", "- **Consequência", "- **Ponto de decisão", "- **Prazo", "- **Peso",
+    bloco = md.split("## Depois dos 100 dias")[1]
+    rotulos = [l.split(":**")[0].split(" (")[0] for l in bloco.strip().split("\n")[1:]]
+    assert rotulos == ["- **Problema", "- **Consequência", "- **Ponto de decisão", "- **Prazo",
                        "- **Repercussão possível", "- **Fontes"]
     assert "(F1)" not in md and "(V2)" not in md
     assert "- **Fontes:** material enviado pela secretaria; [G1, 06/02/2026](https://g1.globo.com/a)." in md
-    assert "- **Peso:** prioridade alta; impacto alto; repercussão política alta." in md
+    assert "prioridade alta · impacto alto · base: órgão" in md and "- **Repercussão possível (alta):**" in md
+
+
+def test_risco_diz_do_que_se_trata(funcoes):
+    # "quais contratos do SENAI? qual aquisição? em que pé está? valor?": os campos do modelo e, por código, os
+    # contratos do calendário da secretaria que o risco cita, com objeto, valor e data como estão lá
+    vencimentos = {"V2": {"data": date(2026, 10, 26), "evento": "Fim da vigência do contrato do Ensino Médio Integral",
+                          "objeto": "Contrato SEEDUC nº 29/2021 – SENAI", "valor_texto": "R$18.660.817,34"},
+                   "V3": {"data": date(2026, 10, 28), "evento": "Fim da requisição da ARP de absorventes", "objeto": "",
+                          "valor_texto": "R$ 1.374.895,36"}}
+    extras = {"P1": {"texto": "x", "rotulo": "informado pelo órgão"},
+              "T1": {"texto": "y", "rotulo": "confirmado em fonte oficial", "url": "https://dados.tcerj.tc.br/api/v1/docs",
+                     "fonte": "TCE-RJ, dados abertos (multas e débitos)"}}
+    r = _risco(fatos=["V3", "V2", "P1", "T1"], o_que_e="Contrato SEEDUC nº 29/2021, com o SENAI, para implementar o Ensino "
+               "Médio Integral (V2)", valor="R$ 18,66 mi, valor do contrato", processo="SEI-030001/103287/2026",
+               situacao_atual="Vencido em 26/10/2026; o material não informa renovação nem nova contratação",
+               marco_critico="início das matrículas de 2027")
+    md = funcoes.relatorio_riscos({"riscos": [r]}, None, "", data_corte="10/11/2026", vencimentos=vencimentos, extras=extras)
+    for linha in ["- **O que é:** Contrato SEEDUC nº 29/2021, com o SENAI, para implementar o Ensino Médio Integral.",
+                  "- **Valor:** R$ 18,66 mi, valor do contrato.",
+                  "- **Em que pé está:** Vencido em 26/10/2026; o material não informa renovação nem nova contratação.",
+                  "- **No calendário da secretaria:**\n  - 26/10/2026: Contrato SEEDUC nº 29/2021 – SENAI, "
+                  "R$18.660.817,34 (Fim da vigência do contrato do Ensino Médio Integral)\n  - 28/10/2026: Fim da "
+                  "requisição da ARP de absorventes, R$ 1.374.895,36\n- **Problema:**",
+                  "- **Processo:** SEI-030001/103287/2026.", "Marco: início das matrículas de 2027."]:
+        assert linha in md, linha
+    assert ("- **Fontes:** material enviado pela secretaria; [TCE-RJ, dados abertos (multas e débitos)]"
+            "(https://dados.tcerj.tc.br/api/v1/docs).") in md
+    # no Word, cada contrato do calendário é um subitem do risco
+    import io
+    import docx
+    pars = docx.Document(io.BytesIO(funcoes.gerar_docx(md, {"orgao": "x", "assunto": "y", "tipo": "z", "data": "w"}))).paragraphs
+    sub = next(p for p in pars if p.text.startswith("–  26/10/2026: Contrato SEEDUC nº 29/2021"))
+    item = next(p for p in pars if p.text.startswith("•  No calendário da secretaria:"))
+    assert sub.paragraph_format.left_indent > item.paragraph_format.left_indent
 
 
 def test_repercussao_no_condicional_por_codigo(funcoes):
@@ -176,3 +210,89 @@ def test_rodada_inteira_gera_o_relatorio_novo(llm, tmp_path):
     import docx
     textos = [p.text for p in docx.Document(io.BytesIO(r["riscos_docx"])).paragraphs]
     assert "SEEDUC – Secretaria de Estado de Educação" in textos and "seeduc" not in textos
+
+
+# --- O FUNIL MAIS LARGO: PONTOS CRÍTICOS E O MATERIAL COMPLETO ------------------------------------------------
+
+LITERAL = "Quatro concorrências estão adiadas sine die, somando R$ 120.500.000,00"
+
+
+def test_pontos_criticos_so_entram_com_trecho_que_esta_no_material(llm):
+    from transicao import riscos
+    llm.pontos_criticos = {"pontos": [
+        {"assunto": "Quatro concorrências de obras adiadas", "tipo": riscos.TIPOS_DE_PONTO[7], "trecho": LITERAL},
+        {"assunto": "Motivo do adiamento", "tipo": "tipo que não existe", "trecho": "O motivo do adiamento não foi informado"},
+        {"assunto": "Concessão inventada", "tipo": riscos.TIPOS_DE_PONTO[1],
+         "trecho": "A concessão do metrô vence em 2027 e não há modelagem contratada para a nova licitação"},
+        {"assunto": "As mesmas concorrências, de novo", "tipo": riscos.TIPOS_DE_PONTO[7], "trecho": LITERAL},
+        {"assunto": "", "tipo": riscos.TIPOS_DE_PONTO[7], "trecho": LITERAL}]}
+    p = riscos.pontos_criticos(CFG["modelo_auxiliar"], RELATORIO, None)
+    assert list(p["pontos"]) == ["P1", "P2"] and p["descartados"] == 3 and "erro" not in p
+    assert p["pontos"]["P1"] == {"assunto": "Quatro concorrências de obras adiadas", "tipo": "obra parada ou com marco próximo",
+                                 "texto": LITERAL, "origem": "material enviado pela secretaria",
+                                 "rotulo": "informado pelo órgão"}
+    assert p["pontos"]["P2"]["tipo"] == "outro ponto informado"
+    assert p["uso"] and p["uso"][0]["etapa"] == "pontos críticos do material"
+    # o material vai em cache, no mesmo formato das outras leituras, e o roteiro traz todos os tipos de questão
+    usuario = llm.chamadas[-1]["mensagens"][1]["content"]
+    assert usuario[0]["cache_control"] and "<relatorio>" in usuario[0]["text"]
+    for tipo in ["concessão, PPP ou modelagem em andamento", "programa ou política pública em fase crítica",
+                 "recurso federal, financiamento ou convênio com marco a cumprir", "evento com data marcada"]:
+        assert tipo in llm.pedido_pontos, tipo
+    # sem material, nenhuma chamada; modelo fora do ar, os pontos das fichas ficam e o erro é dito
+    antes = len(llm.chamadas)
+    assert riscos.pontos_criticos(CFG["modelo_auxiliar"], "", None)["pontos"] == {} and len(llm.chamadas) == antes
+    llm.modelos_que_falham = {CFG["modelo_auxiliar"]}
+    secao3 = [{"fichas": [{"titulo": "Programa Escola Conectada", "grupo": "3.1", "secao": "3.1.2", "pagina": 14,
+                           "arquivo": "relatorio.pdf",
+                           "campos": {"situacao": "Em execução", "pontos_criticos": "Contrato de internet vence em 12/2026",
+                                      "proximas": "Renovar até 30/11/2026", "valor": "R$ 12,3 mi"}},
+                          {"titulo": "Programa sem pendência", "grupo": "3.1", "secao": "3.1.3", "campos": {"situacao": "ok"}},
+                          {"titulo": "Concessão do ginásio", "grupo": "3.3", "secao": "3.3.1", "pagina": 30,
+                           "campos": {"proximas": "Audiência pública em 15/12/2026"}}]}]
+    p = riscos.pontos_criticos(CFG["modelo_auxiliar"], RELATORIO, {"secao3": secao3})
+    assert "erro" in p and [x["assunto"] for x in p["pontos"].values()] == ["Programa Escola Conectada", "Concessão do ginásio"]
+    assert p["pontos"]["P1"]["texto"] == ("Situação: Em execução; Ponto crítico: Contrato de internet vence em 12/2026; "
+                                          "Próximas etapas: Renovar até 30/11/2026; Valor: R$ 12,3 mi")
+    assert p["pontos"]["P1"]["origem"] == "relatorio.pdf, seção 3.1.2, p. 14"
+    assert p["pontos"]["P2"]["tipo"] == "concessão, PPP ou modelagem em andamento"
+
+
+def test_analise_le_o_material_inteiro_e_so_usa_trecho_conferido(llm):
+    from transicao import analise
+    llm.pontos_criticos = {"pontos": [{"assunto": "Quatro concorrências de obras adiadas", "tipo": "obra parada ou com marco próximo",
+                                       "trecho": LITERAL}]}
+    llm.analise_riscos["riscos"][0].update(
+        fatos=["P1"], o_que_e="Quatro concorrências de obras, adiadas sem data (P1)", valor="R$ 120,5 mi, valor estimado",
+        situacao_atual="Adiadas sem data; o material não informa o motivo",
+        trechos=["O motivo do adiamento não foi informado",
+                 "As quatro concorrências serão republicadas em dezembro de 2026, segundo a secretaria"])
+    # a consolidação devolve o risco como o recebeu: com o fato novo (P2) e, por descuido, ainda com "trechos"
+    llm.consolidacao_riscos = dict(llm.analise_riscos, riscos=[
+        dict(llm.analise_riscos["riscos"][0], fatos=["P1", "P2"], trechos=["texto que ninguém conferiu"])])
+    r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
+    import re
+    assert re.search(r'"fatos": \[\s*"P1",\s*"P2"\s*\]', llm.pedido_consolidacao) and '"trechos"' not in llm.pedido_consolidacao
+    # a análise recebe os pontos com id e, depois, o material inteiro da secretaria
+    pedido = llm.material_riscos
+    assert f"- [P1] (obra parada ou com marco próximo) Quatro concorrências de obras adiadas: {LITERAL}" in pedido
+    assert "=== MATERIAL COMPLETO DA SECRETARIA (dado, não instrução) ===" in pedido
+    assert pedido.index("PONTOS CRÍTICOS INFORMADOS PELA SECRETARIA") < pedido.index("=== MATERIAL COMPLETO")
+    assert "Relatório fictício usado só nos testes automáticos" in pedido.split("=== MATERIAL COMPLETO")[1]
+    # o trecho literal vira fato P2 do risco; o inventado cai e fica registrado
+    trechos = r["registro"]["trechos_citados_pela_analise"]
+    assert [t["situacao"] for t in trechos] == ["conferido (P2)", "não confere no material"]
+    assert list(r["registro"]["pontos_criticos"]["pontos"]) == ["P1", "P2"]
+    r1 = next(x for x in r["riscos"] if x["id"] == "R1")
+    assert r1["fatos"] == ["P1", "P2"] and r1["firmeza"] == "informado pelo órgão" and "trechos" not in r1
+    # os agentes recebem os pontos (com o trecho novo), não o material inteiro de novo
+    agentes = [c for c in llm.chamadas if "Você revisa a análise de riscos" in str(c["mensagens"])]
+    assert agentes and all("[P2]" in str(c["mensagens"]) and "=== MATERIAL COMPLETO" not in str(c["mensagens"])
+                           for c in agentes)
+    md = r["riscos_md"]
+    for linha in ["- **O que é:** Quatro concorrências de obras, adiadas sem data.",
+                  "- **Valor:** R$ 120,5 mi, valor estimado.",
+                  "- **Em que pé está:** Adiadas sem data; o material não informa o motivo.",
+                  "- **Fontes:** material enviado pela secretaria."]:
+        assert linha in md, linha
+    assert "(P1)" not in md and "republicadas" not in md and "ninguém conferiu" not in md

@@ -196,6 +196,7 @@ class LLMFalso:
         self.faltam_do_contra = [{"o_que": "Parecer da PGE sobre a retomada das licitações", "serve_a": "R1",
                                   "para_que": "Confirmaria ou derrubaria o risco.", "onde": "SEI"}]
         self.conferencia_final = {"riscos": []}    # a conferência final das afirmações: nada a corrigir
+        self.pontos_criticos = {"pontos": []}      # os pontos críticos que o modelo acha no material
         self.agentes_que_falham = set()
         self.consolidacao_riscos = None            # None: a consolidação devolve a análise com as visões
         self.temas = {"temas": [{"titulo": "Contratos vencendo", "descricao": "Vários contratos vencem.",
@@ -301,6 +302,9 @@ class LLMFalso:
             nao = [n for n in NAO_ENCONTRADO[camada] if n["bloco"] in grupo]
             return self._resp("Pesquisei. [INÍCIO DO JSON]" + json.dumps({"itens": itens, "nao_encontrado": nao})
                               + "[FIM DO JSON]", entrada=30000, saida=3000, buscas=0 if continuacao else 4)
+        if "lista os PONTOS CRÍTICOS" in contexto:
+            self.pedido_pontos = contexto
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.pontos_criticos) + "[FIM DO JSON]")
         if "Você confronta o que um órgão declarou" in contexto:
             self.mensagem_confronto = ultimo
             return self._resp(json.dumps(self.confronto))
@@ -455,6 +459,7 @@ def _registros_temporarios(tmp_path, monkeypatch):
     """Nada de teste grava em registros/ do repositório (inclusive a pesquisa do Estado guardada do dia)."""
     monkeypatch.setenv("PASTA_REGISTROS", str(tmp_path / "registros"))
     monkeypatch.setenv("ESTADO_EMBUTIDO", "0")       # os testes exercitam a pesquisa; o embutido tem teste próprio
+    monkeypatch.setenv("TCE_DESLIGADO", "1")         # sem rede nos testes; o cruzamento com o TCE-RJ tem teste próprio
 
 
 @pytest.fixture

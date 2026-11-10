@@ -260,8 +260,9 @@ with st.sidebar:
              "passivos. Usa o dossiê de fontes oficiais e as extrações do material; não roda a análise de riscos.")
     p_riscos = st.checkbox(
         "Relatório de riscos", value=True,
-        help="Riscos e pontos de decisão com prazo, janela e prioridade, revisados e votados por seis agentes. É a "
-             "etapa mais cara.")
+        help="Riscos e pontos de decisão agrupados por janela (contratos, programas, concessões, decisões pendentes "
+             "e outros), cada um dizendo do que se trata, revisados e votados por seis agentes. Inclui o cruzamento "
+             "com as multas e os débitos do TCE-RJ e a pauta de investigação. É a etapa mais cara.")
     p_painel = st.checkbox(
         "Painel (dados para o painel unificado)", value=True,
         help="JSON com os pontos de decisão na mesma régua para todas as secretarias. Sai da análise de riscos: "

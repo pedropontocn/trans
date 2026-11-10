@@ -143,8 +143,11 @@ def _texto_inline(par, texto, tamanho=Pt(10.5), cor=TEXTO, negrito=False):
         run.font.size, run.font.color.rgb = tamanho, cor
 
 
+SUBITEM = "\x00"       # marca interna de subitem de lista (linha "  - " no Markdown)
+
+
 def _ler_markdown(md):
-    """Divide o Markdown em blocos: título, parágrafo, lista, tabela e bloco em fonte fixa (entre ```)."""
+    """Divide o Markdown em blocos: título, parágrafo, lista (com subitens), tabela e bloco em fonte fixa (entre ```)."""
     blocos, paragrafo = [], []
     fixo = None
 
@@ -187,10 +190,12 @@ def _ler_markdown(md):
                 blocos.append(("table", [celulas]))
         elif m := re.match(r"^([-*•])\s+(.*)", s):
             fechar_paragrafo()
+            # item recuado ("  - ") é subitem do anterior: vai com a marca SUBITEM na frente
+            item = (SUBITEM if len(linha) - len(linha.lstrip()) >= 2 else "") + m.group(2)
             if blocos and blocos[-1][0] == "ul":
-                blocos[-1][1].append(m.group(2))
+                blocos[-1][1].append(item)
             else:
-                blocos.append(("ul", [m.group(2)]))
+                blocos.append(("ul", [item]))
         elif m := re.match(r"^(\d+)[.)]\s+(.*)", s):
             fechar_paragrafo()
             if blocos and blocos[-1][0] == "ol":
@@ -220,14 +225,19 @@ def _desenhar_blocos(alvo, blocos):
             par = alvo.add_paragraph()
             par.paragraph_format.space_after = Pt(6)
             par.paragraph_format.line_spacing = 1.2
+            if re.match(r"\*\*R\d+ · ", bloco[1]):          # a linha de título de um risco: respiro antes, junto do corpo
+                par.paragraph_format.space_before = Pt(10)
+                par.paragraph_format.keep_with_next = True
             _texto_inline(par, bloco[1])
         elif tipo in ("ul", "ol"):
             for i, item in enumerate(bloco[1], 1):
+                sub = item.startswith(SUBITEM)
+                item = item[len(SUBITEM):] if sub else item
                 par = alvo.add_paragraph()
-                par.paragraph_format.left_indent = Cm(0.7)
+                par.paragraph_format.left_indent = Cm(1.4 if sub else 0.7)
                 par.paragraph_format.first_line_indent = Cm(-0.5)
-                par.paragraph_format.space_after = Pt(3)
-                marcador = par.add_run(f"{i}.  " if tipo == "ol" else "•  ")
+                par.paragraph_format.space_after = Pt(1 if sub else 3)
+                marcador = par.add_run(f"{i}.  " if tipo == "ol" else "–  " if sub else "•  ")
                 marcador.bold = True
                 marcador.font.size, marcador.font.color.rgb = Pt(10.5), ACENTO
                 _texto_inline(par, item)
@@ -1174,8 +1184,8 @@ def _divergencias(r):
     return "; ".join(partes)
 
 
-RE_IDS_ENTRE_PARENTESES = re.compile(r"\s*\((?:\s*[FVOCER]\d{1,3}\s*(?:,|;|\be\b)?\s*)+\)")
-PAPEL_CURTO = {"Fazenda e orçamento": "Fazenda", "Controle e jurídico (TCE-RJ, PGE, MPRJ)": "Controle",
+RE_IDS_ENTRE_PARENTESES = re.compile(r"\s*\((?:\s*[FVOCERPT]\d{1,3}\s*(?:,|;|\be\b)?\s*)+\)")
+PAPEL_CURTO = {"Cruzamento com o TCE-RJ": "TCE-RJ", "Fazenda e orçamento": "Fazenda", "Controle e jurídico (TCE-RJ, PGE, MPRJ)": "Controle",
                "Área-fim e usuário do serviço": "Área-fim", "Operação e servidores": "Operação",
                "Nova gestão: prioridades e articulação": "Nova gestão", "Advogado do diabo": "Advogado do diabo",
                "Análise": "Análise", "Checklist obrigatório": "Checklist"}
@@ -1194,13 +1204,22 @@ def _frase(texto):
     return texto + "." if texto else ""
 
 
-def fontes_do_risco(r, diag, dossie, limite=4):
+def fontes_do_risco(r, diag, dossie, limite=4, extras=None):
     """De onde vêm os fatos do risco, por extenso: "material da secretaria" e as fontes públicas com data e link."""
     from .pesquisa import itens_incluidos
     fatos = {i["id"]: i for s in (diag or {}).get("secoes") or [] for i in s["itens"]}
     itens = {i["id"]: i for i in itens_incluidos(dossie or {})}
     nomes, secretaria = [], False
     for f in r.get("fatos") or []:
+        extra = (extras or {}).get(f)
+        if extra:                                   # ponto crítico da secretaria (P) ou decisão do TCE-RJ (T)
+            if extra.get("url"):
+                nome = f"[{extra.get('fonte') or 'fonte oficial'}]({extra['url']})"
+                if nome not in nomes:
+                    nomes.append(nome)
+            else:
+                secretaria = True
+            continue
         item = itens.get(f) or itens.get((fatos.get(f) or {}).get("origem_item") or "")
         if f.startswith("V") or (f in fatos and not fatos[f].get("url") and not item):
             secretaria = True
@@ -1302,8 +1321,9 @@ def antes_de_ler_riscos(confianca, data_corte, cortes=None, bases=None):
                       + (" Silêncio sobre os temas sem informação não quer dizer que não haja risco."
                          if confianca.get("lacuna_checklist") else ""))
     legenda = "; ".join(f"\"{b}\" = {LEGENDA_BASE[b]}" for b in bases or [] if b in LEGENDA_BASE)
-    linhas.append("- **Como ler:** cada risco traz o fato, a consequência, o ponto de decisão e o prazo. "
-                  + (f"A coluna Base diz de onde vem a informação: {legenda}. " if legenda else "")
+    linhas.append("- **Como ler:** os riscos vêm agrupados pela janela de decisão. Cada um diz do que se trata (o que é, "
+                  "valor, em que pé está), o problema, a consequência, o ponto de decisão e o prazo. "
+                  + (f"\"Base\" diz de onde vem a informação: {legenda}. " if legenda else "")
                   + "Contratos e datas: só o que a secretaria informou.")
     for c in cortes or []:
         linhas.append(f"- **Material cortado:** {c}. O que ficou de fora não entrou na análise.")
@@ -1315,60 +1335,100 @@ def nota_riscos(registro_id, modelos, revisoes=None, conferencia=None, revisao_t
     usados = list(dict.fromkeys(m for m in (modelos.get("auxiliar"), modelos.get("debate")) if m))
     validas = [r for r in revisoes or [] if not r.get("erro")]
     familias = {r["modelo"].split("/")[0] for r in validas if r.get("modelo")}
+    trechos = lambda n, feito: f"{n} trecho {feito}" if n == 1 else f"{n} trechos {feito}s"
     partes = [f"Registro {registro_id}", "modelo " + " e ".join(usados) if usados else "",
               (f"{len(validas)} agentes de IA, com olhares diferentes, revisaram e votaram a análise"
                + (f", em {len(familias)} famílias de modelos" if len(familias) > 1 else " (todos no mesmo modelo)"))
               if validas else "",
-              (f"conferência final: {len(conferencia.get('corrigidos') or [])} trecho(s) corrigido(s) por falta de apoio "
+              (f"conferência final: {trechos(len(conferencia.get('corrigidos') or []), 'corrigido')} por falta de apoio "
                "nos fatos citados") if conferencia and conferencia.get("corrigidos") else "",
-              (f"revisão de tom: {len((revisao_texto or {}).get('aceitos') or []) + len((revisao_texto or {}).get('condicional') or [])} "
-               "trecho(s) reescrito(s)") if revisao_texto and ((revisao_texto.get("aceitos") or revisao_texto.get("condicional"))) else "",
+              ("revisão de tom: " + trechos(len((revisao_texto or {}).get('aceitos') or [])
+                                            + len((revisao_texto or {}).get('condicional') or []), "reescrito"))
+              if revisao_texto and ((revisao_texto.get("aceitos") or revisao_texto.get("condicional"))) else "",
               "método, votos e revisões completas no arquivo de auditoria"]
     return "_" + " · ".join(p for p in partes if p) + "._"
 
 
+JANELAS_DO_RELATORIO = ["Prazo vencido", "Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias",
+                        "Depois dos 100 dias", "Sem prazo"]
+JANELA_NA_CONTAGEM = {"Prazo vencido": "com prazo vencido", "Antes da posse": "antes da posse",
+                      "Primeiras 72 horas": "nas primeiras 72 horas", "Primeiros 100 dias": "nos primeiros 100 dias",
+                      "Depois dos 100 dias": "depois dos 100 dias", "Sem prazo": "sem prazo"}
+
+
+def _no_calendario(r, vencimentos, limite=8):
+    """Os contratos e prazos do calendário da secretaria que o risco cita, como estão lá e em ordem de data: a data, o
+    objeto, o valor e o que a data marca. É o código que escreve, a partir do evento conferido; assim o risco diz de
+    qual contrato se trata. Devolve a lista de linhas."""
+    ids = list(dict.fromkeys(f for f in r.get("fatos") or [] if (vencimentos or {}).get(f)))
+    partes = []
+    for e in sorted((vencimentos[f] for f in ids), key=lambda e: e.get("data") or date.max):
+        objeto, evento = str(e.get("objeto") or "").strip(), str(e.get("evento") or "").strip().rstrip(".")
+        valor = str(e.get("valor_texto") or "").strip()
+        nome = ", ".join(x for x in [objeto or evento, valor] if x) + (f" ({evento})" if objeto and evento else "")
+        partes.append((f"{e['data']:%d/%m/%Y}: " if e.get("data") else "") + nome)
+    partes = list(dict.fromkeys(p for p in partes if p))
+    return partes[:limite] + ([f"e mais {len(partes) - limite} no calendário"] if len(partes) > limite else [])
+
+
 def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=10, limite_pedir=15, antes_md="", diag=None,
-                     dossie=None, data_corte=None, confianca=None, cortes=None):
-    """Produto 3, o relatório de riscos, direto ao ponto: a tabela dos pontos de decisão em ordem de prazo; cada risco
-    em linhas rotuladas (fato, consequência, ponto de decisão, prazo, peso, o que está contestado, fontes por extenso);
-    e a pauta de investigação (informações que faltam, com para que servem, onde procurar e quem apontou).
+                     dossie=None, data_corte=None, confianca=None, cortes=None, vencimentos=None, extras=None,
+                     tce_md=""):
+    """Produto 3, o relatório de riscos, direto ao ponto e agrupado por janela de decisão (prazo vencido, antes da
+    posse, primeiras 72 horas, primeiros 100 dias, depois). Cada risco diz do que se trata (o que é, valor, em que pé
+    está), o problema, a consequência, o ponto de decisão e o prazo, com os contratos do calendário da secretaria por
+    extenso, o que continua contestado e as fontes. Depois, o cruzamento com o TCE-RJ e a pauta de investigação.
     Analisa; não recomenda, não sugere caminho nem responsável. Votos e objeções completas ficam na auditoria."""
     from .produtos import _ler_data
     hoje = (_ler_data(data_corte) or (None,))[0] if data_corte else None
-    riscos = sorted((resultado.get("riscos") or [])[:limite_riscos], key=lambda r: (r.get("agir_ate") or date.max, -r["nota"]))
+    riscos = (resultado.get("riscos") or [])[:limite_riscos]
     bases = list(dict.fromkeys(BASE_CURTA.get(r["firmeza"], r["firmeza"]) for r in riscos))
     md = [antes_md if antes_md else antes_de_ler_riscos(confianca, data_corte, cortes, bases)]
+    grupos = {j: [] for j in JANELAS_DO_RELATORIO}
+    for r in riscos:
+        prazo, janela, linha = _prazo_do_risco(r, hoje)
+        grupos.setdefault(janela.replace(" ⚠", ""), []).append((r, prazo, linha, "⚠" in janela))
     if riscos:
-        votado = any(r.get("votos") for r in riscos)
-        md += ["## Pontos de decisão, em ordem de prazo",
-               ("_Prioridade: impacto × urgência, na mesma régua para todas as secretarias. Seis agentes de IA, com "
-                "olhares diferentes, revisaram e votaram cada risco; ⚠ marca divergência entre eles._" if votado else ""),
-               "| # | Ponto de decisão | Prazo | Janela | Prioridade | Base |", "|---|---|---|---|---|---|"]
-        for r in riscos:
-            prazo, janela, _ = _prazo_do_risco(r, hoje)
-            md.append(f"| {r['id']} | {_sem_ids(r['titulo'])} | {prazo} | {janela} | {r['prioridade']} | "
-                      f"{BASE_CURTA.get(r['firmeza'], r['firmeza'])} |")
-        md.append("## Os riscos, um a um")
-        for r in riscos:
-            _, _, prazo = _prazo_do_risco(r, hoje)
+        contagem = "; ".join(f"{len(v)} {JANELA_NA_CONTAGEM.get(j, j.lower())}" for j, v in grupos.items() if v)
+        quantos = "1 ponto de decisão" if len(riscos) == 1 else f"{len(riscos)} pontos de decisão"
+        md.append(f"**{quantos}, por janela:** {contagem}. Dentro de cada janela, em ordem de prazo. "
+                  "⚠ marca divergência entre os seis agentes de IA que revisaram e votaram cada risco.")
+    for janela, itens in grupos.items():
+        if not itens:
+            continue
+        md.append(f"## {janela}")
+        for r, prazo, linha, diverge in sorted(itens, key=lambda x: (x[0].get("data_evento") or x[0].get("agir_ate") or date.max,
+                                                                     -x[0]["nota"])):
             v = r.get("votos") or {}
             marca = lambda eixo: " ⚠" if (v.get(eixo) or {}).get("divergencia") else ""
-            peso = (f"prioridade {r['prioridade'].lower()}; impacto {str(r.get('impacto') or '').lower()}{marca('impacto')}; "
-                    f"repercussão política {str(r.get('sensibilidade') or '').lower()}{marca('sensibilidade')}")
-            md.append(f"**{r['id']}. {_sem_ids(r['titulo'])}**")
-            linhas = [("Fato", _frase(r["causa"])), ("Consequência", _frase(r["consequencia"])),
-                      ("Ponto de decisão", _frase(r.get("decisao"))), ("Prazo", prazo[0].upper() + prazo[1:]),
-                      ("Peso", peso + "."), ("Repercussão possível", _frase(r.get("motivo_sensibilidade"))),
-                      ("Já em curso", _frase(r.get("em_curso"))), ("Ponto contestado", _ponto_contestado(r)),
+            quando = prazo if prazo != "sem data" else (_curto(_sem_ids(r.get("marco_critico")), 60) or "sem data")
+            md.append(f"**{r['id']} · {_sem_ids(r['titulo'])}** – {quando} · prioridade {r['prioridade'].lower()} · "
+                      f"impacto {str(r.get('impacto') or '').lower()}{marca('impacto')} · base: "
+                      f"{BASE_CURTA.get(r['firmeza'], r['firmeza'])}")
+            sens = str(r.get("sensibilidade") or "").lower()
+            linhas = [("O que é", _frase(r.get("o_que_e"))), ("Valor", _frase(r.get("valor"))),
+                      ("Em que pé está", _frase(r.get("situacao_atual"))),
+                      ("No calendário da secretaria", "\n".join([""] + [f"  - {c}" for c in _no_calendario(r, vencimentos)])
+                       if _no_calendario(r, vencimentos) else ""),
+                      ("Problema", _frase(r["causa"])), ("Consequência", _frase(r["consequencia"])),
+                      ("Ponto de decisão", _frase(r.get("decisao"))),
+                      ("Prazo", linha[0].upper() + linha[1:]
+                       + (f" Marco: {_frase(r['marco_critico'])}" if r.get("marco_critico") and prazo != "sem data" else "")),
+                      ("Processo", _frase(r.get("processo"))), ("Já em curso", _frase(r.get("em_curso"))),
+                      (f"Repercussão possível ({sens}{marca('sensibilidade')})" if sens else "Repercussão possível",
+                       _frase(r.get("motivo_sensibilidade"))),
+                      ("Ponto contestado", _ponto_contestado(r)),
                       ("A confirmar", " ".join(_frase(a["motivo"]) for a in r.get("a_confirmar") or [])),
-                      ("Fontes", _frase(fontes_do_risco(r, diag, dossie)))]
-            md += [f"- **{rotulo}:** {texto}" for rotulo, texto in linhas if texto]
+                      ("Fontes", _frase(fontes_do_risco(r, diag, dossie, extras=extras)))]
+            md += [f"- **{rotulo}:**{'' if texto.startswith(chr(10)) else ' '}{texto}" for rotulo, texto in linhas if texto]
+    if tce_md:
+        md.append(tce_md)
     pedir = (resultado.get("pedir") or [])[:limite_pedir]
     if pedir:
         md += ["## Informações que faltam: a pauta de investigação",
                "_O que não está no material e mudaria a leitura dos riscos, apontado pela análise e por cada um dos seis "
-               "agentes, pelo seu olhar. Primeiro os temas obrigatórios sem informação; depois, pela prioridade do "
-               "risco a que serve._",
+               "agentes, pelo seu olhar. Primeiro o que vem do cruzamento com o TCE-RJ e os temas obrigatórios sem "
+               "informação; depois, pela prioridade do risco a que serve._",
                "| # | O que falta | Para que serve | Onde procurar | Risco | Quem apontou |", "|---|---|---|---|---|---|"]
         for k, p in enumerate(pedir, 1):
             quem = ", ".join(PAPEL_CURTO.get(q, q) for q in p.get("apontado_por") or []) or "Consolidação"

@@ -184,7 +184,8 @@ def painel_estadual(riscos, situacoes, eventos, cfg, linhas=None, orgao=None):
 
 
 CAMPOS_PAINEL = ["id", "titulo", "decisao", "categoria", "agir_ate", "data_evento", "vencido", "horizonte", "prazo_de_fato", "impacto",
-                 "sensibilidade", "motivo_sensibilidade", "prioridade", "nota", "firmeza", "em_jogo", "em_curso", "fatos"]
+                 "sensibilidade", "motivo_sensibilidade", "prioridade", "nota", "firmeza", "em_jogo", "em_curso", "fatos",
+                 "o_que_e", "valor", "situacao_atual", "marco_critico", "processo"]
 
 
 def dados_do_painel(orgao, riscos, situacao, data_corte):
