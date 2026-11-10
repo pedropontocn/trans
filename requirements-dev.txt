@@ -5,4 +5,7 @@ python-dotenv
 pytest
 openpyxl
 pdfplumber
-pymupdf  # só para scripts/plano_governo.py
+pymupdf  # scripts/plano_governo.py e os PDFs de teste da leitura de imagens
+python-pptx
+Pillow
+pypdfium2
