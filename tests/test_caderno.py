@@ -280,3 +280,6 @@ def test_so_caderno_nao_roda_dossie_nem_riscos(llm, bases, tmp_path):
     assert not any(json.dumps(riscos.PROMPT_ANALISE[:80], ensure_ascii=False)[1:-1] in t for t in textos)
     aud = json.loads(next((tmp_path / "auditoria").glob("*_caderno.json")).read_text(encoding="utf-8"))
     assert aud["situacao"] == "gerado" and all(not f.get("riscos") for f in aud["fichas"])
+    resultado = json.loads(next((tmp_path / "auditoria").glob("*_resultado.json")).read_text(encoding="utf-8"))
+    assert resultado["linha"]["caderno"] == linhas[0]["caderno"]                  # gravado depois do caderno
+    assert resultado["linha"]["custo_usd"] == linhas[0]["custo_usd"]

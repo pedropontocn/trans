@@ -541,6 +541,7 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
                 if "caderno" in escolha:
                     log(f"[{k}] Montando o caderno executivo...")
                     linha.update(_gravar_caderno(saida, pasta, nome, manifesto, r, cfg, log, k, texto))
+                    gravar_resultado(saida, pasta, dict(linha, minutos=round((time.time() - inicio) / 60, 1)), r)
             except Exception as e:
                 linha["observacao"] = f"{type(e).__name__}: {e}"[:300]
                 custo, _ = modelo.custo_estimado(modelo.uso_do_fio())
