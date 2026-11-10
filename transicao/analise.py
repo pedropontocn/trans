@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-from . import checklist, confronto as conf, revisao, documentos, entrada, folha, modelo, painel, pesquisa, produtos, riscos, verificacao
+from . import checklist, confronto as conf, revisao, documentos, entrada, folha, imagens, modelo, painel, pesquisa, produtos, riscos, verificacao
 from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO, esquema_de_modelos
 
 JUNTAS = False          # no modo econômico, as etapas independentes vão juntas para a mesma fila da Batch API
@@ -54,6 +54,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     Levanta ErroAnalise quando não há base para analisar."""
     progresso = progresso or (lambda _t: None)
     uso = modelo.novo_uso_do_fio()            # todas as chamadas desta secretaria registram aqui
+    uso.extend(((manifesto or {}).get("imagens") or {}).get("uso") or [])   # a transcrição de imagens, na leitura
     auxiliar, principal = cfg["modelo_auxiliar"], cfg["modelo"]
     relatorio, avisos = entrada.limpar_relatorio(texto) if (texto or "").strip() else ("", [])
     problemas = []
@@ -405,7 +406,15 @@ def rodar_orgaos(orgaos, cfg, saida, economico=False, cliente_batch=None, parale
             try:
                 texto, manifesto = orgao.get("texto", ""), None
                 if orgao.get("ler"):
-                    texto, manifesto = orgao["ler"]()
+                    with imagens.leitura(cfg.get("modelo_imagens") or cfg["modelo_auxiliar"],
+                                         ligado=cfg.get("ler_imagens", True)) as lidas:
+                        texto, manifesto = orgao["ler"]()
+                    if lidas["ligado"]:
+                        manifesto["imagens"] = lidas
+                        if lidas["transcritas"]:
+                            log(f"[{k}] {lidas['transcritas']} imagem(ns) transcrita(s) em {len(lidas['arquivos'])} "
+                                "arquivo(s)" + (f"; {lidas['acima_do_teto']} acima do teto ficaram de fora"
+                                                if lidas["acima_do_teto"] else ""))
                     (saida / "auditoria" / f"{pasta}_arquivos_lidos.json").write_text(
                         json.dumps(manifesto, ensure_ascii=False, indent=2), encoding="utf-8")
                     if not texto.strip():

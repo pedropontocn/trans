@@ -7,3 +7,6 @@ python-dotenv
 anthropic
 openpyxl
 pdfplumber
+python-pptx
+Pillow
+pypdfium2

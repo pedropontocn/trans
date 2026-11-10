@@ -7,6 +7,7 @@ import zipfile
 from functools import lru_cache
 from pathlib import Path
 
+from . import imagens
 from .config import LIMITE_CARACTERES, LIMITE_RELATORIO
 from .modelo import _norm
 
@@ -67,7 +68,7 @@ def nome_do_orgao_pelo_arquivo(nome):
     return re.sub(r"\s{2,}", " ", base) or Path(nome).stem
 
 
-EXTENSOES_RESUMO = (".docx", ".pdf", ".xlsx", ".xls")
+EXTENSOES_RESUMO = (".docx", ".pdf", ".xlsx", ".xls", ".pptx", *sorted(imagens.EXTENSOES_IMAGEM))
 
 
 PASTA_MIME = "application/vnd.google-apps.folder"
@@ -80,7 +81,31 @@ EXPORTAR = {  # arquivos nativos do Google são exportados para um formato que o
 }
 
 
-EXTENSOES = {".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".csv", ".txt", ".md", ".html", ".htm"}
+EXTENSOES = {".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".csv", ".txt", ".md", ".html", ".htm",
+             *imagens.EXTENSOES_IMAGEM}
+
+
+def texto_do_arquivo(converter, nome, dados, origem, manifesto):
+    """O texto de um arquivo: o digitado (MarkItDown) mais a transcrição do que está em imagem (páginas digitalizadas,
+    slides, prints, fotos), quando a rodada liga a transcrição. Devolve "" se não houver texto; erro vai ao manifesto."""
+    texto = ""
+    if Path(nome).suffix.lower() not in imagens.EXTENSOES_IMAGEM:
+        try:
+            texto = converter(nome, dados) or ""
+        except Exception as e:
+            manifesto["erros"].append({"arquivo": origem, "erro": f"{type(e).__name__}: {e}"[:300]})
+            if Path(nome).suffix.lower() != ".pdf":
+                return ""
+    transcrito = imagens.transcrever_arquivo(nome, dados, origem)
+    if transcrito:
+        manifesto.setdefault("com_imagem_transcrita", []).append(origem)
+    return (texto.rstrip() + transcrito) if transcrito else texto
+
+
+def _motivo_sem_texto(nome):
+    if Path(nome).suffix.lower() in imagens.EXTENSOES_IMAGEM | {".pdf", ".pptx", ".docx"} and not imagens.ativa():
+        return "sem texto digitado; está em imagem e a leitura de imagens está desligada"
+    return "sem texto legível (nem digitado, nem em imagem)"
 
 
 LIMITE_ARQUIVO = 30_000_000
@@ -200,16 +225,14 @@ def ler_documentos(drive, orgao, converter, limite_total):
     textos = []
 
     def converter_bytes(nome, dados, origem):
-        try:
-            texto = converter(nome, dados) or ""
-        except Exception as e:
-            manifesto["erros"].append({"arquivo": origem, "erro": f"{type(e).__name__}: {e}"[:300]})
-            return
+        n_erros = len(manifesto["erros"])
+        texto = texto_do_arquivo(converter, nome, dados, origem, manifesto)
         if texto.strip():
+            del manifesto["erros"][n_erros:]          # o PDF que o conversor não leu, mas a transcrição leu
             textos.append((origem, limpar_dados_pessoais(texto)))
             _guardar_secao3(manifesto, origem, nome, dados)
-        else:
-            manifesto["pulados"].append({"arquivo": origem, "motivo": "sem texto (PDF digitalizado?)"})
+        elif len(manifesto["erros"]) == n_erros:
+            manifesto["pulados"].append({"arquivo": origem, "motivo": _motivo_sem_texto(nome)})
 
     for pasta in orgao["pastas"]:
         for arq in drive.listar(pasta["id"]):
@@ -451,17 +474,15 @@ def orgaos_do_envio(arquivos, cada_pasta=False):
     def ler(itens):
         partes, manifesto = [], {"lidos": [], "pulados": [], "erros": [], "cortados": []}
         for r in itens:
-            try:
-                texto = converter_arquivo(r["arquivo"], r["conteudo"]) or ""
-            except Exception as e:
-                manifesto["erros"].append({"arquivo": r["arquivo"], "erro": f"{type(e).__name__}: {e}"[:300]})
-                continue
+            n_erros = len(manifesto["erros"])
+            texto = texto_do_arquivo(converter_arquivo, r["arquivo"], r["conteudo"], r["arquivo"], manifesto)
             if texto.strip():
+                del manifesto["erros"][n_erros:]
                 partes.append(f"# ARQUIVO: {r['arquivo']}\n\n{texto}")
                 manifesto["lidos"].append({"arquivo": r["arquivo"], "caracteres": len(texto)})
                 _guardar_secao3(manifesto, r["arquivo"], r["arquivo"], r["conteudo"])
-            else:
-                manifesto["pulados"].append({"arquivo": r["arquivo"], "motivo": "sem texto (PDF digitalizado?)"})
+            elif len(manifesto["erros"]) == n_erros:
+                manifesto["pulados"].append({"arquivo": r["arquivo"], "motivo": _motivo_sem_texto(r["arquivo"])})
         return "\n\n".join(partes), manifesto
 
     def previa(itens):
