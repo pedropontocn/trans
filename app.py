@@ -52,7 +52,7 @@ def _recarregar_se_mudou():
 
 _recarregar_se_mudou()
 
-from transicao import VERSAO, analise, entrada, modelo  # noqa: E402
+from transicao import VERSAO, analise, entrada  # noqa: E402
 
 
 def _commit():
@@ -66,7 +66,7 @@ def _commit():
 
 
 _COMMIT = _commit()
-from transicao.config import FAMILIAS, MODELOS, esquema_de_modelos, familias_disponiveis  # noqa: E402
+from transicao.config import familias_disponiveis  # noqa: E402
 
 load_dotenv()
 
@@ -216,9 +216,9 @@ def linhas(trabalho):
 
 st.set_page_config(page_title="Análise da Transição", page_icon="🏛️", layout="wide")
 st.title("🏛️ Análise da Transição")
-st.caption("Por secretaria: o dossiê atualizado com o que ela informou; o relatório de riscos; o calendário de "
-           "vencimentos em Excel; os dados do painel (JSON, para o painel unificado); e a auditoria. "
-           "Analisa riscos e pontos de decisão: não recomenda, não sugere caminho nem responsável.")
+st.caption("Suba os documentos de uma ou mais secretarias e escolha na barra lateral o que gerar: dossiê, relatório "
+           "de riscos, painel, calendário ou caderno executivo, juntos ou separados. Analisa; não recomenda, não "
+           "sugere caminho nem responsável.")
 
 
 def _senha_do_app():
@@ -244,74 +244,77 @@ if SENHA and not st.session_state.get("autenticado"):
 if not SENHA:
     st.sidebar.warning("Sem senha de acesso: quem tiver o link vê e baixa as análises. Defina APP_SENHA nos Secrets.")
 
+# Fixos: o modelo mais forte em todas as etapas (qualidade primeiro) e o cabeçalho da Equipe de Transição.
+MODELO_FIXO = "anthropic/claude-opus-5-5"
+modelo_pesquisa = modelo_auxiliar = modelo_debate = MODELO_FIXO
+modelos_agentes = ""
+familias = familias_disponiveis()
+orgao_emissor, unidade, para = "Equipe de Transição", "", ""
+
 with st.sidebar:
-    st.header("Modelos")
-    # Qualidade primeiro: o modelo mais forte em todas as etapas. O modo econômico (abaixo) só muda o tempo.
-    modelo_pesquisa = st.selectbox("Pesquisa em fontes públicas", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"),
-                                   help="Busca na web e monta o dossiê. A Anthropic cobra US$ 10 por mil buscas, além dos tokens.")
-    modelo_auxiliar = st.selectbox("Extrações", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"),
-                                   help="Diagnóstico, checklist, contratos críticos, calendário e confronto com o relatório.")
-    modelo_debate = st.selectbox("Riscos e consolidação", MODELOS, index=MODELOS.index("anthropic/claude-opus-5-5"),
-                                 help="Escreve a análise de riscos e consolida as revisões dos agentes.")
-    modelos_agentes = st.text_input(
-        "Modelos dos agentes revisores (opcional)", value="",
-        placeholder="ex.: anthropic/claude-opus-5-5, gemini/gemini-4-argon, openai/gpt-6-astra",
-        help="Nomes de modelos (LiteLLM) separados por vírgula, que se revezam entre os seis agentes. Vazio: o esquema "
-             "automático abaixo. Modelos de outros provedores precisam da chave deles nos Secrets "
-             "(GEMINI_API_KEY, OPENAI_API_KEY) e não entram na estimativa de custo.")
-    familias = familias_disponiveis()
-    esquema = esquema_de_modelos(modelo_debate, modelo_auxiliar, [m.strip() for m in modelos_agentes.split(",") if m.strip()],
-                                 familias)
-    if esquema["independente"]:
-        st.caption("✅ Revisão independente: agentes em " + ", ".join(sorted({m.split("/")[0] for m in esquema["agentes"]}))
-                   + f"; neutralidade por {esquema['neutralidade']}.")
-    else:
-        faltam = ", ".join(FAMILIAS[f]["chave"] for f in FAMILIAS if f not in familias)
-        st.caption(f"⚠️ Todos os agentes na mesma família ({modelo_debate.split('/')[0]}): os pontos cegos do modelo se "
-                   f"repetem nos seis. Para revisão independente, defina {faltam} nos Secrets.")
-    if st.button("Testar modelos e chaves", help="Chama cada modelo do esquema com uma palavra. Confira antes de uma "
-                                                   "rodada grande: nome errado ou chave inválida aparecem aqui."):
-        with st.spinner("Chamando cada modelo..."):
-            testes = modelo.testar_modelos([modelo_pesquisa, modelo_auxiliar, modelo_debate, esquema["neutralidade"]]
-                                           + esquema["agentes"])
-        for nome_modelo, situacao in testes.items():
-            (st.success if situacao == "ok" else st.error)(f"{nome_modelo}: {situacao}")
-    economico = st.checkbox("Modo econômico (Batch API)", value=True,
-                            help="Metade do preço dos tokens. Cada etapa espera a fila da Anthropic: o total leva de "
-                                 "uma a algumas horas, com todos os órgãos em paralelo.")
-    st.header("Análise")
-    data_corte = st.date_input("Data de corte", value=date.today(), format="DD/MM/YYYY")
-    foco = st.text_input("Foco (opcional)", placeholder="ex.: contratos que vencem até março")
-    _estado = analise.estado_embutido()
-    pesquisar_estado = st.checkbox(
-        "Pesquisar de novo o contexto do Estado", value=_estado is None,
-        help=("O app já traz o contexto do Estado (situação fiscal, orçamento, órgãos de controle, prioridades do "
-              f"governo eleito), pesquisado em {_estado.get('data_corte', '?')}, com {len(_estado['itens'])} fatos "
-              "conferidos. Marque para pesquisar de novo (cerca de US$ 0,70); a pesquisa nova sai no .zip como "
-              "contexto_estado.json, pronta para substituir a do app." if _estado else
-              "O app não tem contexto do Estado embutido: ele será pesquisado nesta rodada."))
-    gerar_caderno = st.checkbox(
-        "Gerar também o caderno executivo", value=False,
-        help="Uma ficha por programa (seção 3 do Relatório de Transição, modelo v2, em PDF), com o orçamento da LOA "
-             "2026 e da PLOA 2027 por ação e o vínculo com o Plano de Governo. Só sai para a secretaria que tiver o "
-             "relatório no modelo v2. Custo extra estimado: US$ 0,50 a 1,50 por secretaria.")
-    if gerar_caderno:
+    st.header("Produtos")
+    st.caption("Marque só o que quer gerar: cada produto roda apenas as etapas de que precisa.")
+    p_dossie = st.checkbox(
+        "Dossiê da secretaria", value=True,
+        help="Como a secretaria funciona hoje: panorama, organograma, programas, contratos, pessoal, orçamento e "
+             "passivos. Usa o dossiê de fontes oficiais e as extrações do material; não roda a análise de riscos.")
+    p_riscos = st.checkbox(
+        "Relatório de riscos", value=True,
+        help="Riscos e pontos de decisão com prazo, janela e prioridade, revisados e votados por seis agentes. É a "
+             "etapa mais cara.")
+    p_painel = st.checkbox(
+        "Painel (dados para o painel unificado)", value=True,
+        help="JSON com os pontos de decisão na mesma régua para todas as secretarias. Sai da análise de riscos: "
+             "marcado sozinho, roda a análise de riscos inteira.")
+    p_calendario = st.checkbox(
+        "Calendário de vencimentos", value=True,
+        help="Excel com as datas que a secretaria informou. Sozinho, é uma extração só: rápido e barato.")
+    p_caderno = st.checkbox(
+        "Caderno executivo", value=False,
+        help="Uma ficha por programa, com o orçamento da LOA 2026 e da PLOA 2027 por ação e o vínculo com o Plano de "
+             "Governo. Os programas vêm do Relatório de Transição (modelo v2) ou, sem ele, do material enviado. Usa "
+             "os riscos só se o relatório de riscos ou o painel também estiverem marcados.")
+    if p_caderno:
         c1, c2 = st.columns(2)
         caderno_percentual = c1.number_input("Orçamento coberto (%)", 10, 100, 80, step=5,
                                              help="Regra 3: ações por orçamento até este % do finalístico.")
         caderno_teto = c2.number_input("Teto de fichas", 1, 40, 12, help="Máximo de fichas por secretaria.")
     else:
         caderno_percentual, caderno_teto = 80, 12
+    produtos_escolhidos = [k for k, v in (("dossie", p_dossie), ("riscos", p_riscos), ("painel", p_painel),
+                                          ("calendario", p_calendario), ("caderno", p_caderno)) if v]
+    precisa = analise.etapas(set(produtos_escolhidos))
+    if not produtos_escolhidos:
+        st.warning("Marque pelo menos um produto.")
+    elif precisa["riscos"]:
+        st.caption("Vai rodar a análise completa, com os seis agentes.")
+    elif precisa["dossie"]:
+        st.caption("Vai rodar o dossiê e as extrações, sem a análise de riscos.")
+    else:
+        st.caption("Vai rodar só a leitura do material e a extração de datas"
+                   + (", mais o caderno." if p_caderno else "."))
+
+    st.header("Análise")
+    data_corte = st.date_input("Data de corte", value=date.today(), format="DD/MM/YYYY")
+    foco = st.text_input("Foco (opcional)", placeholder="ex.: contratos que vencem até março")
     ler_imagens = st.checkbox(
         "Ler o que está em imagem", value=True,
         help="Páginas digitalizadas, slides salvos como figura, prints de tabelas no Word ou no PowerPoint e fotos de "
-             "documentos: o modelo de Extrações transcreve o texto, as tabelas e os números da imagem, que entram no "
-             "material como o resto. Logos e ícones ficam de fora. Até 250 imagens por secretaria; cerca de "
-             "US$ 0,02 por imagem.")
-    with st.expander("Cabeçalho do documento"):
-        orgao_emissor = st.text_input("Órgão", value="Equipe de Transição")
-        unidade = st.text_input("De (unidade)", value="")
-        para = st.text_input("Para", value="")
+             "documentos: o modelo transcreve o texto, as tabelas e os números da imagem, que entram no material como "
+             "o resto. Logos e ícones ficam de fora. Até 250 imagens por secretaria; cerca de US$ 0,02 por imagem.")
+    _estado = analise.estado_embutido()
+    pesquisar_estado = False
+    if precisa["dossie"]:
+        pesquisar_estado = st.checkbox(
+            "Pesquisar de novo o contexto do Estado", value=_estado is None,
+            help=("O app já traz o contexto do Estado (situação fiscal, orçamento, órgãos de controle, prioridades do "
+                  f"governo eleito), pesquisado em {_estado.get('data_corte', '?')}, com {len(_estado['itens'])} fatos "
+                  "conferidos. Marque para pesquisar de novo (cerca de US$ 0,70); a pesquisa nova sai no .zip como "
+                  "contexto_estado.json, pronta para substituir a do app." if _estado else
+                  "O app não tem contexto do Estado embutido: ele será pesquisado nesta rodada."))
+    economico = st.checkbox("Modo econômico (Batch API)", value=True,
+                            help="Metade do preço dos tokens. Cada etapa espera a fila da Anthropic: o total leva de "
+                                 "uma a algumas horas, com todos os órgãos em paralelo.")
     st.caption(f"Versão {VERSAO} · código {_COMMIT}")
 
 trabalho = trabalho_atual()
@@ -383,10 +386,12 @@ if not trabalho or trabalho["situacao"] != "rodando":
                                           "gif", "bmp", "tif", "tiff"],
                                     accept_multiple_files=True)
         modo = st.radio("Como os arquivos estão organizados?",
-                        ["Cada arquivo é o resumo de um órgão", "Cada pasta é um órgão (documentos brutos)"],
+                        ["Arquivos soltos (os da mesma sigla viram uma secretaria)",
+                         "Cada pasta é um órgão (documentos brutos)"],
                         horizontal=True,
-                        help="Resumos: o nome do órgão vem do nome do arquivo. Documentos brutos: suba o .zip da pasta "
-                             "que tem uma subpasta por órgão; o app lê os Word, PDF e planilhas de cada uma.")
+                        help="Arquivos soltos: o órgão vem do nome do arquivo, e os que começam ou terminam com a mesma "
+                             "sigla (\"SEEDUC - ofício.pdf\", \"SEEDUC - apresentação.pptx\") viram uma secretaria só. "
+                             "Documentos brutos: suba o .zip da pasta que tem uma subpasta por órgão.")
         embutidos, data_embutidos = _embutidos()
         if embutidos:
             st.caption(f"📚 Dossiês embutidos: {len(embutidos)} secretarias, pacote de {data_embutidos or 'data não informada'} "
@@ -444,17 +449,26 @@ if not trabalho or trabalho["situacao"] != "rodando":
                             for i, r in enumerate(registros) if r.get("analisar")]
                 escolhidos = aplicar_escolhas(orgaos, dossies, escolhas)   # o dossiê escolhido na tabela vale
                 faixa = CUSTO_POR_ORGAO[economico]
-                peso = sum(1 if o.get("ler_dossie") else PESO_COM_PESQUISA for o in escolhidos)
-                st.caption(f"Estimativa: US$ {faixa[0] * peso:.0f} a {faixa[1] * peso:.0f} para "
+                if precisa["riscos"]:
+                    peso = sum(1 if o.get("ler_dossie") else PESO_COM_PESQUISA for o in escolhidos)
+                elif precisa["dossie"]:
+                    peso = sum(0.35 if o.get("ler_dossie") else 0.85 for o in escolhidos)
+                else:
+                    peso = 0.1 * len(escolhidos)
+                extra = (0.5, 1.5) if p_caderno else (0, 0)          # o caderno, por secretaria
+                minimo = faixa[0] * peso + extra[0] * len(escolhidos)
+                maximo = faixa[1] * peso + extra[1] * len(escolhidos)
+                st.caption(f"Estimativa: US$ {minimo:.2f} a {maximo:.2f} para "
                            f"{len(escolhidos)} secretaria(s). O valor real sai no resumo. Não envie documentos sigilosos.")
-                if st.button(f"▶️ Analisar {len(escolhidos)} secretaria(s)", type="primary", width="stretch",
-                             disabled=not escolhidos):
+                if st.button(f"▶️ Gerar para {len(escolhidos)} secretaria(s)", type="primary", width="stretch",
+                             disabled=not escolhidos or not produtos_escolhidos):
                     cfg = {"modelo_pesquisa": modelo_pesquisa, "modelo_auxiliar": modelo_auxiliar, "modelo": modelo_debate,
                            "modelos_agentes": [m.strip() for m in modelos_agentes.split(",") if m.strip()],
                            "familias": familias,
                            "data_corte": data_corte.strftime("%d/%m/%Y"),
                            "foco": foco.strip(), "orgao_emissor": orgao_emissor, "unidade": unidade, "para": para,
-                           "pesquisar_estado": pesquisar_estado, "caderno": gerar_caderno, "ler_imagens": ler_imagens,
+                           "pesquisar_estado": pesquisar_estado, "caderno": p_caderno, "ler_imagens": ler_imagens,
+                           "produtos": produtos_escolhidos,
                            "caderno_percentual": caderno_percentual / 100, "caderno_teto": int(caderno_teto)}
                     try:
                         saida = REGISTROS / f"analise_{datetime.now():%Y%m%d%H%M%S%f}"

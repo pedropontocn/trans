@@ -46,7 +46,7 @@ def test_fluxo_unico_da_tela(llm, monkeypatch, pasta_de_registros):
     assert not at.exception
     economico = next(c for c in at.checkbox if "econômico" in c.label)
     economico.uncheck().run()                       # sem a Batch API, o teste usa o modelo falso direto
-    botao = next(b for b in at.button if b.label.startswith("▶️ Analisar 2"))
+    botao = next(b for b in at.button if b.label.startswith("▶️ Gerar para 2"))
     botao.click().run()
     for _ in range(120):
         at.run()
@@ -73,7 +73,7 @@ def test_so_com_dossies_a_tabela_ja_vem_marcada(llm, monkeypatch):
     at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=60)
     at.run()
     assert not at.exception
-    assert any(b.label.startswith("▶️ Analisar 2") for b in at.button)
+    assert any(b.label.startswith("▶️ Gerar para 2") for b in at.button)
 
 
 def test_com_senha_a_tela_pede_a_senha_antes(llm, monkeypatch):
@@ -84,13 +84,13 @@ def test_com_senha_a_tela_pede_a_senha_antes(llm, monkeypatch):
     monkeypatch.setattr(streamlit, "file_uploader", lambda *a, **k: [])
     at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=60)
     at.run()
-    assert not at.exception and not at.selectbox            # nada da tela antes da senha
+    assert not at.exception and not at.checkbox             # nada da tela antes da senha
     at.text_input[0].input("errada")
     at.button[0].click().run()
-    assert any("incorreta" in e.value for e in at.error) and not at.selectbox
+    assert any("incorreta" in e.value for e in at.error) and not at.checkbox
     at.text_input[0].input("segredo")
     at.button[0].click().run()
-    assert not at.exception and at.selectbox
+    assert not at.exception and any(c.label == "Dossiê da secretaria" for c in at.checkbox)
 
 
 def test_depois_de_um_reinicio_a_tela_oferece_retomar(llm, monkeypatch, pasta_de_registros):
@@ -103,7 +103,7 @@ def test_depois_de_um_reinicio_a_tela_oferece_retomar(llm, monkeypatch, pasta_de
     at = AppTest.from_file(str(RAIZ / "app.py"), default_timeout=60)
     at.run()
     next(c for c in at.checkbox if "econômico" in c.label).uncheck().run()
-    next(b for b in at.button if b.label.startswith("▶️ Analisar 2")).click().run()
+    next(b for b in at.button if b.label.startswith("▶️ Gerar para 2")).click().run()
     for _ in range(120):
         at.run()
         if any(getattr(d, "label", "").startswith("⬇️") for d in at.get("download_button")):
@@ -145,7 +145,7 @@ def test_dossies_embutidos_entram_sozinhos_na_tabela(llm, monkeypatch):
     assert not at.exception
     assert any("Dossiês embutidos: 3" in c.value and "06/11/2026" in c.value for c in at.caption)
     # a SECID casou com o dossiê embutido; a secretaria desconhecida ficou sem; as 30 só com dossiê ficam escondidas
-    assert any(b.label.startswith("▶️ Analisar 2") for b in at.button)
+    assert any(b.label.startswith("▶️ Gerar para 2") for b in at.button)
     assert any("secretarias que têm dossiê mas nenhum documento enviado" in c.label for c in at.checkbox)
 
 

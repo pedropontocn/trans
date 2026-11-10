@@ -8,7 +8,18 @@ analisa riscos e pontos de decisão, com as fontes conferidas por código.
 
 ## O que sai
 
-Um `.zip` com:
+Na barra lateral, escolha os produtos: juntos ou separados. Cada um roda só as etapas de que precisa:
+
+| Produto marcado | O que roda |
+|---|---|
+| Calendário | só a extração das datas que a secretaria informou (rápido e barato) |
+| Caderno executivo | a leitura do material, a LOA, a PLOA, o plano e as datas; usa os riscos só se o relatório de riscos ou o painel também estiverem marcados |
+| Dossiê | o dossiê de fontes e as extrações (diagnóstico, checklist, confronto, contratos), sem a análise de riscos |
+| Relatório de riscos ou Painel | o caminho completo, com a análise de riscos revisada e votada pelos seis agentes |
+
+Os modelos (Claude Opus 5.5 em todas as etapas) e o cabeçalho dos documentos (Equipe de Transição) são fixos.
+
+Um `.zip` com os produtos pedidos:
 
 | Arquivo | O que é |
 |---|---|
@@ -17,13 +28,16 @@ Um `.zip` com:
 | `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, até 3 páginas e sem anexo: situação; os pontos de decisão urgentes em ordem de prazo, com janela, impacto e repercussão política votados item a item pelos seis agentes (contagem dos votos e divergências), prioridade e base; as informações que faltam. Tom de análise: sem recomendação, sem caminho sugerido, sem responsável |
 | `auditoria/<secretaria>.json` | **5. Auditoria**: o registro completo de cada análise: dossiê e conferências, análise inicial, revisões e votos dos seis agentes, consolidação, objeções risco a risco, método, descartes, custo |
 | `calendarios/<sigla>_calendario.xlsx` | **4. Calendário, por secretaria:** os vencimentos com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro. Só as datas que a secretaria informou |
-| `cadernos/<sigla>_caderno.docx` e `_quadro.csv` | **Caderno executivo** (opcional): o que a secretaria entrega, para quem, com quanto e em que pé está. Página-resumo; quadro-síntese por ação orçamentária (LOA 2026 e PLOA 2027), com os programas sob cada ação e o total conferido com o finalístico da LOA; uma ficha por programa (14 campos, cada valor com a fonte); notas de fonte e lacunas. Fonte: a seção 3 do Relatório de Transição (modelo v2) em PDF, lida por código. Seleção por código: riscos e painel, Plano de Governo, ações por orçamento até 80% do finalístico, teto de 12 fichas (editáveis na tela) |
+| `cadernos/<sigla>_caderno.docx` e `_quadro.csv` | **Caderno executivo** (opcional): o que a secretaria entrega, para quem, com quanto e em que pé está. Página-resumo; quadro-síntese por ação orçamentária (LOA 2026 e PLOA 2027), com os programas sob cada ação e o total conferido com o finalístico da LOA; uma ficha por programa (14 campos, cada valor com a fonte); notas de fonte e lacunas. Fonte: a seção 3 do Relatório de Transição (modelo v2) em PDF, lida por código; sem ele, os programas achados no material enviado, com cada campo copiado e conferido no arquivo; sem programas, só o orçamento. Seleção por código: riscos e painel, Plano de Governo, ações por orçamento até 80% do finalístico, teto de 12 fichas (editáveis na tela) |
 | `resumo.csv` | Situação, números e custo de cada secretaria |
 
 ## Como usar
 
-1. Suba os arquivos: o `.zip` com os documentos (Word, PDF ou Excel; o nome ou a sigla da secretaria no nome do arquivo; arquivos com o mesmo nome são juntados) ou o
-   `.zip` da pasta com uma subpasta de documentos brutos por órgão.
+1. Suba os arquivos: os documentos soltos ou num `.zip` (Word, PDF, Excel, PowerPoint ou imagens; a sigla da
+   secretaria no começo ou no fim do nome junta os arquivos dela numa secretaria só) ou o `.zip` da pasta com uma
+   subpasta de documentos brutos por órgão. O que está em imagem (página digitalizada, slide salvo como figura, print
+   de tabela, foto de documento) é transcrito pelo modelo e entra no material, se "Ler o que está em imagem" estiver
+   marcado.
 2. O **pacote de dossiês das secretarias** montado pela equipe já vem embutido no app (`dossies_embutidos/`, pacote de
    06/11/2026, 31 secretarias) e é usado sozinho: por sigla, o app pega `SIGLA_pesquisa.md` (pesquisa web com
    citações `[título](link)`); os nomes por extenso vêm de `00_CONSOLIDACAO_ESTADUAL.md`. As bases de contratos do
