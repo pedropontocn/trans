@@ -6,16 +6,16 @@ MODELOS = [
     "anthropic/claude-sonnet-5-5",
     "anthropic/claude-opus-5-5",
     "anthropic/claude-haiku-5-5",
-    "anthropic/claude-sonnet-4-5-20250929",
-]
+]  # o Sonnet 4.5 saiu da lista: o contexto dele (200 mil tokens) não comporta o limite de 800 mil caracteres
 
 
-LIMITE_CARACTERES = 400_000      # documentos brutos de uma pasta (Drive ou .zip), somados: o mesmo do relatório
+LIMITE_CARACTERES = 800_000      # documentos brutos de uma pasta (Drive ou .zip), somados: o mesmo do relatório
 
 
-# Relatório ou resumo do órgão: é o material já preparado e precisa ser lido inteiro. 400 mil caracteres são cerca de
-# 130 páginas e 110 mil tokens, o que cabe com folga no contexto dos modelos junto com o dossiê.
-LIMITE_RELATORIO = 400_000
+# Relatório ou resumo do órgão: é o material já preparado e precisa ser lido inteiro. 800 mil caracteres são cerca de
+# 260 páginas e 230 mil tokens; cabe no contexto de 1 milhão de tokens dos modelos 5.5 junto com o dossiê, sem preço
+# maior por contexto longo no Opus e no Sonnet (o Haiku 5.5 cobra 5x acima de 100 mil tokens de entrada).
+LIMITE_RELATORIO = 800_000
 
 
 
