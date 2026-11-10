@@ -62,14 +62,33 @@ ideal", "cabe a", "é importante que", "a melhor saída", "quem decide".
 Não invente números, datas ou nomes: use só o que está no material, citando os ids (F1, V2, O3). Valores arredondados
 (R$ 2,49 bi, R$ 998 mi)."""
 
-ESQUEMA_RISCO = ('{"titulo": "até 10 palavras", "categoria": "' + "|".join(CATEGORIAS) + '", '
-                 '"causa": "...", "consequencia": "...", "em_jogo": "valor, serviço ou obra", '
+ESQUEMA_RISCO = ('{"titulo": "frase nominal de até 10 palavras, com o assunto e a data, se houver", "categoria": "'
+                 + "|".join(CATEGORIAS) + '", '
+                 '"causa": "o fato, hoje", "consequencia": "o que acontece se nada mudar", "em_jogo": "valor, serviço ou obra", '
                  '"prazo": "dd/mm/aaaa, antes da posse, nas primeiras 72 horas, nos primeiros 100 dias ou vazio", '
                  '"impacto": "Alto|Médio|Baixo", "chance": "Alta|Média|Baixa", '
-                 '"sensibilidade_politica": "Alta|Média|Baixa", "motivo_sensibilidade": "o que a torna sensível, ou vazio", '
+                 '"sensibilidade_politica": "Alta|Média|Baixa", "motivo_sensibilidade": "quem pode reagir e como, no condicional, ou vazio", '
                  '"em_curso": "providência já publicada ou informada, ou vazio", '
-                 '"decisao": "o ponto pendente de decisão, em frase afirmativa e neutra, sem listar caminhos", '
+                 '"decisao": "o ponto pendente de decisão, em frase nominal de até 18 palavras, sem listar caminhos", '
                  '"fatos": ["F3", "V1"]}')
+
+ESQUEMA_LACUNA = ('{"o_que": "a informação que falta, em frase nominal", "para_que": "o que ela permite concluir ou decidir, '
+                  'em uma frase", "onde": "onde costuma estar: sistema, processo, documento ou setor (ex.: SIAFE-Rio, SEI, '
+                  'SIGA, contrato e aditivos, TCE-RJ), ou vazio se não souber", "serve_a": "R1"}')
+
+CLAREZA = """CLAREZA (o leitor decide com pouco tempo):
+- Cada risco trata de UM assunto e de UMA data. Contratos de objetos diferentes ou com datas diferentes são riscos
+  diferentes: não junte "contratos que vencem" num risco só. Só agrupe o que é o mesmo serviço com a mesma data (ex.:
+  os 12 lotes de refeições que vencem no mesmo dia).
+- "titulo" e "decisao" são frases nominais curtas, sem "Está em aberto", "Está pendente" ou "Falta definir" (ex.: título
+  "Contrato de combustível da frota vence em 01/12/2026"; decisão "Continuidade do abastecimento da frota depois de
+  01/12/2026").
+- "causa" é o fato de hoje; "consequencia" é o que acontece se nada mudar. Uma ou duas frases cada, com o número e a
+  data que importam. Nada de sigla sem explicar na primeira vez.
+- "motivo_sensibilidade" diz quem PODE reagir e como, sempre no condicional ("pode gerar reação de famílias e da
+  imprensa"). Não afirme reação que ainda não ocorreu ("reagem", "reage de imediato") e não escreva que algo "expõe o
+  governador" ou "expõe o novo governo". Trate só de repercussão: fonte de receita e dado orçamentário vão em "causa".
+- Cada afirmação tem de estar num fato citado em "fatos". Não misture dados de assuntos diferentes para reforçar o risco."""
 
 PROMPT_ANALISE = """Você é analista de riscos da Equipe de Transição do governo do Estado do Rio de Janeiro. A partir
 do DIAGNÓSTICO da secretaria, dos VENCIMENTOS PRIORITÁRIOS e das CONTRADIÇÕES entre o que a secretaria informou e as
@@ -80,7 +99,7 @@ com pouco tempo.
 
 Entregue:
 - "situacao": 4 ou 5 frases que resumem como a secretaria está hoje e o que mais pesa na transição.
-- "riscos": 5 a 8 riscos. Cada risco liga uma causa a uma consequência concreta e cita os fatos que o sustentam
+- "riscos": 6 a 10 riscos. Cada risco liga uma causa a uma consequência concreta e cita os fatos que o sustentam
   ("fatos": ids F e V do material). Serviço essencial que pode parar pesa mais que obra de valor maior. Se o
   vencimento citado tem aditivo recente, registre em "em_curso".
 - Em cada risco, "sensibilidade_politica": a repercussão política da decisão (toda decisão tem): Alta quando a
@@ -89,12 +108,14 @@ Entregue:
   Média quando pode chegar lá; Baixa quando fica restrita à máquina. "motivo_sensibilidade" diz quem reage e como.
 - Em cada risco, "prazo": a data em que a decisão precisa estar tomada. Sem data no material, diga se é "antes da
   posse", "nas primeiras 72 horas" (o que não pode esperar a primeira semana de governo) ou "nos primeiros 100 dias".
-- "pedir": até 6 informações que faltam no material, em frase nominal (ex.: "Execução orçamentária por ação e
-  fonte"), cada uma dizendo a que risco se liga. Se houver CHECKLIST OBRIGATÓRIO com temas SEM INFORMAÇÃO, eles entram
-  aqui antes dos demais (cite o id, ex.: "C5").
+- "pedir": até 8 informações que faltam no material e que mudariam a leitura de um risco (confirmam, derrubam ou
+  dão o tamanho dele). É a pauta de investigação da equipe: seja específico (o dado, o período, o contrato), diga para
+  que serve e onde costuma estar. Tema do CHECKLIST OBRIGATÓRIO que está SEM INFORMAÇÃO entra aqui.
+
+""" + CLAREZA + """
 
 Numere os riscos R1, R2... Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
-{"situacao": ["..."], "riscos": [{"id": "R1", ...}], "pedir": [{"o_que": "...", "serve_a": "R1"}]}
+{"situacao": ["..."], "riscos": [{"id": "R1", ...}], "pedir": [""" + ESQUEMA_LACUNA + """]}
 Cada risco segue este formato: """ + ESQUEMA_RISCO
 
 PROMPT_AGENTE = """Você revisa a análise de riscos da transição de uma secretaria do Estado do Rio de Janeiro com um
@@ -104,11 +125,15 @@ Leia o material e a análise. Pelo seu olhar:
 1. "faltando": até 3 riscos que a análise não viu e que o material sustenta (cite os ids em "fatos"). Não repita
    riscos que já estão na análise. Se não faltar nada, devolva lista vazia.
 2. "exagerados": riscos da análise que o material não sustenta ou cujo impacto está superestimado, com o motivo.
+   Aponte também o risco que junta assuntos ou datas diferentes e a afirmação que não está nos fatos citados.
+3. "faltam": até 4 informações que NÃO estão no material e que, pelo seu olhar, são necessárias para fechar um risco
+   ou uma decisão (confirmam, derrubam ou dão o tamanho dele). É a pauta de investigação da equipe: seja específico
+   (o dado, o período, o contrato), diga para que serve e onde costuma estar. "serve_a" é o id do risco, ou vazio.
 
 """ + LINGUAGEM + """
 
 Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
-{{"faltando": [{esquema}], "exagerados": [{{"risco": "R2", "motivo": "..."}}]}}"""
+{{"faltando": [{esquema}], "exagerados": [{{"risco": "R2", "motivo": "..."}}], "faltam": [{lacuna}]}}"""
 
 PROMPT_CONTRA = """Você é o ADVOGADO DO DIABO na análise de riscos da transição de uma secretaria do Estado do Rio de
 Janeiro. Seu trabalho é tentar DERRUBAR cada risco da análise: o que no material mostra que ele está errado, exagerado,
@@ -120,11 +145,14 @@ Leia o material e a análise. Entregue:
    frases, com os fatos) e "fatos" (ids do material que sustentam a contestação). Risco que você não consegue
    contestar com o material NÃO entra aqui.
 2. "sustentados": os ids dos riscos que resistiram, em uma lista.
+3. "faltam": até 4 informações que NÃO estão no material e que confirmariam ou derrubariam de vez um risco (a prova
+   que falta). Seja específico (o dado, o período, o contrato), diga para que serve e onde costuma estar.
 
 """ + LINGUAGEM + """
 
 Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
-{"contestados": [{"risco": "R2", "motivo": "...", "fatos": ["F4"]}], "sustentados": ["R1", "R3"]}"""
+{"contestados": [{"risco": "R2", "motivo": "...", "fatos": ["F4"]}], "sustentados": ["R1", "R3"],
+"faltam": [""" + ESQUEMA_LACUNA + """]}"""
 
 PROMPT_CONSOLIDACAO = """Você consolida a análise de riscos da transição de uma secretaria do Estado do Rio de Janeiro
 com as revisões de agentes independentes, cada um com um olhar de gestão, e de um ADVOGADO DO DIABO, que tentou
@@ -133,13 +161,18 @@ derrubar cada risco.
 - Inclua um risco apontado como faltando só se ele citar fatos do material; junte riscos repetidos.
 - Ajuste ou retire um risco apontado como exagerado ou contestado só se o motivo se apoiar no material. Contestação
   sem fato não retira risco.
-- Mantenha 5 a 8 riscos, numerados de novo (R1, R2...).
+- Mantenha 6 a 10 riscos, numerados de novo (R1, R2...). Separe o risco que junta assuntos ou datas diferentes.
+- "pedir": junte as informações que faltam apontadas pela análise e pelos agentes ("faltam"): una as repetidas,
+  mantenha as específicas, até 15, as dos riscos mais graves primeiro. Cada uma com "o_que", "para_que", "onde" e
+  "serve_a" (o id NOVO do risco). Não invente lacuna que ninguém apontou.
 - Em cada risco, preencha "id_anterior": o id que ele tinha na ANÁLISE (ex.: "R3"); se veio de um agente como
   faltando, escreva "novo: " e o nome do agente (ex.: "novo: Fazenda e orçamento").
 - "respostas_as_revisoes": para CADA risco apontado como faltando, exagerado ou contestado, diga o que fez:
   {"agente": "...", "risco": "R2" ou o título do faltando, "decisao": "acatado|parcial|não acatado", "motivo": "uma
   frase, com os fatos"}. Nenhuma revisão fica sem resposta.
 """ + LINGUAGEM + """
+
+""" + CLAREZA + """
 
 Responda SOMENTE com JSON, no mesmo formato da análise, entre [INÍCIO DO JSON] e [FIM DO JSON], mais a lista
 "respostas_as_revisoes". Cada risco segue este formato, mais "id_anterior": """ + ESQUEMA_RISCO
@@ -198,7 +231,7 @@ def revisar_por_agentes(modelo, texto_material, analise, uso, modelos=None):
     def um(papel, modelo_agente):
         _, nome, criterio = papel
         sistema = PROMPT_CONTRA if nome == PAPEL_CONTRA else PROMPT_AGENTE.format(
-            papel=nome, criterio=criterio, esquema=ESQUEMA_RISCO)
+            papel=nome, criterio=criterio, esquema=ESQUEMA_RISCO, lacuna=ESQUEMA_LACUNA)
         mensagens = mensagens_compartilhadas(modelo_agente, sistema, pedido)
         try:
             r = chamar_json(modelo_agente, mensagens, 16000, etapa=f"agente: {nome}", uso_lista=uso)
@@ -366,10 +399,13 @@ def _sensibilidade(r):
     return {"sensibilidade": nivel, "motivo_sensibilidade": motivo}
 
 
-def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
+def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None, eventos=None):
     """Confere os fatos de cada risco, dá a firmeza (a melhor entre os fatos citados) e a prioridade:
     a dos vencimentos citados ou, sem eles, impacto × urgência pelo prazo. Risco sem fato conferido fica com
-    firmeza "sem comprovação" e prioridade no máximo Média. Devolve a lista ordenada."""
+    firmeza "sem comprovação" e prioridade no máximo Média. Devolve a lista ordenada.
+    "data_evento" é a data que está no material (o vencimento); "agir_ate" é a data-limite para agir: em contrato e
+    convênio, 30 dias antes do fim, também quando a data veio do texto do risco e casa com um evento do calendário.
+    "vencido" marca a data que já passou na data de corte."""
     base_dia = (_ler_data(data_corte) or (date.today(), False))[0] if data_corte else date.today()
     fatos = {i["id"]: i["rotulo"] for s in (diag or {}).get("secoes") or [] for i in s["itens"]}
     dossie_ids = {i["id"]: i for i in itens_incluidos(dossie or {})}
@@ -385,9 +421,12 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
         firmeza = min(firmezas, key=lambda x: FIRMEZA.index(x) if x in FIRMEZA else 99) if firmezas else "sem comprovação"
         impacto = r.get("impacto") if r.get("impacto") in IMPACTO_PONTOS else "Médio"
         ligados = [vencimentos[f] for f in validos if f in vencimentos]
+        data_evento = None
+        ligados = [e for e in ligados if e.get("agir_ate")]
         if ligados:
             nota = max(e.get("prioridade_nota") or 0 for e in ligados)
-            agir = min(e["agir_ate"] for e in ligados if e.get("agir_ate"))
+            primeiro = min(ligados, key=lambda e: e["agir_ate"])
+            agir, data_evento = primeiro["agir_ate"], primeiro["data"]
             prazo_de_fato = True
         else:
             prazo = str(r.get("prazo") or "")
@@ -398,6 +437,13 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
                     else POSSE + timedelta(days=2) if "72" in texto
                     else POSSE + timedelta(days=99) if "100 dias" in texto else None)
             prazo_de_fato = bool(lida) and firmeza != "sem comprovação"
+            if lida:
+                data_evento = lida[0]
+                # a data do risco é a de um contrato do calendário: vale a mesma antecedência de 30 dias
+                mesmo_dia = [e for e in eventos or [] if e.get("data") == lida[0] and e.get("agir_ate")
+                             and e.get("tipo") in ("Contrato", "Convênio")]
+                if mesmo_dia:
+                    agir = min(e["agir_ate"] for e in mesmo_dia)
             nota = IMPACTO_PONTOS[impacto] * (_urgencia((agir - base_dia).days) if agir else 1)
         if firmeza == "sem comprovação":
             nota = min(nota, 5)
@@ -408,17 +454,180 @@ def conferir_e_ordenar(resultado, diag, vencimentos, dossie, data_corte=None):
                        if r.get("categoria") in CATEGORIAS else "Continuidade de serviço",
                        "impacto": impacto, "chance": r.get("chance") if r.get("chance") in ("Alta", "Média", "Baixa")
                        else "Média", "fatos": validos, "fatos_invalidos": [f for f in citados if f not in validos],
-                       "firmeza": firmeza, "agir_ate": agir, "nota": nota, "prioridade": _rotulo_prioridade(nota),
+                       "firmeza": firmeza, "agir_ate": agir, "data_evento": data_evento,
+                       "vencido": bool(data_evento and prazo_de_fato and data_evento < base_dia),
+                       "nota": nota, "prioridade": _rotulo_prioridade(nota),
                        "horizonte": horizonte(agir), "prazo_de_fato": prazo_de_fato, **_sensibilidade(r)})
     riscos.sort(key=lambda r: (-r["nota"], r["agir_ate"] or date.max))
     novo_id = {r["id_original"]: f"R{k}" for k, r in enumerate(riscos, 1)}
     for r in riscos:
         r["id"] = novo_id[r["id_original"]]
-    pedir = [{"o_que": str(p.get("o_que") or "").strip(),
+    pedir = [{"o_que": str(p.get("o_que") or "").strip(), "para_que": str(p.get("para_que") or "").strip(),
+              "onde": str(p.get("onde") or "").strip(),
               "serve_a": re.sub(r"\bR\d+\b", lambda m: novo_id.get(m.group(0), m.group(0)), str(p.get("serve_a") or ""))}
-             for p in resultado.get("pedir") or [] if isinstance(p, dict) and str(p.get("o_que") or "").strip()][:6]
+             for p in resultado.get("pedir") or [] if isinstance(p, dict) and str(p.get("o_que") or "").strip()][:LIMITE_LACUNAS]
     situacao = [str(x).strip() for x in resultado.get("situacao") or [] if str(x).strip()][:5]
     return {"situacao": situacao, "riscos": riscos, "decisoes": [], "pedir": pedir}
+
+
+# --- INFORMAÇÕES QUE FALTAM (a pauta de investigação) -------------------------------------------------
+# A análise e os seis agentes apontam, cada um pelo seu olhar, o que falta no material para fechar um risco. A
+# consolidação junta e tira as repetidas. O código diz quem apontou cada uma (comparando com o que cada agente
+# escreveu, não com o que a consolidação diz), põe na frente os temas obrigatórios do checklist sem informação e
+# ordena pela prioridade do risco a que serve.
+
+LIMITE_LACUNAS = 15
+# onde costuma estar a informação de cada tema obrigatório (para a pauta, quando o tema ficou sem informação)
+ONDE_DO_CHECKLIST = {
+    "C1": "SIGA (contratos e aditivos) e a gestão de contratos da secretaria",
+    "C2": "SIGA e processos SEI das dispensas e emergenciais",
+    "C3": "SIAFE-Rio (execução por ação e fonte)", "C4": "SIAFE-Rio (restos a pagar inscritos e saldo)",
+    "C5": "TCE-RJ (consulta de processos) e o controle interno da secretaria",
+    "C6": "PGE-RJ e a assessoria jurídica da secretaria", "C7": "Transferegov.br e o setor de convênios",
+    "C8": "Setor de obras da secretaria, EMOP e o painel de obras do TCE-RJ",
+    "C9": "SIGRH e o Caderno de RH da SEPLAG", "C10": "PRODERJ e a área de TI da secretaria",
+}
+
+
+def lacunas_brutas(analise, revisoes):
+    """[(quem apontou, lacuna)] da análise e de cada agente, como vieram."""
+    brutas = [("Análise", p) for p in (analise or {}).get("pedir") or [] if isinstance(p, dict)]
+    for rev in revisoes or []:
+        if not rev.get("erro"):
+            brutas += [(rev["papel"], p) for p in rev.get("faltam") or [] if isinstance(p, dict)]
+    return [(quem, p) for quem, p in brutas if str(p.get("o_que") or "").strip()]
+
+
+def juntar_lacunas(resultado, analise, revisoes, cobertura=None):
+    """Fecha a lista de informações que faltam em resultado["pedir"]: quem apontou cada uma (por código), os temas
+    do checklist sem informação na frente, e a ordem pela prioridade do risco. Sem lista da consolidação, usa as
+    lacunas brutas, tirando as repetidas."""
+    brutas = lacunas_brutas(analise, revisoes)
+    lista = [dict(p) for p in resultado.get("pedir") or []]
+    if not lista:                                   # a consolidação não devolveu: junta por código
+        for _, p in brutas:
+            if not any(_parecido(p["o_que"], q["o_que"]) >= 0.5 for q in lista):
+                lista.append({"o_que": str(p["o_que"]).strip(), "para_que": str(p.get("para_que") or "").strip(),
+                              "onde": str(p.get("onde") or "").strip(), "serve_a": ""})
+    for p in lista:
+        quem = []
+        for papel, b in brutas:
+            if papel not in quem and _parecido(p["o_que"], b["o_que"]) >= 0.34:
+                quem.append(papel)
+        p["apontado_por"] = quem
+    obrigatorios = []
+    for c in cobertura or []:
+        if c.get("estado") == "não procurado" and not any(c["id"] in p.get("o_que", "") for p in lista):
+            obrigatorios.append({"o_que": c.get("pergunta") or c["tema"], "onde": ONDE_DO_CHECKLIST.get(c["id"], ""),
+                                 "serve_a": "",
+                                 "para_que": f"Tema obrigatório da transição ({c['tema'].lower()}) sem nenhuma "
+                                             "informação no material.",
+                                 "apontado_por": ["Checklist obrigatório"]})
+    nota = {r["id"]: (r.get("nota") or 0, k) for k, r in enumerate(resultado.get("riscos") or [])}
+
+    def ordem(p):
+        ids = re.findall(r"\bR\d+\b", p.get("serve_a") or "")
+        melhor = max((nota.get(i, (0, 99)) for i in ids), default=(0, 99), key=lambda x: (x[0], -x[1]))
+        return (-melhor[0], melhor[1], -len(p.get("apontado_por") or []))
+    resultado["pedir"] = (obrigatorios + sorted(lista, key=ordem))[:LIMITE_LACUNAS]
+    return resultado["pedir"]
+
+
+# --- CONFERÊNCIA FINAL DAS AFIRMAÇÕES -----------------------------------------------------------------
+# Depois da consolidação e da votação, um revisor lê cada risco final ao lado do TEXTO dos fatos que ele cita e
+# aponta o que o texto afirma sem apoio neles (dado de outro assunto, número trocado, conclusão que o fato não dá).
+# Ele devolve o campo corrigido; o código só aceita a correção que não traz número novo nem palavra de recomendação.
+# O que foi apontado e não pôde ser corrigido fica marcado no risco, para o relatório dizer.
+
+PROMPT_CONFERENCIA = """Você confere, risco a risco, a análise de riscos da transição de uma secretaria do Estado do
+Rio de Janeiro. Para cada risco você recebe os campos de texto e, em "fatos_citados", o TEXTO de cada fato que ele
+cita. Seu trabalho é achar o que o risco AFIRMA e os fatos citados NÃO dizem:
+- número, data, nome ou valor que não está nos fatos citados, ou que está diferente;
+- dado de outro assunto usado para reforçar o risco (ex.: questionamento sobre uma contratação aplicado a outro
+  contrato; déficit de uma carreira usado como falta de outra função);
+- conclusão que os fatos não dão (ex.: "não foi entregue" quando o fato diz só que o prazo venceu);
+- reação afirmada como fato ("a imprensa reage", "expõe o governador"): repercussão é sempre no condicional.
+Diferença de redação, arredondamento e resumo fiel NÃO são erro. Não acrescente nada ao risco.
+
+Para cada risco COM problema, devolva "sem_apoio" (o trecho e o motivo, em uma frase) e "corrigido": só os campos
+que mudam, reescritos para dizer apenas o que os fatos citados sustentam, com os mesmos números dos fatos. Risco sem
+problema não volta.
+
+""" + LINGUAGEM + """
+
+Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
+{"riscos": [{"id": "R2", "sem_apoio": [{"campo": "motivo_sensibilidade", "trecho": "...", "motivo": "..."}],
+"corrigido": {"motivo_sensibilidade": "..."}}]}"""
+
+CAMPOS_CONFERIDOS = ("titulo", "causa", "consequencia", "motivo_sensibilidade", "decisao", "em_curso")
+RE_NUM = re.compile(r"\d+(?:[.,/]\d+)*")
+
+
+def textos_dos_fatos(diag, vencimentos, dossie):
+    """{id: texto} de tudo que um risco pode citar: fatos do diagnóstico, vencimentos e itens do dossiê."""
+    textos = {i["id"]: i["texto"] for s in (diag or {}).get("secoes") or [] for i in s["itens"]}
+    for vid, e in (vencimentos or {}).items():
+        textos[vid] = (f"vence em {e['data']:%d/%m/%Y}: {e['evento']}" + (f" – {e['objeto']}" if e.get("objeto") else "")
+                       + (f" – {e['valor_texto']}" if e.get("valor_texto") else "")
+                       + (f". {e['consequencia']}" if e.get("consequencia") else "")
+                       + (f" {e['decisao']}" if e.get("decisao") else ""))
+    for i in itens_incluidos(dossie or {}):
+        textos.setdefault(i["id"], i.get("afirmacao", ""))
+    return textos
+
+
+def conferir_afirmacoes(modelo, resultado, diag, vencimentos, dossie, uso):
+    """A conferência final: altera os riscos de `resultado` com as correções aceitas e devolve o registro (o que foi
+    apontado, o que foi corrigido e o que foi recusado). Nunca derruba a rodada: sem resposta, nada muda."""
+    from .revisao import RE_PROIBIDAS
+    textos = textos_dos_fatos(diag, vencimentos, dossie)
+    riscos = resultado.get("riscos") or []
+    registro = {"modelo": modelo, "apontados": [], "corrigidos": [], "recusados": []}
+    if not riscos:
+        return registro
+    pedido = [{"id": r["id"], **{c: r.get(c, "") for c in CAMPOS_CONFERIDOS if r.get(c)},
+               "fatos_citados": {f: textos[f] for f in r.get("fatos") or [] if f in textos}} for r in riscos]
+    try:
+        dados = chamar_json(modelo, [{"role": "system", "content": PROMPT_CONFERENCIA},
+                                     {"role": "user", "content": json.dumps(pedido, ensure_ascii=False, indent=1)}],
+                            16000, etapa="conferência final das afirmações", uso_lista=uso, chave="riscos") or {}
+    except Exception as e:
+        registro["erro"] = f"{type(e).__name__}: {e}"[:200]
+        return registro
+    por_id = {r["id"]: r for r in riscos}
+    for item in dados.get("riscos") or []:
+        r = por_id.get(str((item or {}).get("id") or "").strip()) if isinstance(item, dict) else None
+        if not r:
+            continue
+        apontados = [{"campo": str(a.get("campo") or ""), "trecho": str(a.get("trecho") or "").strip(),
+                      "motivo": str(a.get("motivo") or "").strip()}
+                     for a in item.get("sem_apoio") or [] if isinstance(a, dict) and str(a.get("motivo") or "").strip()]
+        if not apontados:
+            continue
+        registro["apontados"].append({"risco": r["id"], "sem_apoio": apontados})
+        base_numeros = set(RE_NUM.findall(" ".join(textos.get(f, "") for f in r.get("fatos") or [])))
+        corrigidos = set()
+        for campo, novo in (item.get("corrigido") or {}).items():
+            if campo not in CAMPOS_CONFERIDOS or not isinstance(novo, str):
+                continue
+            antes, novo = str(r.get(campo) or ""), novo.strip()
+            permitidos = base_numeros | set(RE_NUM.findall(antes))
+            motivo = ("veio vazio" if not novo and campo != "motivo_sensibilidade" else
+                      "trouxe número que não está no risco nem nos fatos citados"
+                      if not set(RE_NUM.findall(novo)) <= permitidos else
+                      "trouxe palavra de recomendação" if RE_PROIBIDAS.search(novo) else
+                      "ficou bem mais longo" if len(novo) > max(len(antes) * 1.3, len(antes) + 60) else "")
+            if motivo:
+                registro["recusados"].append({"risco": r["id"], "campo": campo, "proposta": novo, "motivo": motivo})
+                continue
+            if novo != antes:
+                r[campo] = novo
+                corrigidos.add(campo)
+                registro["corrigidos"].append({"risco": r["id"], "campo": campo, "antes": antes, "depois": novo})
+        pendentes = [a for a in apontados if a["campo"] not in corrigidos]
+        if pendentes:
+            r["a_confirmar"] = pendentes          # apontado e não corrigido: o relatório diz
+    return registro
 
 
 # --- VOTAÇÃO ITEM A ITEM ---------------------------------------------------------------------------
@@ -442,9 +651,10 @@ Para CADA risco da lista, dê três votos, cada um com uma justificativa de uma 
   "Depois dos 100 dias". A posse é em 01/01/2027.
 - "sensibilidade": a REPERCUSSÃO POLÍTICA da decisão, Alta, Média ou Baixa. Toda decisão tem repercussão; diga
   qual e com que força. Na justificativa, diga QUEM REAGE E COMO (imprensa, MP, TCE, CGE, polícia, Alerj, municípios,
-  servidores, sindicatos, população atendida, fornecedores). Alta quando a reação vem no primeiro dia de governo ou
-  expõe o governador eleito.
-Vote pelo seu olhar, sem procurar consenso. Não invente fatos.
+  servidores, sindicatos, população atendida, fornecedores). Alta quando a reação pode vir no primeiro dia de governo.
+  Escreva a justificativa no condicional ("pode gerar reação de..."), só com o que está nos fatos DESTE risco; não
+  afirme reação que não ocorreu e não escreva que algo "expõe o governador".
+Se o risco traz "agir_ate", a janela é a dessa data. Vote pelo seu olhar, sem procurar consenso. Não invente fatos.
 
 """ + LINGUAGEM + """
 
@@ -549,9 +759,10 @@ def apurar_votos(resultado, votacoes, data_corte=None):
             r["impacto"] = eixos["impacto"]["nivel"]
         if "sensibilidade" in eixos:
             r["sensibilidade"] = eixos["sensibilidade"]["nivel"]
-            if r["sensibilidade"] == "Alta":
-                motivos = [j["por_que"] for j in eixos["sensibilidade"]["justificativas"] if j["voto"] == "Alta" and j["por_que"]]
-                r["motivo_sensibilidade"] = motivos[0] if motivos else r.get("motivo_sensibilidade", "")
+            if not r.get("motivo_sensibilidade"):     # o motivo já consolidado (e revisto) fica; sem ele, o do voto
+                motivos = [j["por_que"] for j in eixos["sensibilidade"]["justificativas"]
+                           if j["voto"] == r["sensibilidade"] and j["por_que"]]
+                r["motivo_sensibilidade"] = motivos[0] if motivos else ""
         if "janela" in eixos and not r.get("prazo_de_fato"):
             r["agir_ate"] = data_da_janela[eixos["janela"]["nivel"]]
             r["horizonte"] = eixos["janela"]["nivel"]

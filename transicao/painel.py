@@ -183,7 +183,7 @@ def painel_estadual(riscos, situacoes, eventos, cfg, linhas=None, orgao=None):
     return documentos.gerar_docx(md, meta), uso
 
 
-CAMPOS_PAINEL = ["id", "titulo", "decisao", "categoria", "agir_ate", "horizonte", "prazo_de_fato", "impacto",
+CAMPOS_PAINEL = ["id", "titulo", "decisao", "categoria", "agir_ate", "data_evento", "vencido", "horizonte", "prazo_de_fato", "impacto",
                  "sensibilidade", "motivo_sensibilidade", "prioridade", "nota", "firmeza", "em_jogo", "em_curso", "fatos"]
 
 

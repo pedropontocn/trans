@@ -420,18 +420,27 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     for fora in ("Riscos por prioridade", "### R1.", "Sobre este documento", "Como este documento foi feito", "teme aditivo"):
         assert fora not in texto, fora                                            # riscos e método ficam em outros produtos
     # produto 3: o relatório de riscos, em ordem de prazo e sem anexo
-    riscos = funcoes.relatorio_riscos(resultado, cobertura, nota)
-    ordem = [riscos.index(t) for t in ["## Situação", "**Lacunas: 1 de 10", "## Decisões urgentes, em ordem de prazo",
-                                       "| # | Ponto de decisão (risco) | Agir até |", "**R1. ",
-                                       "## Informações que faltam", "_Apoio à decisão gerado com IA (registro abc"]]
+    riscos = funcoes.relatorio_riscos(resultado, cobertura, nota, confianca={"nivel": "média", "por_que": ["x"]},
+                                      data_corte="04/11/2026")
+    ordem = [riscos.index(t) for t in ["- **O que é:**", "- **Confiança: MÉDIA**", "- **Como ler:**",
+                                       "## Pontos de decisão, em ordem de prazo",
+                                       "| # | Ponto de decisão | Prazo | Janela | Prioridade | Base |",
+                                       "## Os riscos, um a um", "**R1. ", "- **Fato:**", "- **Consequência:**",
+                                       "- **Ponto de decisão:**", "- **Prazo:**", "- **Peso:**",
+                                       "## Informações que faltam: a pauta de investigação",
+                                       "| # | O que falta | Para que serve | Onde procurar | Risco | Quem apontou |",
+                                       "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
+    assert "## Situação" not in riscos and "## Antes de ler" not in riscos                 # direto ao ponto
     assert "Decisões em aberto" not in riscos and "Pedir à secretaria" not in riscos and "Quem decide" not in riscos
-    assert len(re.findall(r"^\| R\d ", riscos, re.M)) == len(resultado["riscos"][:8])   # todos na tabela, até 8
+    assert len(re.findall(r"^\| R\d+ ", riscos, re.M)) == len(resultado["riscos"][:10])  # todos na tabela, até 10
     assert "Anexo" not in riscos and "aditivo irregular" not in riscos and "1. Contratos" not in riscos
-    datas = [d for d in re.findall(r"^\| R\d+ \| [^|]+ \| (\d\d/\d\d/\d{4}|–) \|", riscos, re.M)]
+    assert not re.search(r"\((?:[FVO]\d+(?:, )?)+\)", riscos)                              # sem códigos soltos no texto
+    datas = [d for d in re.findall(r"^\| R\d+ \| [^|]+ \| (\d\d/\d\d/\d{4}|sem data) \|", riscos, re.M)]
     from datetime import datetime
-    assert [datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "–"] == sorted(
-        datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "–")                 # em ordem de prazo
+    assert len(datas) == len(resultado["riscos"][:10])
+    assert [datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "sem data"] == sorted(
+        datetime.strptime(d, "%d/%m/%Y") for d in datas if d != "sem data")           # em ordem de prazo
     # produto 5: a auditoria legível
     auditoria = funcoes.auditoria_secretaria(resultado, d, None, "## Anexo 3 – Como este documento foi feito\nx")
     assert "## Todas as fontes do dossiê" in auditoria and auditoria.rstrip().endswith("x")
@@ -776,7 +785,8 @@ def test_quadro_antes_de_ler_diz_o_que_e_a_confianca_e_os_cortes(funcoes):
         {"cortados": [{"arquivo": "Controle_SECID.xlsx", "caracteres": 93411, "usados": 60000}]},
         ["⚠️ O relatório tem 500.000 caracteres e passou do limite de 400.000: o final (cerca de 20%) foi cortado e não "
          "entra na análise.", "3 endereço(s) de e-mail foram omitidos."])
-    assert cortes == ["Controle_SECID.xlsx (60 de 93 mil caracteres lidos)",
+    assert funcoes._tamanho(12337906) == "12,3 milhões" and funcoes._tamanho(331632) == "332 mil"
+    assert cortes == ["Controle_SECID.xlsx (lidos 60 mil de 93 mil caracteres)",
                       "O relatório tem 500.000 caracteres e passou do limite de 400.000: o final (cerca de 20%) foi cortado"]
     md = funcoes.antes_de_ler(conf, "04/11/2026", cortes)
     assert md.startswith("## Antes de ler\n- **O que é:**") and "data de corte 04/11/2026" in md

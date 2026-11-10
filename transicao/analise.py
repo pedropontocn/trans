@@ -47,6 +47,23 @@ def _so_contratos_da_secretaria(dossie):
             i["incluir"], i["fora_por"] = False, "contrato de base externa: só vale o que a secretaria informou"
 
 
+def nome_de_exibicao(nome):
+    """O nome da secretaria no título dos documentos. Quando o nome é só a sigla ("seeduc"), vira a sigla em
+    maiúsculas e o nome por extenso da LOA ("SEEDUC – Secretaria de Estado de Educação"). O resto fica como veio."""
+    limpo = (nome or "").strip()
+    sigla = limpo.upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9]{1,14}", sigla) or sigla not in entrada.siglas_conhecidas():
+        return limpo
+    try:
+        from . import caderno
+        loa, _ = caderno.orcamento()
+        uo = caderno._unidade_da_sigla(sigla)
+        por_extenso = (loa or {}).get("uos", {}).get(uo, {}).get("nome", "")
+    except Exception:
+        por_extenso = ""
+    return f"{sigla} – {por_extenso}" if por_extenso else sigla
+
+
 PRODUTOS = {"dossie": "Dossiê", "riscos": "Relatório de riscos", "painel": "Painel (dados)",
             "calendario": "Calendário", "caderno": "Caderno executivo"}
 
@@ -177,6 +194,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     esquema = esquema_de_modelos(principal, auxiliar, cfg.get("modelos_agentes"), cfg.get("familias"))
     modelos_agentes = esquema["agentes"]
     analise, revisoes, final, votacoes = {}, [], {}, []
+    conferencia_final = {"apontados": [], "corrigidos": [], "recusados": []}
     resultado = {"riscos": [], "decisoes": [], "situacao": [], "pedir": []}   # sem a análise de riscos nesta rodada
     if precisa["riscos"]:
         progresso("Analisando riscos e decisões...")
@@ -190,11 +208,16 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         revisoes = riscos.revisar_por_agentes(principal, material, analise, uso, modelos_agentes)
         progresso("Consolidando...")
         final = riscos.consolidar(principal, material, analise, revisoes, uso)
-        resultado = riscos.conferir_e_ordenar(final, diagnostico, vencimentos, dossie, cfg["data_corte"])
+        resultado = riscos.conferir_e_ordenar(final, diagnostico, vencimentos, dossie, cfg["data_corte"], eventos)
         # os seis agentes votam cada risco final: impacto, janela e sensibilidade política; o código apura
         progresso("Seis agentes votando, item a item, impacto, janela e sensibilidade política...")
         votacoes = riscos.votar_por_agentes(principal, material, resultado, uso, modelos_agentes)
         riscos.apurar_votos(resultado, votacoes, cfg["data_corte"])
+        # a pauta de investigação: o que a análise e cada agente disseram que falta, com quem apontou
+        riscos.juntar_lacunas(resultado, analise, revisoes, cobertura)
+        # a conferência final: cada risco ao lado do texto dos fatos que cita; o que não tem apoio é corrigido ou marcado
+        progresso("Conferindo cada risco com os fatos que ele cita...")
+        conferencia_final = riscos.conferir_afirmacoes(principal, resultado, diagnostico, vencimentos, dossie, uso)
         riscos.proveniencia(resultado["riscos"], revisoes, analise, final)   # quem apontou e quem contestou cada risco
         riscos.visoes_por_codigo(resultado["decisoes"], analise, revisoes)   # o que cada agente teme e valoriza, do bruto
     confianca = riscos.confianca(resumo_dos, resultado["riscos"], cobertura)
@@ -235,12 +258,16 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     texto_dossie = documentos.dossie_secretaria(
         resultado, diagnostico, None, eventos, dossie, confronto, checklist.markdown(cobertura), nota,
         cobertura=cobertura, contratos_criticos=contratos_criticos, antes_md=antes, orgao=nome)
-    texto_riscos = documentos.relatorio_riscos(resultado, cobertura, nota, antes_md=antes) if "riscos" in escolha else ""
+    cortes = documentos.cortes_de_leitura(manifesto, avisos)
+    texto_riscos = documentos.relatorio_riscos(
+        resultado, cobertura, documentos.nota_riscos(registro_id, modelos, revisoes, conferencia_final, revisao_texto),
+        diag=diagnostico, dossie=dossie, data_corte=cfg["data_corte"], confianca=confianca,
+        cortes=cortes) if "riscos" in escolha else ""
     revisao_texto["alertas_no_documento"] = revisao.alertas_do_documento(texto_riscos)   # a última conferência
     if "dossie" not in escolha:
         texto_dossie = ""
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
-            "assunto": nome, "tipo": "Dossiê da secretaria: como funciona hoje",
+            "assunto": nome_de_exibicao(nome), "tipo": "Dossiê da secretaria: como funciona hoje",
             "data": documentos._data_extenso(date.today()),
             "rodape_extra": f"apoio de IA, processamento automático, reg. {registro_id}"}
     para_json = lambda x: json.loads(json.dumps(x, ensure_ascii=False, default=str))
@@ -251,7 +278,8 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "confronto": confronto, "diagnostico": diagnostico,
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
-        "votacao_dos_agentes": votacoes,
+        "votacao_dos_agentes": votacoes, "conferencia_final": conferencia_final,
+        "lacunas_brutas": [{"quem": q, **l} for q, l in riscos.lacunas_brutas(analise, revisoes)],
         "riscos": para_json(resultado), "checklist": cobertura, "contratos_criticos": contratos_criticos,
         "metodo_md": documentos.markdown_metodo(registro_id, modelos, resumo_dos, confianca, numeros, neutralidade,
                                                revisoes, resultado),
@@ -262,6 +290,8 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     }
     texto_auditoria = documentos.auditoria_secretaria(resultado, dossie, confronto, registro["metodo_md"],
                                                       checklist.markdown(cobertura), diagnostico)
+    if precisa["riscos"]:
+        texto_auditoria += "\n\n" + documentos.auditoria_da_conferencia(conferencia_final, registro["lacunas_brutas"])
     registro["auditoria_md"] = texto_auditoria
     return {"dossie_docx": documentos.gerar_docx(texto_dossie, meta) if texto_dossie else None,
             "dossie_md": texto_dossie,
@@ -296,8 +326,9 @@ LEIA_ME_PRODUTOS = {
               "  repercussão política, na mesma régua para todas), prontos para o painel unificado.",
     "dossie": "- dossies/: o dossiê de cada secretaria: como ela funciona hoje (panorama, organograma, programas,\n"
               "  contratos, pessoal, orçamento, passivos), primeiro o que ela informou, depois as fontes oficiais.",
-    "riscos": "- riscos/: o relatório de riscos de cada secretaria, em até 3 páginas (riscos com prazo, janela,\n"
-              "  prioridade, sensibilidade política e revisão dos agentes; informações que faltam).",
+    "riscos": "- riscos/: o relatório de riscos de cada secretaria: a tabela dos pontos de decisão em ordem de prazo,\n"
+              "  cada risco em linhas (fato, consequência, ponto de decisão, prazo, o que está contestado, fontes) e a\n"
+              "  pauta de investigação (informações que faltam, com para que servem, onde procurar e quem apontou).",
     "calendario": "- calendarios/: o calendário de vencimentos de cada secretaria em Excel, só com as datas que ela\n"
                   "  informou; a aba Prioridades vem primeiro.",
     "caderno": "- cadernos/: o caderno executivo de cada secretaria em Word (uma ficha por programa, com o orçamento da\n"

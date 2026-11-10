@@ -187,9 +187,15 @@ class LLMFalso:
             "decisoes": [{"id": "Q1", "pergunta": "Retomar as licitações agora ou esperar?", "opcoes": [
                 {"nome": "Retomar", "o_que_e": "publicar de novo"}, {"nome": "Esperar", "o_que_e": "deixar à nova gestão"}],
                 "o_que_falta_saber": "preços atualizados", "riscos": ["R1"]}],
-            "pedir": [{"o_que": "Lista de contratos", "serve_a": "R1"}]}
+            "pedir": [{"o_que": "Lista de contratos vigentes com datas de término", "serve_a": "R1",
+                       "para_que": "Dizer quais serviços ficam sem cobertura.", "onde": "SIGA"}]}
         self.revisao_agente = {"faltando": [], "exagerados": [{"risco": "R2", "motivo": "sem base"}],
-                               "decisoes": [{"decisao": "Q1", "opcao": 1, "teme": "custo", "valoriza": "rapidez"}]}
+                               "decisoes": [{"decisao": "Q1", "opcao": 1, "teme": "custo", "valoriza": "rapidez"}],
+                               "faltam": [{"o_que": "Lista dos contratos vigentes, com as datas de término",
+                                           "para_que": "Medir o alcance.", "onde": "SIGA", "serve_a": "R1"}]}
+        self.faltam_do_contra = [{"o_que": "Parecer da PGE sobre a retomada das licitações", "serve_a": "R1",
+                                  "para_que": "Confirmaria ou derrubaria o risco.", "onde": "SEI"}]
+        self.conferencia_final = {"riscos": []}    # a conferência final das afirmações: nada a corrigir
         self.agentes_que_falham = set()
         self.consolidacao_riscos = None            # None: a consolidação devolve a análise com as visões
         self.temas = {"temas": [{"titulo": "Contratos vencendo", "descricao": "Vários contratos vencem.",
@@ -340,7 +346,7 @@ class LLMFalso:
                 raise RuntimeError("agente fora do ar")
             return self._resp("[INÍCIO DO JSON]" + json.dumps({
                 "contestados": [{"risco": "R2", "motivo": "o risco inventado não tem fato no material", "fatos": ["F1"]}],
-                "sustentados": ["R1"],
+                "sustentados": ["R1"], "faltam": self.faltam_do_contra,
                 "decisoes": [{"decisao": "Q1", "opcao": 1, "teme": "licitar sem caixa", "valoriza": ""}]}) + "[FIM DO JSON]")
         if "Você revisa a análise de riscos" in contexto:
             papel = re.search(r"VOCÊ É: ([^.]+)\.", contexto).group(1)
@@ -349,6 +355,9 @@ class LLMFalso:
             if papel in self.agentes_que_falham:
                 raise RuntimeError("agente fora do ar")
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.revisao_agente) + "[FIM DO JSON]")
+        if "Você confere, risco a risco" in sistema:
+            self.pedido_conferencia = ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.conferencia_final) + "[FIM DO JSON]")
         if "Você consolida a análise de riscos" in sistema:
             self.pedido_consolidacao = ultimo
             final = self.consolidacao_riscos or dict(
