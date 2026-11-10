@@ -76,3 +76,34 @@ def test_varios_arquivos_da_mesma_secretaria_viram_uma_so(llm):
     seeduc = next(o for o in entrada.orgaos_do_envio(envio) if o["nome"] == "SEEDUC")
     texto, manifesto = seeduc["ler"]()
     assert texto.count("# ARQUIVO:") == 3 and len(manifesto["lidos"]) == 3
+
+
+def test_planilha_grande_corta_por_aba_e_o_total_fica_no_limite(llm):
+    # a planilha da SEEDUC tinha 12 milhões de caracteres: o corte no fim deixava só as primeiras abas
+    from transicao import entrada
+    grande = "## Escolas\n| Escola | Município |\n| --- | --- |\n" + "".join(
+        f"| Escola {k} | Município {k % 92} |\n" for k in range(40000))
+    abas = grande + "\n## Contratos\n| Nº | Objeto |\n| --- | --- |\n| 1 | Vigilância |\n" + \
+        "\n## Programas\n| Programa | Situação |\n| --- | --- |\n" + "".join(f"| Programa {k} | ativo |\n" for k in range(9000))
+    manifesto = {"lidos": [], "pulados": [], "erros": [], "cortados": []}
+    textos = [("Relatório.pdf", "Relatório da secretaria. " * 4000), ("Modelo_Integrado.xlsx", abas)]
+    texto = entrada.montar_material(textos, manifesto, 200_000)
+    assert len(texto) <= 200_000
+    assert "|1|Vigilância|" in texto and "|Programa 0|ativo|" in texto           # todas as abas entram
+    assert "Relatório da secretaria." in texto
+    corte = manifesto["cortados"][0]
+    assert corte["arquivo"] == "Modelo_Integrado.xlsx"
+    assert {a["aba"] for a in corte["abas_cortadas"]} == {"Escolas", "Programas"}  # a pequena entrou inteira
+    assert texto.count("[… aba cortada para caber no limite:") == 2
+    # cada corte é no fim de uma linha: nenhuma linha de tabela pela metade
+    assert all(l.endswith("|") for l in texto.split("\n") if l.startswith("|"))
+
+
+def test_arquivos_soltos_dividem_o_limite(llm, monkeypatch):
+    # no envio de arquivos soltos, o último arquivo não some inteiro: cada um tem a sua parte
+    from transicao import entrada
+    monkeypatch.setattr(entrada, "LIMITE_CARACTERES", 50_000)
+    llm.texto_relatorio = "Texto longo do relatório. " * 5000
+    texto, manifesto = entrada.orgaos_do_envio([("SEEDUC - a.docx", b"a"), ("SEEDUC - b.docx", b"b")])[0]["ler"]()
+    assert len(texto) <= 50_000 and texto.count("# ARQUIVO:") == 2
+    assert manifesto["cortados"] and {l["arquivo"] for l in manifesto["lidos"]} == {"SEEDUC - a.docx", "SEEDUC - b.docx"}

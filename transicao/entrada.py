@@ -296,21 +296,55 @@ def ler_documentos(drive, orgao, converter, limite_total):
             except zipfile.BadZipFile:
                 manifesto["erros"].append({"arquivo": origem, "erro": "zip corrompido"})
 
-    # Antes de cortar, tira o que ocupa espaço sem trazer informação: células vazias de planilha e trechos repetidos
-    # entre arquivos. Depois divide o limite: relatórios e resumos primeiro, e quem precisa de menos que a sua parte
-    # deixa a sobra para os outros.
     textos.sort(key=lambda t: (not PRIORIDADE_NOME.search(t[0]), t[0]))
+    return montar_material(textos, manifesto, limite_total), manifesto
+
+
+RE_ABA = re.compile(r"(?m)^(?=## )")
+EXTENSOES_PLANILHA = (".xlsx", ".xls", ".csv")
+
+
+def cortar(origem, texto, cota):
+    """Corta um arquivo na sua cota. Planilha corta por aba: cada aba recebe uma parte (a pequena entra inteira),
+    para nenhuma ficar de fora porque as primeiras eram grandes; o corte é sempre no fim de uma linha. Devolve o
+    texto e, para planilha, as abas cortadas."""
+    abas = [a for a in RE_ABA.split(texto) if a.strip()]
+    if not origem.lower().endswith(EXTENSOES_PLANILHA) or len(abas) < 2:
+        return texto[:cota].rsplit("\n", 1)[0] + "\n\n[… cortado para caber no limite]", []
+    marca = "\n[… aba cortada para caber no limite: {usados:,} de {total:,} caracteres]\n"
+    folga = len(marca) + 40
+    cotas = dividir_limite([len(a) for a in abas], max(cota - folga * len(abas), 2000 * len(abas)), pesos_iguais=True)
+    saida, cortadas = [], []
+    for aba, q in zip(abas, cotas):
+        if len(aba) <= q:
+            saida.append(aba)
+            continue
+        pedaco = aba[:q].rsplit("\n", 1)[0]
+        nome = aba.split("\n", 1)[0].removeprefix("## ").strip()
+        cortadas.append({"aba": nome, "caracteres": len(aba), "usados": len(pedaco)})
+        saida.append(pedaco + marca.format(usados=len(pedaco), total=len(aba)).replace(",", "."))
+    return "".join(saida), cortadas
+
+
+def montar_material(textos, manifesto, limite_total):
+    """Junta os arquivos de uma secretaria no limite. Antes de cortar, tira o que ocupa espaço sem trazer
+    informação: células vazias de planilha e trechos repetidos entre arquivos. Depois divide o limite: o primeiro
+    (relatório ou resumo) com peso dobrado, e quem precisa de menos que a sua parte deixa a sobra para os outros.
+    O cabeçalho de cada arquivo e as marcas de corte entram na conta, para o total ficar dentro do limite."""
     textos = [(origem, compactar_tabelas(texto)) for origem, texto in textos]
     textos = remover_repetidos(textos, manifesto)
-    cotas = dividir_limite([len(t) for _, t in textos], limite_total)
+    cabecalhos = sum(len(f"# ARQUIVO: {o}\n\n") + 2 for o, _ in textos)
+    cotas = dividir_limite([len(t) for _, t in textos], max(limite_total - cabecalhos - 200 * len(textos), 0))
     partes = []
     for (origem, texto), cota in zip(textos, cotas):
         if len(texto) > cota:
-            manifesto["cortados"].append({"arquivo": origem, "caracteres": len(texto), "usados": cota})
-            texto = texto[:cota] + "\n\n[… cortado para caber no limite]"
+            original = len(texto)
+            texto, abas = cortar(origem, texto, cota)
+            manifesto["cortados"].append({"arquivo": origem, "caracteres": original, "usados": len(texto),
+                                          **({"abas_cortadas": abas} if abas else {})})
         manifesto["lidos"].append({"arquivo": origem, "caracteres": len(texto)})
         partes.append(f"# ARQUIVO: {origem}\n\n{texto}")
-    return "\n\n".join(partes), manifesto
+    return "\n\n".join(partes)
 
 
 RE_CELULA_VAZIA = re.compile(r"^(nan|none|null|nat|unnamed: ?\d+|-+|:?-+:?)$", re.I)
@@ -372,10 +406,10 @@ def remover_repetidos(textos, manifesto):
     return saida
 
 
-def dividir_limite(tamanhos, limite, minimo=2000):
+def dividir_limite(tamanhos, limite, minimo=2000, pesos_iguais=False):
     """Divide o limite entre os arquivos: quem precisa de menos que a parte igual fica com o que precisa, e a sobra
-    é dividida entre os maiores. Os primeiros da lista (relatórios) recebem o dobro do peso."""
-    pesos = [2 if k == 0 else 1 for k in range(len(tamanhos))]
+    é dividida entre os maiores. O primeiro da lista (relatório) recebe o dobro do peso, salvo `pesos_iguais`."""
+    pesos = [2 if k == 0 and not pesos_iguais else 1 for k in range(len(tamanhos))]
     cotas, pendentes, restante = [0] * len(tamanhos), set(range(len(tamanhos))), limite
     while pendentes:
         peso_total = sum(pesos[i] for i in pendentes)
@@ -505,18 +539,18 @@ def orgaos_do_envio(arquivos, cada_pasta=False):
             grupos[s] = [r for n in nomes for r in grupos.pop(n)]
 
     def ler(itens):
-        partes, manifesto = [], {"lidos": [], "pulados": [], "erros": [], "cortados": []}
+        textos, manifesto = [], {"lidos": [], "pulados": [], "erros": [], "cortados": []}
         for r in itens:
             n_erros = len(manifesto["erros"])
             texto = texto_do_arquivo(converter_arquivo, r["arquivo"], r["conteudo"], r["arquivo"], manifesto)
             if texto.strip():
                 del manifesto["erros"][n_erros:]
-                partes.append(f"# ARQUIVO: {r['arquivo']}\n\n{texto}")
-                manifesto["lidos"].append({"arquivo": r["arquivo"], "caracteres": len(texto)})
+                textos.append((r["arquivo"], texto))
                 _guardar_secao3(manifesto, r["arquivo"], r["arquivo"], r["conteudo"])
             elif len(manifesto["erros"]) == n_erros:
                 manifesto["pulados"].append({"arquivo": r["arquivo"], "motivo": _motivo_sem_texto(r["arquivo"])})
-        return "\n\n".join(partes), manifesto
+        # vários arquivos: o mesmo limite dividido entre eles (sem isso, o corte no fim levaria o último inteiro)
+        return montar_material(textos, manifesto, LIMITE_CARACTERES), manifesto
 
     def previa(itens):
         r = itens[0]

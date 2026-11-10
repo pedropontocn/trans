@@ -106,7 +106,7 @@ def test_transcricao_entra_no_texto_do_orgao_e_no_manifesto(llm):
     # pptx: 2 slides (a figura repetida no slide 3 é a mesma: 1 transcrição); png: 1; pdf: 2
     assert lidas["transcritas"] == 4 and len(llm.imagens_vistas) == 4
     assert all(u.startswith("data:image/jpeg;base64,") for u in llm.imagens_vistas)
-    assert texto.count("(transcrição de imagem)") == 4 and "| Ponte do Rio | R$ 1.234.567,89 |" in texto
+    assert texto.count("(transcrição de imagem)") == 4 and "|Ponte do Rio|R$ 1.234.567,89|" in texto
     assert "### Slide 1 (transcrição de imagem)" in texto and "### Página 2 (transcrição de imagem)" in texto
     assert {l["arquivo"] for l in manifesto["lidos"]} == {a for a, _ in envio}       # a imagem solta também
     assert set(manifesto["com_imagem_transcrita"]) == {a for a, _ in envio}
