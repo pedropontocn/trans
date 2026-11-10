@@ -28,6 +28,27 @@ RE_PROIBIDAS = re.compile("|".join(PROIBIDAS), re.I)
 RE_NUMEROS = re.compile(r"\d+(?:[.,/]\d+)*")
 RE_REFS = re.compile(r"\b[FVOCRQ]\d{1,3}\b")
 RE_CORTE = re.compile(r"…|\.\.\.\s*$")
+# repercussão política: reação que ainda não ocorreu não é fato; e o documento não diz quem fica exposto
+RE_REACAO_AFIRMADA = re.compile(r"\b(reage|reagem|reagirá|reagirão|expõe|expõem|exporá|exporão)\b", re.I)
+_EXPOE = (r"(?:pode[m]? expor|exp[õo]e[m]?|expor[áã]o?)\s+(?:diretamente\s+)?(?:o|a)\s+"
+          r"(?:novo governo|governador eleito|nova gestão|governador)\b")
+RE_EXPOE_ORACAO = re.compile(r",\s*[^,.;()]*?" + _EXPOE + r"[^.;(]*?(?=\s*[.;(]|$)", re.I)   # a oração, desde a vírgula
+RE_EXPOE_GOVERNO = re.compile(_EXPOE + r"[^.;(]*?(?=\s*[.;(]|$)", re.I)
+_CONDICIONAL = {"reage": "pode reagir", "reagem": "podem reagir", "reagirá": "pode reagir", "reagirão": "podem reagir",
+                "expõe": "pode expor", "expõem": "podem expor", "exporá": "pode expor", "exporão": "podem expor"}
+
+
+def condicional(texto):
+    """A repercussão no condicional, por código: tira "expõe o governador/novo governo" e troca a reação afirmada
+    ("reagem") pela possível ("podem reagir"). Não muda número, nome nem data."""
+    texto = RE_EXPOE_ORACAO.sub("", str(texto or ""))
+    texto = RE_EXPOE_GOVERNO.sub("pode gerar repercussão política", texto)   # sem vírgula antes: fica a frase
+
+    def troca(m):
+        novo = _CONDICIONAL[m.group(0).lower()]
+        return novo.capitalize() if m.group(0)[0].isupper() else novo
+    texto = RE_REACAO_AFIRMADA.sub(troca, texto)
+    return re.sub(r"\s+([.,;])", r"\1", re.sub(r"\s{2,}", " ", texto)).strip(" ,;")
 
 
 def alertas(texto):
@@ -94,6 +115,8 @@ Regras de tom (valem para todo campo):
 - Campo "decisao": o ponto que está pendente de decisão, em frase afirmativa e neutra, sem listar caminhos e sem
   pergunta (ex.: "Destino dos sete contratos de viaturas que terminam entre 14/11/2026 e 09/01/2027.").
 - Campo "pedir": a informação que falta no material, em frase nominal (ex.: "Execução orçamentária por ação e fonte.").
+- Campo "motivo_sensibilidade": a repercussão política, sempre no condicional ("pode gerar reação de famílias e da
+  imprensa"). Não afirme reação que não ocorreu ("reagem") e tire "expõe o governador" ou "expõe o novo governo".
 - Frases completas, de até 25 palavras. Nada cortado no meio, nada de reticências.
 
 Regras de fidelidade (o sistema confere e recusa a reescrita que quebrar uma delas):
@@ -133,6 +156,14 @@ def revisar_texto(modelo, resultado, uso, pistas=None):
         else:
             _gravar(resultado, chave, depois.strip())
             registro["aceitos"].append({"campo": chave, "antes": textos[chave], "depois": depois.strip()})
+    # a repercussão no condicional, por código, mesmo que a reescrita não tenha vindo ou tenha sido recusada
+    registro["condicional"] = []
+    for r in resultado.get("riscos") or []:
+        antes = str(r.get("motivo_sensibilidade") or "")
+        depois = condicional(antes)
+        if depois != antes:
+            r["motivo_sensibilidade"] = depois
+            registro["condicional"].append({"campo": f"{r['id']}.motivo_sensibilidade", "antes": antes, "depois": depois})
     registro["alertas_depois"] = {k: a for k, t in campos(resultado).items() if (a := alertas(t))}
     return registro
 

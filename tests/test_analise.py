@@ -122,8 +122,10 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert not any(t.startswith(("Riscos por prioridade", "Sobre este documento", "Anexo 3")) for t in textos)
     # produto 3: o relatório de riscos, focado nas decisões urgentes, sem anexo
     riscos_txt = [p.text for p in docx.Document(io.BytesIO(r["riscos_docx"])).paragraphs]
-    for titulo in ["Situação", "Decisões urgentes, em ordem de prazo", "Informações que faltam"]:
+    for titulo in ["Pontos de decisão, em ordem de prazo", "Os riscos, um a um",
+                   "Informações que faltam: a pauta de investigação"]:
         assert titulo in riscos_txt, titulo
+    assert "Situação" not in riscos_txt and "Antes de ler" not in riscos_txt       # direto ao ponto
     assert not any(t.startswith(("1. Contratos", "Anexo")) for t in riscos_txt)
     # produto 5: a auditoria é só o registro JSON, com a versão legível dentro dele
     assert "auditoria_docx" not in r
@@ -151,11 +153,12 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert reg["modelos"]["neutralidade"] == CFG["modelo_auxiliar"] and len(reg["modelos"]["agentes"]) == 6
     # o olhar de cada agente fica no registro (visões montadas do que o agente disse, não da paráfrase)
     assert reg["riscos"]["decisoes"] == []                 # sem opções nem caminhos: o relatório não sugere
-    assert "revisao_do_texto" in reg["verificacao"] and "Revisão de tom" in r["riscos_md"]
+    assert "revisao_do_texto" in reg["verificacao"] and "revisão de tom: 1 trecho(s) reescrito(s)" in r["riscos_md"]
     # a revisão do texto reescreveu o ponto de decisão no tom de análise (sem listar caminhos)
     assert "Destino das licitações adiadas" in r["riscos_md"] and "Retomar ou cancelar" not in r["riscos_md"]
     assert reg["verificacao"]["revisao_do_texto"]["aceitos"][0]["campo"].endswith(".decisao")
-    assert "Advogado do diabo contesta: o risco inventado não tem fato no material" in r["riscos_md"]
+    # a contestação que ficou sem resposta da consolidação aparece como ponto contestado
+    assert "- **Ponto contestado:** Advogado do diabo: o risco inventado não tem fato no material." in r["riscos_md"]
     assert "- Fazenda e orçamento vê exagero: sem base" in r["auditoria_md"]
     # votação item a item: seis votantes; o código apurou impacto, janela e repercussão de cada risco
     assert sorted(llm.votantes) == sorted(p[1] for p in __import__("transicao.riscos", fromlist=["x"]).PAPEIS)
@@ -163,7 +166,8 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert r1["votos"]["impacto"]["nivel"] == "Alto" and r1["votos"]["impacto"]["votos"] == 6
     assert r1["votos"]["sensibilidade"]["nivel"] == "Alta" and r1["votos"]["sensibilidade"]["votos"] == 5
     assert r1["votos"]["sensibilidade"]["divergencia"][0]["papel"] == "Fazenda e orçamento"   # votou Baixa: 2 níveis longe
-    assert "Alta 5/6 ⚠" in r["riscos_md"] and "Divergência: Fazenda e orçamento vê sensibilidade baixa" in r["riscos_md"]
+    assert "repercussão política alta ⚠" in r["riscos_md"] and "5/6" not in r["riscos_md"]   # o placar fica na auditoria
+    assert "- **Ponto contestado:** Fazenda votou repercussão política baixa" in r["riscos_md"]
     assert reg["votacao_dos_agentes"] and len(reg["votacao_dos_agentes"]) == 6
     # a consolidação falsa não informa id_anterior: o casamento é pelo título
     assert all(x["revisao"]["agentes"] == 6 for x in riscos)
@@ -538,10 +542,15 @@ def test_antes_de_ler_abre_dossie_e_relatorio(llm):
     from transicao import analise
     manifesto = {"cortados": [{"arquivo": "Controle.xlsx", "caracteres": 93411, "usados": 60000}]}
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG, manifesto=manifesto)
-    for md in (r["dossie_md"], r["riscos_md"]):
-        assert md.startswith("## Antes de ler\n- **O que é:**")
-        assert "**Confiança desta análise:" in md and "Controle.xlsx (60 de 93 mil caracteres lidos)" in md
-    assert "sem revisão da equipe: confira antes de usar" not in r["riscos_md"].split("## Situação")[1]   # não repete no fim
+    corte = "Controle.xlsx (lidos 60 mil de 93 mil caracteres)"
+    assert r["dossie_md"].startswith("## Antes de ler\n- **O que é:**")
+    assert "**Confiança desta análise:" in r["dossie_md"] and corte in r["dossie_md"]
+    # o relatório de riscos abre em três linhas (o que é, confiança, como ler), mais o material cortado
+    riscos_md = r["riscos_md"]
+    abertura = riscos_md.split("## Pontos de decisão")[0].strip().split("\n")
+    assert len(abertura) == 4 and abertura[0].startswith("- **O que é:**") and abertura[2].startswith("- **Como ler:**")
+    assert abertura[1].startswith("- **Confiança: ") and corte in abertura[3]
+    assert riscos_md.count("confira antes de usar") == 1 and riscos_md.count("Mede quanto a análise") == 1   # não repete
 
 
 def test_pesquisa_do_estado_e_reaproveitada_no_mesmo_dia(llm, tmp_path):

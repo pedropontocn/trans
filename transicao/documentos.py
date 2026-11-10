@@ -283,7 +283,17 @@ def _desenhar_tabela(alvo, linhas):
         medias.append(max(7 if curta else 12, cabecalho_len + 2, min(60, sum(textos) / len(textos)),
                           min(26, palavra + 8 if numerica else palavra * 1.5 + 3)))
     total = sum(medias)
-    larguras = [Cm(17 * m / total) for m in medias]
+    cm = [17 * m / total for m in medias]
+    # nenhuma coluna mais estreita que a sua maior palavra (cabeçalho ou célula): "Prioridade" e "26/10/2026" não
+    # quebram no meio; a diferença sai das colunas mais largas
+    minimos = [min(4.5, 0.42 + 0.185 * max((len(w) for l in linhas if c < len(l)
+                                             for w in re.findall(r"[^\s/]+(?:/[^\s/]+)*", re.sub(r"[*_]|\]\([^)]*\)", "", l[c]))),
+                                            default=0)) for c in range(ncol)]
+    falta = sum(max(0, m - x) for m, x in zip(minimos, cm))
+    sobra = sum(max(0, x - m) for m, x in zip(minimos, cm))
+    if falta and sobra > falta:
+        cm = [m if x < m else x - (x - m) * falta / sobra for m, x in zip(minimos, cm)]
+    larguras = [Cm(x) for x in cm]
     tabela.autofit = False
     for c, coluna in enumerate(tabela.columns):
         coluna.width = larguras[c]
@@ -787,12 +797,17 @@ def antes_de_ler(confianca, data_corte, cortes=None):
     return "\n".join(linhas)
 
 
+def _tamanho(n):
+    """331632 → "332 mil"; 12337906 → "12,3 milhões"."""
+    return f"{n / 1e6:.1f}".replace(".", ",") + " milhões" if n >= 1e6 else f"{round(n / 1000)} mil"
+
+
 def cortes_de_leitura(manifesto=None, avisos=None):
     """O que foi cortado do material da secretaria, em frases curtas: arquivos de uma pasta (pelo manifesto) e o
     relatório que passou do limite (pelos avisos da limpeza)."""
     cortes = []
     for c in (manifesto or {}).get("cortados") or []:
-        cortes.append(f"{c['arquivo']} ({c['usados'] // 1000} de {c['caracteres'] // 1000} mil caracteres lidos)")
+        cortes.append(f"{c['arquivo']} (lidos {_tamanho(c['usados'])} de {_tamanho(c['caracteres'])} caracteres)")
     for a in avisos or []:
         if "foi cortado" in a:
             cortes.append(re.sub(r"^⚠️\s*", "", a).rstrip(". ").replace(" e não entra na análise", ""))
@@ -1159,47 +1174,206 @@ def _divergencias(r):
     return "; ".join(partes)
 
 
-def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=8, limite_pedir=5, antes_md=""):
-    """Produto 3, o relatório de riscos, em até 3 páginas: situação; tabela dos pontos de decisão (prazo, janela,
-    prioridade, repercussão política, base); cada risco em um parágrafo; as informações que faltam. Analisa; não
-    recomenda, não sugere caminho nem responsável. As visões e objeções completas ficam no registro de auditoria."""
-    from .checklist import linha_essencial
+RE_IDS_ENTRE_PARENTESES = re.compile(r"\s*\((?:\s*[FVOCER]\d{1,3}\s*(?:,|;|\be\b)?\s*)+\)")
+PAPEL_CURTO = {"Fazenda e orçamento": "Fazenda", "Controle e jurídico (TCE-RJ, PGE, MPRJ)": "Controle",
+               "Área-fim e usuário do serviço": "Área-fim", "Operação e servidores": "Operação",
+               "Nova gestão: prioridades e articulação": "Nova gestão", "Advogado do diabo": "Advogado do diabo",
+               "Análise": "Análise", "Checklist obrigatório": "Checklist"}
+LEGENDA_BASE = {"fonte oficial ✔": "dado conferido em fonte oficial", "fonte pública ✔": "conferido em fonte pública",
+                "fonte não conferida": "fonte pública que não pôde ser conferida", "órgão": "declarado pela secretaria",
+                "imprensa": "só em notícia", "sem comprovação": "sem fonte: confirmar antes de usar"}
+
+
+def _sem_ids(texto):
+    """O texto sem as listas de códigos entre parênteses ("(F16, V14)"): no relatório, a fonte vai por extenso."""
+    return re.sub(r"\s+([.,;])", r"\1", RE_IDS_ENTRE_PARENTESES.sub("", str(texto or ""))).strip()
+
+
+def _frase(texto):
+    texto = _sem_ids(texto).rstrip(". ")
+    return texto + "." if texto else ""
+
+
+def fontes_do_risco(r, diag, dossie, limite=4):
+    """De onde vêm os fatos do risco, por extenso: "material da secretaria" e as fontes públicas com data e link."""
+    from .pesquisa import itens_incluidos
+    fatos = {i["id"]: i for s in (diag or {}).get("secoes") or [] for i in s["itens"]}
+    itens = {i["id"]: i for i in itens_incluidos(dossie or {})}
+    nomes, secretaria = [], False
+    for f in r.get("fatos") or []:
+        item = itens.get(f) or itens.get((fatos.get(f) or {}).get("origem_item") or "")
+        if f.startswith("V") or (f in fatos and not fatos[f].get("url") and not item):
+            secretaria = True
+            continue
+        if item:
+            nome = str(item.get("fonte") or "fonte pública").strip() + (f", {item['data_fonte']}" if item.get("data_fonte") else "")
+            nome = f"[{nome}]({item['url']})" if item.get("url") else nome
+        elif f in fatos and fatos[f].get("url"):
+            nome = f"[{fatos[f]['url'].split('/')[2].removeprefix('www.')}]({fatos[f]['url']})"
+        else:
+            continue
+        if nome not in nomes:
+            nomes.append(nome)
+    partes = (["material enviado pela secretaria"] if secretaria else []) + nomes[:limite]
+    if len(nomes) > limite:
+        partes.append(f"e mais {len(nomes) - limite} fonte(s), na auditoria")
+    return "; ".join(partes)
+
+
+def _prazo_do_risco(r, hoje=None):
+    """(prazo na tabela, janela na tabela, linha de prazo por extenso)."""
+    data, agir = r.get("data_evento"), r.get("agir_ate")
+    votos = (r.get("votos") or {}).get("janela") or {}
+    if r.get("prazo_de_fato") and (data or agir):
+        data = data or agir
+        vencido = bool(r.get("vencido") or (hoje and data < hoje))
+        janela = "Prazo vencido" if vencido else r.get("horizonte") or "–"
+        if agir and agir != data:
+            linha = (f"vence em {data:%d/%m/%Y}" + (", já vencido" if vencido else "")
+                     + ("" if vencido else f". Para não haver interrupção, a decisão precisa sair até {agir:%d/%m/%Y}, "
+                        "30 dias antes" + (", data que já passou" if hoje and agir < hoje else "")))
+        else:
+            linha = f"{data:%d/%m/%Y}" + (", já vencido" if vencido else "")
+        return f"{data:%d/%m/%Y}", janela, f"{linha}. Janela: {janela.lower()}."
+    janela = r.get("horizonte") or "Sem prazo"
+    if votos.get("prevaleceu") == "voto":
+        marca = " ⚠" if votos.get("divergencia") else ""
+        return "sem data", janela + marca, (f"sem data no material. Janela: {janela.lower()}, pelo voto de "
+                                            f"{votos['votos']} dos {votos['total']} agentes.")
+    return "sem data", janela, f"sem data no material. Janela: {janela.lower()}."
+
+
+def _ponto_contestado(r):
+    """O que continua em disputa depois da consolidação: objeção não acatada ou acatada só em parte (com a resposta) e
+    divergência de voto. Objeção acatada já foi corrigida no texto e fica só na auditoria."""
+    from .riscos import PAPEL_CONTRA
+    objecoes = [o for o in (r.get("revisao") or {}).get("objecoes") or []
+                if not str(o.get("resposta") or "").lower().startswith("acatado")]
+    objecoes.sort(key=lambda o: o["papel"] != PAPEL_CONTRA)
+    partes = []
+    for o in objecoes[:1]:
+        resposta = str(o.get("resposta") or "")
+        m = re.match(r"(parcial|não acatado)\s*\((.*)\)\s*$", resposta, re.I | re.S)
+        partes.append(f"{PAPEL_CURTO.get(o['papel'], o['papel'])}: {_frase(o['motivo'])}"
+                      + (f" Resposta da consolidação ({m.group(1).lower()}): {_frase(m.group(2))}" if m else ""))
+    for eixo, rotulo in (("impacto", "impacto"), ("sensibilidade", "repercussão política"), ("janela", "janela")):
+        v = (r.get("votos") or {}).get(eixo) or {}
+        if eixo == "janela" and v.get("prevaleceu") != "voto":
+            continue                                   # a data do documento decidiu a janela: o voto não está em disputa
+        for dv in (v.get("divergencia") or [])[:1]:
+            partes.append(f"{PAPEL_CURTO.get(dv['papel'], dv['papel'])} votou {rotulo} {dv['voto'].lower()}"
+                          + (f": {_frase(dv['por_que'])}" if dv.get("por_que") else "."))
+    return " ".join(partes)
+
+
+def auditoria_da_conferencia(conferencia, lacunas_brutas):
+    """Na auditoria: o que a conferência final apontou, corrigiu e recusou, e as informações que faltam como cada
+    agente as apontou (antes de a consolidação juntar)."""
+    md = ["## Conferência final das afirmações",
+          "Depois da consolidação e da votação, cada risco foi lido ao lado do texto dos fatos que cita. O que não tinha "
+          "apoio foi corrigido; a correção só entra se não trouxer número novo nem palavra de recomendação."]
+    conferencia = conferencia or {}
+    if conferencia.get("erro"):
+        md.append(f"- A conferência não rodou: {conferencia['erro']}")
+    md += [f"- **{c['risco']}, {c['campo']}** – antes: {c['antes']} → depois: {c['depois']}" for c in conferencia.get("corrigidos") or []]
+    md += [f"- **{c['risco']}, {c['campo']}** – correção recusada ({c['motivo']}): {c['proposta']}"
+           for c in conferencia.get("recusados") or []]
+    for a in conferencia.get("apontados") or []:
+        md += [f"- **{a['risco']}** – apontado em {s['campo'] or 'texto'}: {s['motivo']}" for s in a["sem_apoio"]]
+    if not (conferencia.get("apontados") or conferencia.get("erro")):
+        md.append("- Nada apontado.")
+    if lacunas_brutas:
+        md += ["## Informações que faltam, como cada agente apontou", "| Quem | O que falta | Para que serve | Onde | Risco |",
+               "|---|---|---|---|---|"]
+        md += [f"| {l['quem']} | {l.get('o_que', '')} | {l.get('para_que') or '–'} | {l.get('onde') or '–'} | "
+               f"{l.get('serve_a') or '–'} |" for l in lacunas_brutas]
+    return "\n".join(md)
+
+
+def antes_de_ler_riscos(confianca, data_corte, cortes=None, bases=None):
+    """A abertura do relatório de riscos, em três linhas: o que é, a confiança e como ler."""
+    linhas = [f"- **O que é:** análise de riscos e pontos de decisão gerada com IA a partir do material da secretaria e "
+              f"de fontes públicas, com data de corte {data_corte or 'não informada'}. Descreve; não recomenda. Sem "
+              "revisão da equipe: confira antes de usar."]
+    if confianca:
+        por_que = "; ".join(confianca.get("por_que") or [])
+        linhas.append(f"- **Confiança: {confianca['nivel'].upper()}**" + (f", porque {por_que}" if por_que else "")
+                      + ". Mede quanto a análise se apoia em informação conferida, não a gravidade dos riscos."
+                      + (" Silêncio sobre os temas sem informação não quer dizer que não haja risco."
+                         if confianca.get("lacuna_checklist") else ""))
+    legenda = "; ".join(f"\"{b}\" = {LEGENDA_BASE[b]}" for b in bases or [] if b in LEGENDA_BASE)
+    linhas.append("- **Como ler:** cada risco traz o fato, a consequência, o ponto de decisão e o prazo. "
+                  + (f"A coluna Base diz de onde vem a informação: {legenda}. " if legenda else "")
+                  + "Contratos e datas: só o que a secretaria informou.")
+    for c in cortes or []:
+        linhas.append(f"- **Material cortado:** {c}. O que ficou de fora não entrou na análise.")
+    return "\n".join(linhas)
+
+
+def nota_riscos(registro_id, modelos, revisoes=None, conferencia=None, revisao_texto=None):
+    """O rodapé do relatório de riscos, em uma linha: registro, modelo, agentes e conferências."""
+    usados = list(dict.fromkeys(m for m in (modelos.get("auxiliar"), modelos.get("debate")) if m))
+    validas = [r for r in revisoes or [] if not r.get("erro")]
+    familias = {r["modelo"].split("/")[0] for r in validas if r.get("modelo")}
+    partes = [f"Registro {registro_id}", "modelo " + " e ".join(usados) if usados else "",
+              (f"{len(validas)} agentes de IA, com olhares diferentes, revisaram e votaram a análise"
+               + (f", em {len(familias)} famílias de modelos" if len(familias) > 1 else " (todos no mesmo modelo)"))
+              if validas else "",
+              (f"conferência final: {len(conferencia.get('corrigidos') or [])} trecho(s) corrigido(s) por falta de apoio "
+               "nos fatos citados") if conferencia and conferencia.get("corrigidos") else "",
+              (f"revisão de tom: {len((revisao_texto or {}).get('aceitos') or []) + len((revisao_texto or {}).get('condicional') or [])} "
+               "trecho(s) reescrito(s)") if revisao_texto and ((revisao_texto.get("aceitos") or revisao_texto.get("condicional"))) else "",
+              "método, votos e revisões completas no arquivo de auditoria"]
+    return "_" + " · ".join(p for p in partes if p) + "._"
+
+
+def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=10, limite_pedir=15, antes_md="", diag=None,
+                     dossie=None, data_corte=None, confianca=None, cortes=None):
+    """Produto 3, o relatório de riscos, direto ao ponto: a tabela dos pontos de decisão em ordem de prazo; cada risco
+    em linhas rotuladas (fato, consequência, ponto de decisão, prazo, peso, o que está contestado, fontes por extenso);
+    e a pauta de investigação (informações que faltam, com para que servem, onde procurar e quem apontou).
+    Analisa; não recomenda, não sugere caminho nem responsável. Votos e objeções completas ficam na auditoria."""
+    from .produtos import _ler_data
+    hoje = (_ler_data(data_corte) or (None,))[0] if data_corte else None
     riscos = sorted((resultado.get("riscos") or [])[:limite_riscos], key=lambda r: (r.get("agir_ate") or date.max, -r["nota"]))
-    md = ([antes_md] if antes_md else []) + ["## Situação"] + [f"- {_curto(x, 260)}" for x in (resultado.get("situacao") or [])[:4]]
-    lacunas = linha_essencial(cobertura) if cobertura else ""
-    if lacunas and "sem informação" in lacunas:
-        md.append(lacunas.replace(" Ver a tabela de cobertura no Capítulo 1.", " Ver o dossiê da secretaria."))
+    bases = list(dict.fromkeys(BASE_CURTA.get(r["firmeza"], r["firmeza"]) for r in riscos))
+    md = [antes_md if antes_md else antes_de_ler_riscos(confianca, data_corte, cortes, bases)]
     if riscos:
         votado = any(r.get("votos") for r in riscos)
-        md += ["## Decisões urgentes, em ordem de prazo",
-               ("_Impacto, janela e repercussão política foram votados, item a item, pelos seis agentes independentes "
-                "(a contagem diz quantos votaram no resultado; ⚠ marca divergência). Data que está no documento prevalece "
-                "sobre o voto de janela. Prioridade: impacto × urgência, por código._" if votado else ""),
-               "| # | Ponto de decisão (risco) | Agir até | Janela | Impacto | Repercussão política | Prioridade | Base |",
-               "|---|---|---|---|---|---|---|---|"]
+        md += ["## Pontos de decisão, em ordem de prazo",
+               ("_Prioridade: impacto × urgência, na mesma régua para todas as secretarias. Seis agentes de IA, com "
+                "olhares diferentes, revisaram e votaram cada risco; ⚠ marca divergência entre eles._" if votado else ""),
+               "| # | Ponto de decisão | Prazo | Janela | Prioridade | Base |", "|---|---|---|---|---|---|"]
         for r in riscos:
-            agir = f"{r['agir_ate']:%d/%m/%Y}" if r.get("agir_ate") else "–"
-            md.append(f"| {r['id']} | {_curto(r.get('decisao') or r['titulo'], 90)} _({_curto(r['titulo'], 50)})_ | {agir} | "
-                      f"{_voto(r, 'janela', r.get('horizonte'))} | {_voto(r, 'impacto', r.get('impacto'))} | "
-                      f"{_voto(r, 'sensibilidade', r.get('sensibilidade'))} | {r['prioridade']} | "
+            prazo, janela, _ = _prazo_do_risco(r, hoje)
+            md.append(f"| {r['id']} | {_sem_ids(r['titulo'])} | {prazo} | {janela} | {r['prioridade']} | "
                       f"{BASE_CURTA.get(r['firmeza'], r['firmeza'])} |")
+        md.append("## Os riscos, um a um")
         for r in riscos:
-            md.append(f"**{r['id']}. {_curto(r.get('decisao') or r['titulo'], 180)}**")
-            linha = f"Risco: {r['titulo']}. {_curto(r['causa'], 180)} → {_curto(r['consequencia'], 180)}"
-            if r.get("motivo_sensibilidade"):
-                linha += f". Repercussão: {_curto(r['motivo_sensibilidade'], 130)}"
-            div = _divergencias(r)
-            if div:
-                linha += f". Divergência: {div}"
-            contra = _contestacao_curta(r)
-            if contra:
-                linha += f". Advogado do diabo contesta: {contra}"
-            md.append(f"- {linha}.")
+            _, _, prazo = _prazo_do_risco(r, hoje)
+            v = r.get("votos") or {}
+            marca = lambda eixo: " ⚠" if (v.get(eixo) or {}).get("divergencia") else ""
+            peso = (f"prioridade {r['prioridade'].lower()}; impacto {str(r.get('impacto') or '').lower()}{marca('impacto')}; "
+                    f"repercussão política {str(r.get('sensibilidade') or '').lower()}{marca('sensibilidade')}")
+            md.append(f"**{r['id']}. {_sem_ids(r['titulo'])}**")
+            linhas = [("Fato", _frase(r["causa"])), ("Consequência", _frase(r["consequencia"])),
+                      ("Ponto de decisão", _frase(r.get("decisao"))), ("Prazo", prazo[0].upper() + prazo[1:]),
+                      ("Peso", peso + "."), ("Repercussão possível", _frase(r.get("motivo_sensibilidade"))),
+                      ("Já em curso", _frase(r.get("em_curso"))), ("Ponto contestado", _ponto_contestado(r)),
+                      ("A confirmar", " ".join(_frase(a["motivo"]) for a in r.get("a_confirmar") or [])),
+                      ("Fontes", _frase(fontes_do_risco(r, diag, dossie)))]
+            md += [f"- **{rotulo}:** {texto}" for rotulo, texto in linhas if texto]
     pedir = (resultado.get("pedir") or [])[:limite_pedir]
     if pedir:
-        md.append("## Informações que faltam")
-        md += [f"{k}. {_curto(p['o_que'], 170)}" + (f" _({p['serve_a']})_" if p.get("serve_a") else "")
-               for k, p in enumerate(pedir, 1)]
+        md += ["## Informações que faltam: a pauta de investigação",
+               "_O que não está no material e mudaria a leitura dos riscos, apontado pela análise e por cada um dos seis "
+               "agentes, pelo seu olhar. Primeiro os temas obrigatórios sem informação; depois, pela prioridade do "
+               "risco a que serve._",
+               "| # | O que falta | Para que serve | Onde procurar | Risco | Quem apontou |", "|---|---|---|---|---|---|"]
+        for k, p in enumerate(pedir, 1):
+            quem = ", ".join(PAPEL_CURTO.get(q, q) for q in p.get("apontado_por") or []) or "Consolidação"
+            md.append(f"| {k} | {_sem_ids(p['o_que'])} | {_sem_ids(p.get('para_que')) or '–'} | "
+                      f"{_sem_ids(p.get('onde')) or '–'} | {p.get('serve_a') or '–'} | {quem} |")
     md.append(nota_md)
     return "\n".join(m for m in md if m)
 
