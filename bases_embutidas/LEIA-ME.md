@@ -18,10 +18,14 @@ Dados oficiais que o app usa sozinho, por código, sem passar pelo modelo.
   cruzamento de multas e débitos acha a secretaria e as antecessoras extintas; as vinculadas são casadas pelo nome na
   LOA. (4) `"tce_vinculadas"`: as entidades que o TCE abrevia de um jeito que o código não casa com a LOA (CEPERJ,
   Rioprevidência, AGETRANSP, UERJ, PRODERJ, Corpo de Bombeiros), com a unidade orçamentária de cada uma. (5)
-  `"tce_a_confirmar"`: nomes antigos de secretarias que aparecem na base de multas e débitos e a secretaria atual de
-  que podem ser antecessoras ("SEC EST INFRAESTRUTURA E CIDADES" → SEIOP e SECID, por exemplo). Enquanto a ligação
-  não for confirmada com fonte, os processos não entram na contagem, e o relatório da secretaria diz que ficaram de
-  fora. Confirmada, o nome passa para `"tce"`. Secretaria nova ou renomeada no TCE: inclua o nome exato em `"tce"`.
+  `"tce_antecessoras"`: nomes antigos de secretarias que aparecem na base de multas e débitos e a secretaria atual
+  que as sucede, confirmados pela Equipe de Transição em 10/11/2026: Infraestrutura e Cidades → SEIOP e SECID; Saúde
+  e Defesa Civil → SES e SEDEC; Fazenda e Planejamento → SEFAZ e SEPLAG; Assistência Social e Direitos Humanos →
+  SEDSODH; Envelhecimento Saudável e Qualidade de Vida → SEIJES; Esporte, Lazer e Juventude → SEEL. O processo da
+  antiga com duas sucessoras aparece no relatório das duas, com o nome antigo da unidade. (6) `"tce_a_confirmar"`,
+  no mesmo formato e hoje vazia: nome antigo que pode ser antecessora e ainda não foi confirmado. Enquanto estiver
+  ali, os processos não entram na contagem, e o relatório da secretaria diz que ficaram de fora. Secretaria nova ou
+  renomeada no TCE: inclua o nome exato em `"tce"`.
   Os nomes usados em cada rodada saem no relatório de riscos ("Unidades consideradas"), para conferência.
 
 Para atualizar a folha, baixe o Caderno do mês e rode:

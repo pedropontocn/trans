@@ -162,19 +162,21 @@ def mesmo_orgao(nome_tce, nome_loa):
 
 
 def _tabelas():
-    """As tabelas conferidas de bases_embutidas/siglas_2026.json: "tce", "tce_vinculadas" e "tce_a_confirmar"."""
+    """As tabelas conferidas de bases_embutidas/siglas_2026.json: "tce", "tce_vinculadas", "tce_antecessoras" e
+    "tce_a_confirmar"."""
     from .folha import PASTA_BASES
     try:
         dados = json.loads((Path(os.getenv("PASTA_BASES") or PASTA_BASES) / "siglas_2026.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         dados = {}
-    return {c: dados.get(c) or {} for c in ("tce", "tce_vinculadas", "tce_a_confirmar")}
+    return {c: dados.get(c) or {} for c in ("tce", "tce_vinculadas", "tce_antecessoras", "tce_a_confirmar")}
 
 
 def alvos_da_secretaria(sigla):
     """Como achar a secretaria e as vinculadas nos nomes do TCE: os nomes conferidos da tabela (secretaria e
     antecessoras), os nomes das unidades na LOA e, para a entidade que o TCE abrevia demais, a tabela de vinculadas
-    (nome do TCE → unidade orçamentária). "a_confirmar" são os nomes antigos que podem ser antecessoras."""
+    (nome do TCE → unidade orçamentária). "antecessoras" são os nomes antigos com a sucessão confirmada;
+    "a_confirmar", os que podem ser antecessoras e ainda não entram."""
     from . import caderno
     from .folha import APELIDOS
     sigla = (sigla or "").strip().upper()
@@ -190,18 +192,21 @@ def alvos_da_secretaria(sigla):
         pass
     return {"sigla": sigla, "conferidos": conferidos, "loa": nomes_loa,
             "vinculadas": [_sem_acento(n) for n, uo in tabelas["tce_vinculadas"].items() if uo in uos],
+            "antecessoras": [_sem_acento(n) for n, quem in tabelas["tce_antecessoras"].items() if siglas & set(quem)],
             "a_confirmar": [n for n, quem in tabelas["tce_a_confirmar"].items() if siglas & set(quem)]}
 
 
 def da_secretaria(nome_tce, alvos):
-    """"secretaria", "antecessora (extinta)", "vinculada" ou "" para um nome de unidade do TCE."""
+    """"secretaria", "antecessora", "vinculada" ou "" para um nome de unidade do TCE."""
     nome = str(nome_tce or "").strip()
     if not nome:
         return ""
     chave = _sem_acento(nome)
     for conferido in alvos["conferidos"]:
         if _sem_acento(conferido) == chave:
-            return "antecessora (extinta)" if "extinta" in chave else "secretaria"
+            return "antecessora" if "extinta" in chave else "secretaria"
+    if chave in alvos.get("antecessoras", ()):       # nome antigo, com a sucessão confirmada
+        return "antecessora"
     if chave in alvos.get("vinculadas", ()):
         return "vinculada"
     if any(_sem_acento(n) == chave for n in alvos.get("a_confirmar", ())):
@@ -214,7 +219,7 @@ def da_secretaria(nome_tce, alvos):
             if _tipo(_palavras(loa)) == "secretaria":
                 if alvos["conferidos"]:
                     continue
-                return "antecessora (extinta)" if "extinta" in chave else "secretaria"
+                return "antecessora" if "extinta" in chave else "secretaria"
             return "vinculada"
     return ""
 
@@ -283,7 +288,7 @@ def cruzar(sigla, texto_material, data_corte=None):
              "origem": ORIGEM, "unidades": {}, "erros": [], "penalidades": [], "resumo": {}, "a_confirmar": {}}
     desde = corte.year - RECENTES_ANOS + 1
     antigos = {_sem_acento(n): n for n in alvos["a_confirmar"]}
-    if not (alvos["conferidos"] or alvos["loa"]):
+    if not (alvos["conferidos"] or alvos["loa"] or alvos["antecessoras"]):
         saida["erros"].append("a secretaria não foi achada na tabela de nomes do TCE-RJ nem na LOA")
         return saida
     for tipo, rotulo in (("multas", "multa"), ("debitos", "débito")):

@@ -55,7 +55,7 @@ def test_nomes_do_tce_casam_com_a_secretaria_e_as_vinculadas(tce):
         assert tce.da_secretaria(outro, seeduc) == "", outro
     seiop = tce.alvos_da_secretaria("SEIOP")
     assert tce.da_secretaria("SEC EST INFRA E OBRAS PÚBLICAS", seiop) == "secretaria"
-    assert tce.da_secretaria("SEC EST INFRAESTRUTURA E OBRAS (EXTINTA)", seiop) == "antecessora (extinta)"
+    assert tce.da_secretaria("SEC EST INFRAESTRUTURA E OBRAS (EXTINTA)", seiop) == "antecessora"
     assert tce.da_secretaria("EMOP-EMPRESA DE OBRAS PUBLICAS DO ERJ", seiop) == "vinculada"
     assert tce.da_secretaria("DER-RJ FUND DEPART ESTRADAS DE RODAGEM", seiop) == "vinculada"
     assert tce.da_secretaria("SEC EST CIDADES (EXTINTA)", seiop) == ""
@@ -166,24 +166,51 @@ def test_entidade_abreviada_e_nome_antigo_sem_ligacao_confirmada(tce, monkeypatc
     assert tce.da_secretaria("PRODERJ - CENTRO TECN DA INF E COMUNI RJ", tce.alvos_da_secretaria("SETD")) == "vinculada"
     assert tce.da_secretaria("UERJ-FUND UNIVERSIDADE DO ESTADO RJ", tce.alvos_da_secretaria("SECTI")) == "vinculada"
     assert tce.da_secretaria("PRODERJ - CENTRO TECN DA INF E COMUNI RJ", tce.alvos_da_secretaria("SEEDUC")) == ""
-    assert tce.da_secretaria("SEC EST TRABALHO E RENDA (EXTINTA)", tce.alvos_da_secretaria("SETRAB")) == "antecessora (extinta)"
-    # "SEC EST INFRAESTRUTURA E CIDADES" pode ser antecessora da SEIOP e da SECID: não entra na contagem de nenhuma,
-    # e o relatório das duas diz que ficou de fora, com os processos
+    assert tce.da_secretaria("SEC EST TRABALHO E RENDA (EXTINTA)", tce.alvos_da_secretaria("SETRAB")) == "antecessora"
+    # nome antigo com a sucessão confirmada: "SEC EST INFRAESTRUTURA E CIDADES" conta para a SEIOP e para a SECID
     linhas = [_linha("300001-1/2021", "50/2025-0", "SEC EST INFRAESTRUTURA E CIDADES", ano=2025),
               _linha("300002-2/2021", "51/2025-0", "SEC EST INFRAESTRUTURA E CIDADES", ano=2025),
-              _linha("300003-3/2015", "52/2019-0", "SEC EST INFRAESTRUTURA E CIDADES", ano=2019),      # antiga: nem aparece
+              _linha("300003-3/2015", "52/2019-0", "SEC EST INFRAESTRUTURA E CIDADES", ano=2019),
+              _linha("300004-4/2022", "53/2025-0", "SEC EST INFRA E OBRAS PÚBLICAS", ano=2025),
+              _linha("300005-5/2022", "54/2025-0", "SEC EST SAÚDE E DEFESA CIVIL (EXTINTA)", ano=2025),
+              _linha("300006-6/2022", "55/2025-0", "SEC EST DE FAZENDA E PLANEJAMENTO", ano=2025)]
+    monkeypatch.setattr(tce, "_baixar_json", lambda caminho, params: linhas if params["tipo"] == "multa" else [])
+    for sigla, recentes, ao_todo in (("SEIOP", 3, 4), ("SECID", 2, 3)):
+        c = tce.cruzar(sigla, "", "10/11/2026")
+        assert (c["resumo"]["recentes"], c["resumo"]["condenacoes"]) == (recentes, ao_todo) and c["a_confirmar"] == {}
+        assert c["unidades"]["SEC EST INFRAESTRUTURA E CIDADES"] == "antecessora"
+        md = tce.markdown(c)
+        assert "SEC EST INFRAESTRUTURA E CIDADES (antecessora)" in md and "fora da contagem" not in md
+        assert "| 300001-1/2021 | SEC EST INFRAESTRUTURA E CIDADES | 01/04/2025 | 1 | – | Tomada de contas | não |" in md
+    for sigla, nome in (("SES", "SEC EST SAÚDE E DEFESA CIVIL (EXTINTA)"), ("SEDEC", "SEC EST SAÚDE E DEFESA CIVIL (EXTINTA)"),
+                        ("SEFAZ", "SEC EST DE FAZENDA E PLANEJAMENTO"), ("SEPLAG", "SEC EST DE FAZENDA E PLANEJAMENTO"),
+                        ("SEDSODH", "SEC EST ASSIST SOC DIREITOS HUMANOS"), ("SEIJES", "SEC EST ENVELHEC SAUDE QUAL VIDA"),
+                        ("SEEL", "SEC EST ESPORTE, LAZER, JUVENTUDE")):
+        assert tce.da_secretaria(nome, tce.alvos_da_secretaria(sigla)) == "antecessora", (sigla, nome)
+    assert tce.da_secretaria("SEC EST INFRAESTRUTURA E CIDADES", tce.alvos_da_secretaria("SEEDUC")) == ""
+    assert tce.da_secretaria("SEC EST DE FAZENDA E PLANEJAMENTO", tce.alvos_da_secretaria("SES")) == ""
+
+
+def test_nome_antigo_sem_ligacao_confirmada_fica_de_fora_e_o_relatorio_diz(tce, monkeypatch):
+    # a tabela "tce_a_confirmar": o nome pode ser antecessora, mas não entra na contagem enquanto não for confirmado
+    tabelas = tce._tabelas()
+    tabelas["tce_a_confirmar"] = {"SEC EST OBRAS E HABITACAO": ["SEIOP", "SEHIS"]}
+    monkeypatch.setattr(tce, "_tabelas", lambda: tabelas)
+    linhas = [_linha("300001-1/2021", "50/2025-0", "SEC EST OBRAS E HABITACAO", ano=2025),
+              _linha("300002-2/2021", "51/2025-0", "SEC EST OBRAS E HABITACAO", ano=2025),
+              _linha("300003-3/2015", "52/2019-0", "SEC EST OBRAS E HABITACAO", ano=2019),            # antiga: nem aparece
               _linha("300004-4/2022", "53/2025-0", "SEC EST INFRA E OBRAS PÚBLICAS", ano=2025)]
     monkeypatch.setattr(tce, "_baixar_json", lambda caminho, params: linhas if params["tipo"] == "multa" else [])
-    for sigla, condenacoes in (("SEIOP", 1), ("SECID", 0)):
+    for sigla, condenacoes in (("SEIOP", 1), ("SEHIS", 0)):
         c = tce.cruzar(sigla, "", "10/11/2026")
         assert c["resumo"]["condenacoes"] == condenacoes
-        assert c["a_confirmar"] == {"SEC EST INFRAESTRUTURA E CIDADES": ["300001-1/2021", "300002-2/2021"]}
+        assert c["a_confirmar"] == {"SEC EST OBRAS E HABITACAO": ["300001-1/2021", "300002-2/2021"]}
         md = tce.markdown(c)
         assert ('- **Nome antigo, fora da contagem:** a base traz 2 processos com condenação de 2024 para cá em nome de '
-                '"SEC EST INFRAESTRUTURA E CIDADES", que pode ser antecessora desta secretaria. A ligação não está '
+                '"SEC EST OBRAS E HABITACAO", que pode ser antecessora desta secretaria. A ligação não está '
                 'confirmada; por isso não entram acima: 300001-1/2021, 300002-2/2021.') in md
         assert all("300001" not in f["texto"] for f in tce.fatos(c))
-    assert "Nenhuma multa ou débito em processos do órgão" in tce.markdown(tce.cruzar("SECID", "", "10/11/2026"))
+    assert "Nenhuma multa ou débito em processos do órgão" in tce.markdown(tce.cruzar("SEHIS", "", "10/11/2026"))
     assert tce.cruzar("SEEDUC", "", "10/11/2026")["a_confirmar"] == {}
 
 

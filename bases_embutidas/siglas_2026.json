@@ -1,5 +1,5 @@
 {
- "descricao": "Sigla de cada secretaria e a unidade orçamentária principal na LOA 2026 (as vinculadas são as do mesmo órgão, os dois primeiros dígitos). E as secretarias que saíram do Caderno de RH na reforma administrativa de 2026, com a sigla da sucessora no Caderno mais recente e a fonte. Só entra sucessão com fonte. Em \"tce\", o nome de cada secretaria nos dados abertos do TCE-RJ (como o Tribunal escreve), conferido em 10/11/2026 nos conjuntos de dotação de 2026 e de multas e débitos; os nomes com \"(EXTINTA)\" são antecessoras. Em \"tce_vinculadas\", as entidades que o TCE abrevia de um jeito que o código não casa com o nome da LOA, com a unidade orçamentária de cada uma (a mesma entidade, conferida uma a uma). Em \"tce_a_confirmar\", nomes antigos de secretarias que aparecem na base de multas e débitos e a secretaria atual de que podem ser antecessoras: enquanto a ligação não for confirmada, os processos não entram na contagem e o relatório diz que ficaram de fora.",
+ "descricao": "Sigla de cada secretaria e a unidade orçamentária principal na LOA 2026 (as vinculadas são as do mesmo órgão, os dois primeiros dígitos). E as secretarias que saíram do Caderno de RH na reforma administrativa de 2026, com a sigla da sucessora no Caderno mais recente e a fonte. Só entra sucessão com fonte. Em \"tce\", o nome de cada secretaria nos dados abertos do TCE-RJ (como o Tribunal escreve), conferido em 10/11/2026 nos conjuntos de dotação de 2026 e de multas e débitos; os nomes com \"(EXTINTA)\" são antecessoras. Em \"tce_vinculadas\", as entidades que o TCE abrevia de um jeito que o código não casa com o nome da LOA, com a unidade orçamentária de cada uma (a mesma entidade, conferida uma a uma). Em \"tce_antecessoras\", nomes antigos de secretarias que aparecem na base de multas e débitos e a secretaria atual que as sucede (uma antiga pode ter duas sucessoras), confirmados pela Equipe de Transição em 10/11/2026. Em \"tce_a_confirmar\", no mesmo formato, o nome antigo que ainda não tem a ligação confirmada: os processos não entram na contagem e o relatório diz que ficaram de fora; confirmado, passa para \"tce_antecessoras\".",
  "unidades": {
   "SES": "29010",
   "SEEDUC": "18010",
@@ -194,7 +194,7 @@
   "PRODERJ - CENTRO TECN DA INF E COMUNI RJ": "58350",
   "CORPO DE BOMBEIROS DO ESTADO": "16010"
  },
- "tce_a_confirmar": {
+ "tce_antecessoras": {
   "SEC EST ASSIST SOC DIREITOS HUMANOS": [
    "SEDSODH"
   ],
@@ -216,5 +216,6 @@
    "SES",
    "SEDEC"
   ]
- }
+ },
+ "tce_a_confirmar": {}
 }

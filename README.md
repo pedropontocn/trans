@@ -118,8 +118,9 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    contratos, convênios, dotação) são declarados pelos órgãos e ficam de fora. O app acha a secretaria, as antecessoras
    extintas e as vinculadas pelo nome que o TCE usa (tabela conferida em `bases_embutidas/siglas_2026.json` e nomes da
    LOA) e diz, de cada processo, se o número aparece no material enviado. O que o TCE tem e a secretaria não citou
-   abre a pauta de investigação. Nome antigo de secretaria que pode ser antecessora, mas sem ligação confirmada, não
-   entra na contagem: o relatório diz que ficou de fora, com os processos. **Valores não entram**: a base não informa a unidade (R$ ou UFIR-RJ) e repete a mesma
+   abre a pauta de investigação. Nome antigo de secretaria entra pela tabela de antecessoras confirmadas pela
+   equipe (a antiga com duas sucessoras aparece nas duas, com o nome antigo); sem confirmação, não entra na contagem
+   e o relatório diz que ficou de fora, com os processos. **Valores não entram**: a base não informa a unidade (R$ ou UFIR-RJ) e repete a mesma
    condenação em uma linha por responsável; o app conta condenações e processos, e o valor fica, como publicado, só no
    registro de auditoria. Sem acesso ao portal, o relatório diz que o cruzamento não foi feito. `TCE_DESLIGADO=1` nos
    Secrets desliga.
