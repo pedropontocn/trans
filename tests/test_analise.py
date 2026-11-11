@@ -10,6 +10,16 @@ import pytest
 
 from conftest import RELATORIO
 
+# os capítulos do dossiê, na ordem do roteiro da Equipe de Transição (os itens 3 e g dependem da leitura da análise)
+TITULOS_DO_ROTEIRO = ['## 1. Estrutura organizacional vigente',
+                      '## 2. Funcionamento atual',
+                      '## a) Planejamento e execução orçamentária',
+                      '## b) Cargos e força de trabalho',
+                      '## c) Contratos relevantes e riscos de vencimento',
+                      '## d) Auditorias, convênios e instrumentos de cooperação',
+                      '## e) Programas e serviços essenciais',
+                      '## f) Principais dificuldades e problemas identificados']
+
 CFG = {"modelo_pesquisa": "anthropic/claude-haiku-5-5", "modelo_auxiliar": "anthropic/claude-sonnet-5-5",
        "modelo": "anthropic/claude-opus-5-5", "data_corte": "04/11/2026",
        "foco": "", "orgao_emissor": "Equipe de Transição", "unidade": "", "para": ""}
@@ -107,9 +117,7 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
     # produto 2: o dossiê da secretaria, atualizado com o que ela informou
     textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
-    for titulo in ["Panorama", "Ficha rápida", "1. O que faz", "2. Como se organiza", "3. Programas e ações",
-                   "4. Principais contratos", "5. Pessoal", "6. Orçamento", "7. Pendências com controle e justiça",
-                   "8. Sistemas, convênios e parcerias", "Anexo – Fontes"]:
+    for titulo in ["Panorama", "Ficha rápida"] + [x[3:] for x in TITULOS_DO_ROTEIRO] + ["Fontes"]:
         assert titulo in textos, titulo
     # o organograma em árvore, em fonte fixa, só com as unidades conferidas
     assert "│   └── Subsecretaria de Obras (SUBOB) — vago" in textos and "│       └── Superintendência de Projetos" in textos
@@ -132,9 +140,9 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     for titulo in ["Revisão dos agentes, risco a risco", "Todas as fontes do dossiê", "Anexo 3 – Como este documento foi feito"]:
         assert titulo in r["registro"]["auditoria_md"], titulo
     md = r["dossie_md"]
-    assert md.index("## Panorama") < md.index("## 1. O que faz") < md.index("## 4. Principais contratos") < md.index("## Anexo")
+    assert md.index("## Panorama") < md.index("## 1. Estrutura organizacional vigente") < md.index("## c) Contratos relevantes") < md.index("## Fontes")
     assert "| LOA 2026 | R$ 412 mi |" in md and "| Empenhado | R$ 398,75 mi |" in md and "Inventado" not in md
-    assert "| Contrato 99/2026 |" in md and "Contrato 7/2025" not in md and "Contrato sem origem" not in md
+    assert "- **Contrato 99/2026 – Empresa X** · " in md and "Contrato 7/2025" not in md and "Contrato sem origem" not in md
     auditoria = r["registro"]["auditoria_md"]                   # o confronto e a cobertura ficam na auditoria
     assert "**As fontes mostram:**" in auditoria or "Não mencionado pela secretaria" in auditoria
     assert "Cobertura" in auditoria and "## Organograma completo" in auditoria
@@ -419,7 +427,7 @@ def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
     pedidos = [json.dumps(c["mensagens"][0]["content"], ensure_ascii=False) for c in llm.chamadas]
     assert not any("Monte a camada" in p and 'camada\\n\\"Estado\\"' not in p for p in pedidos)   # só o Estado
     texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "dossies").glob("*_dossie.docx"))).paragraphs)
-    assert "4. Principais contratos" in texto and "Cobertura do checklist obrigatório" not in texto
+    assert "c) Contratos relevantes e riscos de vencimento" in texto and "Cobertura do checklist obrigatório" not in texto
     import openpyxl
     calendarios = list((tmp_path / "calendarios").glob("*_calendario.xlsx"))
     celulas = [str(c.value) for f in calendarios for ws in openpyxl.load_workbook(f).worksheets
@@ -547,7 +555,8 @@ def test_antes_de_ler_abre_dossie_e_relatorio(llm):
     # o dossiê abre e fecha como dossiê: um retrato, sem confiança de riscos nem agentes; material cortado em uma linha
     dossie_md = r["dossie_md"]
     # o preâmbulo é curto: duas notas, sem título nem lista
-    assert dossie_md.startswith("_Retrato de como a secretaria funciona hoje, gerado com IA a partir do que ela enviou")
+    assert dossie_md.startswith("_Retrato de como a secretaria funciona hoje, na ordem do roteiro da Equipe de Transição, "
+                                "gerado com IA a partir do que ela enviou")
     preambulo = dossie_md.split("## Panorama")[0].strip().split("\n\n")
     assert len(preambulo) == 2 and all(p.startswith("_") and p.endswith("_") and "\n" not in p for p in preambulo)
     assert preambulo[0].endswith("Sem revisão da equipe: confira antes de usar._")

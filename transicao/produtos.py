@@ -203,8 +203,9 @@ def ordem_de_prioridade(e):
 
 # A ficha padrão: os mesmos blocos em todas as secretarias, para comparar e consolidar. A ordem é a da leitura
 # de quem decide: primeiro o que mais pesa na transição (contratos, pessoal, passivos), depois o resto.
-SECOES_DIAGNOSTICO = ["O que faz", "Como se organiza", "Programas e ações", "Contratos", "Pessoal",
-                      "Orçamento e execução", "Pendências com controle e justiça", "Sistemas, convênios e parcerias"]
+SECOES_DIAGNOSTICO = ["O que faz", "Como se organiza", "Funcionamento das unidades", "Programas e ações", "Contratos",
+                      "Pessoal", "Orçamento e execução", "Pendências com controle e justiça",
+                      "Sistemas, convênios e parcerias", "Dificuldades e problemas"]
 
 # o dossiê responde "como essa secretaria funciona hoje?": cada bloco descreve; os detalhes que pesam na transição
 # (vencimentos, paralisações, aditivos, apontamentos) entram como fato, sem juízo, e servem à análise de riscos
@@ -213,19 +214,33 @@ ANGULOS_DIAGNOSTICO = {
     "Como se organiza": "unidades (subsecretarias, superintendências, coordenações), vinculadas (autarquias, "
                         "fundações, empresas), quem comanda cada uma; cargos de direção vagos; mudanças recentes de "
                         "estrutura (decreto, data).",
-    "Programas e ações": "principais programas e projetos, com metas, entregas e números; carteira de obras com valor, "
-                         "medido e saldo; obras ou ações paralisadas ou atrasadas; licitações em andamento.",
+    "Funcionamento das unidades": "como cada subsecretaria ou unidade principal atua: o que faz, os principais "
+                                  "processos de trabalho (contratação, pagamento, prestação de contas, atendimento, "
+                                  "fiscalização), pelo que responde, de quem depende e com quem se relaciona (outras "
+                                  "secretarias, vinculadas, municípios, União, órgãos de controle).",
+    "Programas e ações": "principais programas, projetos e serviços essenciais, cada um com a situação atual, o público "
+                         "atendido, a abrangência (municípios, unidades), os resultados e o que ameaça a continuidade; "
+                         "carteira de obras com valor, medido e saldo; obras ou ações paralisadas ou atrasadas.",
     "Contratos": "os contratos que sustentam a operação (objeto, contratado, valor, vigência), os de maior valor e os "
                  "de serviço essencial; emergenciais; aditivos relevantes; paralisados; com litígio ou apontamento.",
-    "Pessoal": "tamanho e composição da equipe (efetivos, comissionados, temporários, terceirizados, cedidos); custo da "
-               "folha; áreas que dependem de comissionados ou terceirizados; fiscais de contrato.",
-    "Orçamento e execução": "dotação da LOA do ano, empenhado, liquidado e pago; onde se concentra o gasto; restos a "
-                            "pagar; PLOA do ano seguinte; receitas vinculadas e fundos.",
-    "Pendências com controle e justiça": "ações judiciais relevantes e seu valor; decisões e tutelas em vigor; "
-                                         "apontamentos e determinações do TCE-RJ e da CGE, com prazo; demandas do MPRJ "
-                                         "e do MPT; tomadas de contas; precatórios e condenações.",
-    "Sistemas, convênios e parcerias": "sistemas críticos para a operação; convênios federais e com municípios (valor, "
-                                       "situação, prestação de contas); organizações sociais e parcerias.",
+    "Pessoal": "cargos existentes, ocupados e vagos; quantos efetivos, comissionados, cedidos, contratados e "
+               "terceirizados; custo da folha; áreas que dependem de comissionados ou terceirizados; necessidade de "
+               "recomposição ou redimensionamento que a secretaria aponta (déficit, concurso, aposentadorias).",
+    "Orçamento e execução": "dotação do ano, empenhado, liquidado e pago, com o percentual de execução; execução por "
+                            "ação orçamentária em 2025 e 2026, se o material trouxer; onde se concentra o gasto; "
+                            "restos a pagar; necessidades de recursos e compromissos já assumidos para 2027; "
+                            "receitas vinculadas e fundos.",
+    "Pendências com controle e justiça": "auditorias em andamento ou pendentes de atendimento; recomendações e "
+                                         "determinações do TCE-RJ, da CGE e de outros órgãos de controle, com prazo e "
+                                         "obrigação; ações judiciais relevantes e seu valor; decisões e tutelas em "
+                                         "vigor; demandas do MPRJ e do MPT; tomadas de contas; precatórios.",
+    "Sistemas, convênios e parcerias": "convênios, acordos de cooperação e demais instrumentos vigentes (com quem, "
+                                       "valor, prazo, obrigações, prestação de contas); organizações sociais e "
+                                       "parcerias; sistemas críticos para a operação.",
+    "Dificuldades e problemas": "os entraves que a própria secretaria aponta: administrativos, operacionais, "
+                                "orçamentários, institucionais e de gestão (falta de pessoal ou de sistema, processo "
+                                "parado, dependência de outro órgão, competência dividida ou duplicada entre unidades, "
+                                "falta de integração), cada um com o impacto que ela descreve.",
 }
 
 
@@ -259,7 +274,8 @@ Blocos, nesta ordem e com exatamente estes títulos, cada um com o que procurar:
 
 Em cada bloco:
 - "itens": até 5 afirmações descritivas e concretas (números, datas, nomes de unidades, programas, contratos), de uma
-  frase completa cada; até 8 em "Programas e ações", "Contratos" e "Pendências com controle e justiça". Cada item cita a origem: "relatorio" com um trecho LITERAL de até 30 palavras do relatório, ou
+  frase completa cada; até 8 em "Programas e ações", "Contratos", "Pendências com controle e justiça" e
+  "Dificuldades e problemas". Cada item cita a origem: "relatorio" com um trecho LITERAL de até 30 palavras do relatório, ou
   "dossie" com o id do item (ex.: "O3"). O sistema confere: item sem origem conferida é descartado.
 - Quando o relatório e o dossiê dizem coisas diferentes sobre o mesmo ponto, registre os dois itens, cada um com sua
   origem, sem escolher.
@@ -296,7 +312,8 @@ Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
 
 
 # quantos itens o código aceita por bloco (o pedido ao modelo é de 5, ou de 8 nos três blocos mais densos)
-ITENS_POR_BLOCO = {"Programas e ações": 8, "Contratos": 8, "Pendências com controle e justiça": 8}
+ITENS_POR_BLOCO = {"Programas e ações": 8, "Contratos": 8, "Pendências com controle e justiça": 8,
+                   "Dificuldades e problemas": 8}
 
 
 def _conferir_citacao(c, por_id, comp_rel, sh_rel):

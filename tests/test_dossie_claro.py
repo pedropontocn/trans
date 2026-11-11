@@ -63,7 +63,7 @@ def test_ficha_rapida_com_folha_e_lei_sem_repetir(funcoes):
         "| Escolas da rede estadual | 1.244 | órgão |"]
 
 
-def test_contratos_sem_corte_e_destaques_em_linha_propria(funcoes):
+def test_contratos_em_lista_sem_corte(funcoes):
     from transicao import documentos
     c = lambda **k: dict({"rotulo": "informado pelo órgão", "url": "", "motivos": ["valor alto"], "observacao": ""}, **k)
     contratos = [
@@ -74,27 +74,26 @@ def test_contratos_sem_corte_e_destaques_em_linha_propria(funcoes):
         c(contrato="TAC 08/2026", contratado="AGILE CORP SERVIÇOS ESPECIALIZADOS LTDA", valor="R$ 14.196.481,17", vigencia="",
           objeto="Serviços de limpeza da rede estadual por Termo de Ajuste de Contas", motivos=["serviço essencial"])]
     md = documentos.markdown_contratos_criticos(contratos)
-    assert "…" not in md
-    assert ("| Contrato Emergencial PED nº 09/2026 | Centro de Desenvolvimento Pessoal - CDP | Profissionais de apoio escolar "
-            "para estudantes da Educação Especial e com TEA | R$158.997.240,00 | 11/06/2027 |") in md
-    assert "| TAC 08/2026 | AGILE CORP SERVIÇOS ESPECIALIZADOS LTDA | Serviços de limpeza da rede estadual por Termo de Ajuste de Contas | R$ 14.196.481,17 | – |" in md
-    assert "| Contrato | Contratado | Objeto | Valor | Vigência |" in md and "Destaques |" not in md and "| Base |" not in md
-    assert "_Todos informados pela secretaria. As datas de todos os contratos informados estão no calendário (Excel)._" in md
-    assert ("- **Contrato Emergencial PED nº 09/2026 (Centro de Desenvolvimento Pessoal - CDP):** emergencial, serviço "
-            "essencial, valor alto. É um contrato emergencial com saldo informado de R$47.699.172,00; a licitação regular "
-            "está em ajustes.") in md
-    assert "- **TAC 08/2026 (AGILE CORP SERVIÇOS ESPECIALIZADOS LTDA):** serviço essencial." in md   # a caixa é a do material
+    # um item por contrato, sempre na mesma ordem: contrato e contratado, valor, vigência; objeto, destaque, situação
+    assert md.split("\n")[0] == (
+        "- **Contrato Emergencial PED nº 09/2026 – Centro de Desenvolvimento Pessoal - CDP** · R$158.997.240,00 · até "
+        "11/06/2027. Profissionais de apoio escolar para estudantes da Educação Especial e com TEA. Emergencial, serviço "
+        "essencial, valor alto. É um contrato emergencial com saldo informado de R$47.699.172,00; a licitação regular está "
+        "em ajustes.")
+    assert md.split("\n")[1] == ("- **TAC 08/2026 – AGILE CORP SERVIÇOS ESPECIALIZADOS LTDA** · R$ 14.196.481,17 · vigência não "
+                                 "informada. Serviços de limpeza da rede estadual por Termo de Ajuste de Contas. Serviço essencial.")
+    assert "…" not in md and "|" not in md                                  # nada cortado; a caixa é a do material; sem tabela
+    assert md.endswith("_Todos informados pela secretaria. As datas de todos os contratos informados estão no calendário (Excel)._")
     # mais contratos do que cabem: a nota diz quantos, sem "(s)"
     muitos = [c(contrato=f"Contrato {k}/2026", contratado=f"Empresa {k}", objeto="x", valor=f"R$ {k}.000,00", vigencia="")
               for k in range(1, 15)]
     md = documentos.markdown_contratos_criticos(muitos)
-    assert "Os 12 mais críticos dos 14 que a leitura do material destacou." in md and "(s)" not in md
-    # no Word, a tabela não quebra palavra nem valor
-    import docx
-    doc = docx.Document(io.BytesIO(funcoes.gerar_docx("## 4. Principais contratos\n" + documentos.markdown_contratos_criticos(contratos),
-                                                      {"orgao": "x", "assunto": "y", "tipo": "z", "data": "w"})))
-    celulas = [c.text for t in doc.tables for l in t.rows for c in l.cells]
-    assert "Contrato Emergencial PED nº 09/2026" in celulas and "R$158.997.240,00" in celulas
+    assert "Os 10 mais críticos dos 14 que a leitura do material destacou." in md and "(s)" not in md
+    assert md.count("\n- **Contrato ") == 9
+    # o contrato que não veio da secretaria (dado antigo) traz a base
+    outro = documentos.markdown_contratos_criticos([c(contrato="Contrato 1/2026", contratado="A", objeto="Limpeza", valor="R$ 1,0 mi",
+                                                      vigencia="01/12/2026", rotulo="dado do SIGA/PNCP")])
+    assert "Todos informados pela secretaria" not in outro and outro.split("\n")[0].endswith(")_")
 
 
 def test_soma_do_pessoal_contra_o_caderno_de_rh(funcoes):
@@ -118,7 +117,7 @@ def test_soma_do_pessoal_contra_o_caderno_de_rh(funcoes):
     md = documentos.markdown_capitulos({"secoes": [{"titulo": "Pessoal", "itens": [_item(frase)], "leitura": "",
                                                     "nao_se_sabe": ["Custo mensal da folha", "Total de terceirizados e de cedidos",
                                                                     "Número total de servidores"]}]}, None, None, FOLHA)
-    assert md.index("48.565 professores") < md.index("_Conferência por código:") < md.index("## 6. Orçamento")
+    assert md.index("48.565 professores") < md.index("_Conferência por código:") < md.index("## c) Contratos")
     # o que o quadro da folha já traz não aparece como "não se sabe"
     assert "_Não se sabe:_ Total de terceirizados e de cedidos." in md and "Custo mensal da folha" not in md
 
@@ -138,7 +137,7 @@ def test_capitulos_com_a_lei_e_nao_se_sabe_sem_o_que_o_app_tem(funcoes):
         "organograma": [{"unidade": "Gabinete", "sigla": "", "subordinada_a": "", "titular": "", "rotulo": "informado pelo órgão"}]}
     md = documentos.markdown_capitulos(diag, None, None, FOLHA, "SEEDUC", dossie, lei)
     # 1. a LOA abre o capítulo, por código (com o ato de criação); o item do modelo sobre a mesma fonte não repete
-    assert ("## 1. O que faz\n- Na LOA 2026: A Secretaria de Estado de Educação é órgão integrante da estrutura da "
+    assert ("## 2. Funcionamento atual\n- Na LOA 2026: A Secretaria de Estado de Educação é órgão integrante da estrutura da "
             "Administração Direta do Poder Executivo do Estado, criada pelo Decreto Lei nº 1, de 15 de março de 1975") in md
     assert "_(fonte oficial ✔: LOA 2026, Volume II, p. 172)_" in md and "executa a política estadual de educação.\n" not in md
     assert "Lei de criação" not in md and "_Não se sabe:_ Número de matrículas em 2026." in md
@@ -146,16 +145,18 @@ def test_capitulos_com_a_lei_e_nao_se_sabe_sem_o_que_o_app_tem(funcoes):
     assert ("- Unidades orçamentárias do órgão na LOA 2026 e no PLOA 2027: Secretaria de Estado de Educação; Departamento "
             "Geral de Ações Socio-Educativas; Conselho Estadual de Educação. _(fonte oficial ✔: LOA 2026, Volume II)_") in md
     # 6. o quadro da lei, por código, e o "não se sabe" do PLOA some
-    for linha in ["**Orçamento na lei** (LOA 2026, Volume II e PLOA 2027, Volume II; fonte oficial ✔)",
-                  "| Secretaria de Estado de Educação | R$ 6.702.485.057 | R$ 7.654.748.512 |",
-                  "| Departamento Geral de Ações Socio-Educativas | R$ 479.889.772 | R$ 499.330.060 |",
-                  "| **Total do órgão** | **R$ 7.182.384.829** | **R$ 8.154.088.572** |",
+    for linha in ["**Orçamento na lei, por unidade orçamentária** (LOA 2026, Volume II e PLOA 2027, Volume II; fonte oficial ✔)",
+                  "| Secretaria de Estado de Educação | R$ 6.702.485.057 | R$ 7.654.748.512 | +R$ 952.263.455 (+14,2%) |",
+                  "| Departamento Geral de Ações Socio-Educativas | R$ 479.889.772 | R$ 499.330.060 | +R$ 19.440.288 (+4,1%) |",
+                  "| Conselho Estadual de Educação | R$ 10.000 | R$ 10.000 | sem variação |",
+                  "| **Total do órgão** | **R$ 7.182.384.829** | **R$ 8.154.088.572** | **+R$ 971.703.743 (+13,5%)** |",
                   "_Não se sabe:_ Execução por fonte vinculada."]:
         assert linha in md, linha
     assert "no PLOA 2027 (PL 8.378/26)" not in md
     # sem a lei (sigla fora da tabela), nada muda no que o modelo disse
     sem = documentos.markdown_capitulos(diag, None, None, FOLHA, "X", dossie, None)
     assert "Lei de criação e regimento atualizado" in sem and "no PLOA 2027 (PL 8.378/26)" in sem and "Orçamento na lei" not in sem
+    assert "plano de governo" not in md and "## 3." not in md and "## g)" not in md   # sem cruzamento e sem leitura, não aparecem
     # as fontes: as bases lidas por código entram, sem códigos de item
     fontes = documentos.fontes_do_dossie(diag, dossie, FOLHA, lei)
     assert "- [Caderno de RH (SEPLAG), folha de setembro de 2026](https://www.rj.gov.br/gesperj/) · ✔ base oficial, lida por código" in fontes
@@ -173,7 +174,10 @@ def test_mais_itens_nos_blocos_mais_densos(llm, funcoes):
     assert quantos["Programas e ações"] == quantos["Contratos"] == quantos["Pendências com controle e justiça"] == 8
     assert quantos["Pessoal"] == 6
     pedido = funcoes.PROMPT_DIAGNOSTICO_ORGAO
-    for trecho_do_pedido in ['até 8 em "Programas e ações", "Contratos" e "Pendências com controle e justiça"',
+    for trecho_do_pedido in ['até 8 em "Programas e ações", "Contratos", "Pendências com controle e justiça" e',
+                             "- Funcionamento das unidades: como cada subsecretaria ou unidade principal atua",
+                             "- Dificuldades e problemas: os entraves que a própria secretaria aponta",
+                             "cargos existentes, ocupados e vagos", "execução por ação orçamentária em 2025 e 2026",
                              "de que tamanho é", "Primeiro os que dão a ESCALA da secretaria",
                              'NÃO é "não se sabe"', 'registre o que o DOSSIÊ traz\nde inquérito, operação, auditoria']:
         assert trecho_do_pedido in pedido, trecho_do_pedido
@@ -190,18 +194,18 @@ def test_rodada_gera_o_dossie_com_a_lei_e_sem_cara_de_relatorio_de_riscos(llm):
     assert any(i["afirmacao"].startswith("No PLOA 2027, a proposta para Secretaria de Estado de Educação") and
                i["tipo_fonte"] == "documento_oficial" and i["checagem"] == "conferido" for i in itens)
     assert r["registro"]["orcamento_na_lei"]["total_ploa"] == 8154088572
-    assert "| Secretaria de Estado de Educação | R$ 6.702.485.057 | R$ 7.654.748.512 |" in md
+    assert "| Secretaria de Estado de Educação | R$ 6.702.485.057 | R$ 7.654.748.512 | +R$ 952.263.455 (+14,2%) |" in md
     assert "| Dotação inicial na LOA 2026 | R$ 6.702.485.057 (órgão, com as outras unidades: R$ 7.182.384.829) |" in md
     assert "(Caderno de RH da SEPLAG, LOA 2026 e PLOA 2027)" in md.split("\n")[0]
     # o dossiê não fala de riscos nem de agentes, não corta nomes e não tem "(s)"
     for fora in ("Confiança", "Analisa riscos", "agentes de IA", "(s)", "…", "os ids são", "(informado pelo órgão)"):
         assert fora not in md, fora
-    assert "| Contrato 99/2026 | Empresa X | Manutenção predial | R$ 398.750.000,00 | 15/12/2026 |" in md
-    assert "- **Contrato 99/2026 (Empresa X):** vence em breve, valor alto. Vence antes da posse." in md
+    assert ("- **Contrato 99/2026 – Empresa X** · R$ 398.750.000,00 · até 15/12/2026. Manutenção predial. Vence em breve, "
+            "valor alto. Vence antes da posse.") in md
     assert md.rstrip().endswith("Método e conferências no arquivo de auditoria._")
     assert "; Caderno de RH da SEPLAG, LOA 2026 e PLOA 2027 entram por código, das bases oficiais." in md
     textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
-    assert "Antes de ler" not in textos and "Panorama" in textos and "6. Orçamento" in textos
+    assert "Antes de ler" not in textos and "Panorama" in textos and "a) Planejamento e execução orçamentária" in textos
     assert sum(len(p) for p in md.split("## Panorama")[0].split("\n")) < 520        # o preâmbulo cabe em poucas linhas
     # secretaria fora da tabela: o dossiê sai como antes, sem o quadro da lei
     outro = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)["dossie_md"]
@@ -239,3 +243,115 @@ def test_nota_em_italico_no_word_mesmo_com_sublinhado_no_nome_do_arquivo(funcoes
     # parágrafo que só começa e termina com trechos em itálico não é uma nota inteira
     assert any(p.text == "uma nota e depois outra nota" for p in pars)
     assert any(p.text == "Não se sabe: Organograma atualizado." for p in pars)
+
+
+def test_orcamento_por_unidade_em_detalhe(funcoes):
+    from transicao import caderno, documentos
+    lei = caderno.orcamento_na_lei("SEEDUC")
+    seeduc, degase, cee = lei["unidades"]
+    # as ações de cada unidade fecham com o total da unidade nas duas leis
+    for u in (seeduc, degase, cee):
+        assert sum(a["loa"] or 0 for a in u["acoes"]) == u["loa"] and sum(a["ploa"] or 0 for a in u["acoes"]) == u["ploa"]
+    # a ação que muda de subfunção de uma lei para a outra é a mesma ação (não "extinta" e "nova")
+    rede = [a for a in seeduc["acoes"] if a["acao"] == "1546"]
+    assert len(rede) == 1 and (rede[0]["loa"], rede[0]["ploa"]) == (334689368, 173027800)
+    md = documentos._quadro_da_lei(lei)
+    for linha in [
+        "**Secretaria de Estado de Educação** (unidade orçamentária 18010): LOA 2026 R$ 6.702.485.057; PLOA 2027 "
+        "R$ 7.654.748.512; variação +R$ 952.263.455 (+14,2%). No PLOA 2027, os programas de gestão administrativa e "
+        "encargos somam R$ 6.329.757.820 (82,7%) e as ações finalísticas, R$ 1.324.990.692 (17,3%).",
+        "| Ação (como está na lei) | LOA 2026 | PLOA 2027 | Variação |",
+        "| 4968 – Remun. profis. em ef. ex. - Ens Med - 1070 (gestão) | – | R$ 2.841.492.907 | nova no PLOA 2027 |",
+        "| 2660 – Pessoal e Encargos Sociais (gestão) | R$ 462.217.963 | R$ 211.944.071 | −R$ 250.273.892 (−54,1%) |",
+        "**Departamento Geral de Ações Socio-Educativas** (unidade orçamentária 18020): LOA 2026 R$ 479.889.772; PLOA 2027 "
+        "R$ 499.330.060; variação +R$ 19.440.288 (+4,1%).",
+        "| 2660 – Pessoal e Encargos Sociais (gestão) | R$ 310.255.159 | R$ 361.244.971 | +R$ 50.989.812 (+16,4%) |"]:
+        assert linha in md, linha
+    assert "não está no PLOA 2027" not in md.split("**Departamento")[0]          # nenhuma das maiores sumiu de verdade
+    # o resto das ações vai somado, e a soma da tabela é o total da unidade
+    bloco = md.split("**Secretaria de Estado de Educação** (unidade")[1].split("**Departamento")[0]
+    valores = lambda col: [int(l.split("|")[col].replace("R$", "").replace(".", "").strip() or 0)
+                           for l in bloco.split("\n") if l.startswith("| ") and "Ação (como" not in l and "–  " not in l
+                           and l.split("|")[col].strip() != "–"]
+    assert sum(valores(3)) == 7654748512 and sum(valores(2)) == 6702485057
+    assert re.search(r"\| Outras \d+ ações \| R\$ [\d.]+ \| R\$ [\d.]+ \|", bloco)
+    # unidade residual (R$ 10 mil) fica só na tabela dos totais
+    assert "**Conselho Estadual de Educação** (unidade" not in md
+    assert documentos._variacao(100, 150) == "+R$ 50 (+50,0%)" and documentos._variacao(200, 150) == "−R$ 50 (−25,0%)"
+    assert documentos._variacao(None, 5) == "–" and documentos._variacao(5, 5) == "sem variação"
+    # no Word, as tabelas por unidade saem inteiras
+    import docx
+    doc = docx.Document(io.BytesIO(funcoes.gerar_docx("## 6. Orçamento\n" + md, {"orgao": "x", "assunto": "y", "tipo": "z", "data": "w"})))
+    assert len(doc.tables) == 3
+
+
+def test_cruzamento_com_o_plano_de_governo_conferido_por_codigo(llm, funcoes):
+    from transicao import caderno, documentos
+    lei = caderno.orcamento_na_lei("SEEDUC")
+    plano = {t["id"]: t for t in caderno.plano()["trechos"]}
+    cita = lambda k, n=10: " ".join(plano[k]["texto"].replace("\x07", " ").split()[:n])
+    fatos = [{"id": "F13", "texto": "Foram ofertadas 193.026.460 refeições até a data-base."},
+             {"id": "V4", "texto": "ARP de absorventes, R$ 1.374.895,36 (Fim da requisição), em 28/10/2026"}]
+    llm.cruzamento_plano = {"compromissos": [
+        {"trecho_id": "P24.9", "citacao": cita("P24.9"), "fatos": ["V4", "F999"], "acoes": []},
+        {"trecho_id": "P22.9", "citacao": cita("P22.9"), "fatos": ["F13"],
+         "acoes": ["18010:12.306.0443.2421", "18010:12.122.0002.2660", "99999:inventada"]},
+        {"trecho_id": "P22.4", "citacao": cita("P22.4"), "fatos": [], "acoes": []},
+        {"trecho_id": "P22.5", "citacao": "reforço escolar para todos os alunos da rede", "fatos": [], "acoes": []},   # não é literal
+        {"trecho_id": "P22.9", "citacao": cita("P22.9"), "fatos": [], "acoes": []},                                     # repetido
+        {"trecho_id": "P999.1", "citacao": "x", "fatos": [], "acoes": []},                                              # não existe
+        {"trecho_id": next(k for k, t in plano.items() if t["tipo"] != "compromisso"), "citacao": "x"}]}               # não é compromisso
+    uso = []
+    c = caderno.cruzar_plano(CFG["modelo_auxiliar"], "SEEDUC – Secretaria de Estado de Educação", lei, fatos, uso)
+    assert [x["id"] for x in c["compromissos"]] == ["P22.4", "P22.9", "P24.9"]            # na ordem do plano
+    assert [r["trecho_id"] for r in c["recusados"]] == ["P22.5"] and c["no_plano"] == 170
+    merenda = c["compromissos"][1]
+    assert [f["id"] for f in merenda["fatos"]] == ["F13"]
+    assert [a["chave"] for a in merenda["acoes"]] == ["18010:12.306.0443.2421"]           # ação de gestão e inventada caem
+    assert [f["id"] for f in c["compromissos"][2]["fatos"]] == ["V4"]                     # fato que não existe cai
+    assert uso and uso[0]["etapa"] == "dossiê: cruzamento com o plano de governo"
+    # o pedido leva os compromissos, os fatos com id e só as ações finalísticas
+    assert '"id": "P22.4"' in llm.pedido_plano and '"id": "V4"' in llm.pedido_plano and "Oferta de Nutrição Escolar" in llm.pedido_plano
+    assert "Pessoal e Encargos Sociais" not in llm.pedido_plano and "\\u0007" not in llm.pedido_plano
+    # no documento, compacto: quem tem correspondência numa linha; os sem correspondência juntos
+    md = documentos.markdown_plano(c)
+    for linha in [
+        "**Para 2027: o que o plano de governo prevê para a área**",
+        "_3 compromissos do Plano de Governo 2027–2030 (Plano do Rio Real) tratam da área da secretaria.",
+        "- **Estrutura digna e escola aberta** (p. 22). Hoje, no material: Foram ofertadas 193.026.460 refeições até a "
+        "data-base. No orçamento: ação 2421, Oferta de Nutrição Escolar, PLOA 2027 R$ 396.962.081 (LOA 2026 R$ 251.981.179).",
+        "- **Escola Para Elas** (p. 24). Hoje, no material: ARP de absorventes, R$ 1.374.895,36 (Fim da requisição), em 28/10/2026.",
+        "- **Sem correspondência apontada nos fatos levantados do material nem no orçamento (1):** Alfabetização na idade "
+        "certa em regime de colaboração com os municípios (p. 22)."]:
+        assert linha in md, linha
+    assert "\x07" not in md and "(s)" not in md and "…" not in md and len(md.split("\n")) == 5
+    assert documentos._nome_do_compromisso("Vem Pra Aula: alerta precoce de evasão pela frequência.") == "Vem Pra Aula"
+    # nenhum compromisso apontado: o capítulo diz isso; sem a base do plano: nada
+    llm.cruzamento_plano = {"compromissos": []}
+    vazio = caderno.cruzar_plano(CFG["modelo_auxiliar"], "X", None, [], [])
+    assert "nenhum que trate diretamente da área da secretaria" in documentos.markdown_plano(vazio)
+    assert documentos.markdown_plano(None) == ""
+    fontes = documentos.fontes_do_dossie({}, {}, None, None, c)
+    assert "- Plano de Governo 2027–2030 (Plano do Rio Real) · compromisso de governo, lido da base embutida" in fontes
+
+
+def test_rodada_do_dossie_cruza_o_plano_e_so_no_dossie(llm):
+    from transicao import analise, caderno
+    plano = {t["id"]: t for t in caderno.plano()["trechos"]}
+    llm.cruzamento_plano = {"compromissos": [{"trecho_id": "P22.9", "citacao": " ".join(plano["P22.9"]["texto"].replace("\x07", " ").split()[:8]),
+                                              "fatos": ["F2", "V1"], "acoes": ["18010:12.306.0443.2421"]}]}
+    r = analise.analisar_orgao("SEEDUC", RELATORIO, CFG)
+    md = r["dossie_md"]
+    orcamento = md.split("## a) Planejamento e execução orçamentária")[1].split("## b) Cargos")[0]
+    assert "**Para 2027: o que o plano de governo prevê para a área**" in orcamento and "- **Estrutura digna e escola aberta** (p. 22)." in orcamento
+    assert "ação 2421, Oferta de Nutrição Escolar" in md and "Plano de Governo 2027–2030 (Plano do Rio Real) ·" in md
+    assert r["registro"]["cruzamento_plano"]["compromissos"][0]["id"] == "P22.9"
+    assert any(u["etapa"] == "dossiê: cruzamento com o plano de governo" for u in r["registro"]["uso_tokens"])
+    # os fatos do pedido: os do diagnóstico e os do calendário da secretaria
+    assert '"id": "F2"' in llm.pedido_plano and '"id": "V1"' in llm.pedido_plano
+    assert "Plano de governo" not in r["riscos_md"]
+    # sem o dossiê entre os produtos, o cruzamento não roda
+    antes = sum("Você cruza o Plano de Governo" in str(c["mensagens"][0]["content"]) for c in llm.chamadas)
+    r = analise.analisar_orgao("SEEDUC", RELATORIO, dict(CFG, produtos=["riscos"]))
+    assert sum("Você cruza o Plano de Governo" in str(c["mensagens"][0]["content"]) for c in llm.chamadas) == antes
+    assert r["registro"]["cruzamento_plano"] is None
