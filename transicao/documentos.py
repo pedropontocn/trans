@@ -228,6 +228,13 @@ def _desenhar_blocos(alvo, blocos):
             if re.match(r"\*\*R\d+ · ", bloco[1]):          # a linha de título de um risco: respiro antes, junto do corpo
                 par.paragraph_format.space_before = Pt(10)
                 par.paragraph_format.keep_with_next = True
+            if (re.fullmatch(r"_[^_].*_", bloco[1], re.S)      # parágrafo inteiro entre "_": nota, em itálico e menor
+                    and not re.search(r"(?<!\w)_|_(?!\w)", bloco[1][1:-1])):   # (sublinhado só dentro de palavra)
+                # (as marcas saem aqui: nome de arquivo com "_" no meio não deixa sublinhado solto no texto)
+                _texto_inline(par, bloco[1][1:-1], Pt(9.5), CINZA)
+                for run in par.runs:
+                    run.italic = True
+                continue
             _texto_inline(par, bloco[1])
         elif tipo in ("ul", "ol"):
             for i, item in enumerate(bloco[1], 1):
@@ -814,22 +821,16 @@ def _lista(nomes):
 
 
 def antes_de_ler_dossie(data_corte, cortes=None, bases=None, imprensa=False):
-    """A abertura do dossiê: o que é (um retrato, sem riscos), como ler a base de cada informação, o material lido em
-    parte (em uma linha só) e as ressalvas. bases: as bases oficiais embutidas que entraram por código."""
+    """A abertura do dossiê, curta: duas notas em itálico, sem título. A primeira diz o que é e que não passou por
+    revisão; a segunda, como ler a origem de cada informação, a regra dos contratos e o material lido em parte.
+    bases: as bases oficiais embutidas que entraram por código."""
     de_onde = "do que ela enviou e de fontes oficiais" + (f" ({_lista(bases)})" if bases else "")
-    linhas = ["## Antes de ler",
-              f"- **O que é:** retrato de como a secretaria funciona hoje, gerado com IA a partir {de_onde}, com data de "
-              f"corte {data_corte or 'não informada'}. Descreve; não avalia nem recomenda. Os riscos e os pontos de "
-              "decisão estão no relatório de riscos.",
-              "- **Base de cada informação:** o que não traz marca foi informado pela secretaria. O que vem de outra "
-              "fonte traz a marca: \"fonte oficial ✔\" é documento ou dado oficial conferido"
-              + ("; \"imprensa ✔\" é notícia conferida na página, e só entra no capítulo de pendências." if imprensa else ".")]
+    ler = ("Sem marca: informado pela secretaria. Outra origem vem marcada: \"fonte oficial ✔\""
+           + (" ou \"imprensa ✔\" (só nas pendências)" if imprensa else "") + ". Contratos: só os que a secretaria informou.")
     if cortes:
-        linhas.append("- **Material lido em parte:** " + "; ".join(cortes) + ". O que ficou de fora não entrou.")
-    linhas.append("- **Contratos:** só o que a secretaria informou. Bases externas (SIGA, PNCP, portais) não são "
-                  "usadas, por trazerem datas defasadas; contrato que a secretaria não citou não aparece aqui.")
-    linhas.append("- **Sem revisão da equipe:** confira antes de usar.")
-    return "\n".join(linhas)
+        ler += " Material lido em parte: " + "; ".join(cortes) + "."
+    return (f"_Retrato de como a secretaria funciona hoje, gerado com IA a partir {de_onde}, com data de corte "
+            f"{data_corte or 'não informada'}. Sem revisão da equipe: confira antes de usar._\n\n_{ler}_")
 
 
 def nota_dossie(registro_id, modelos, data_corte, bases=None):
@@ -852,7 +853,8 @@ def cortes_de_leitura(manifesto=None, avisos=None):
     relatório que passou do limite (pelos avisos da limpeza)."""
     cortes = []
     for c in (manifesto or {}).get("cortados") or []:
-        cortes.append(f"{c['arquivo']} (lidos {_tamanho(c['usados'])} de {_tamanho(c['caracteres'])} caracteres)")
+        total = _tamanho(c["caracteres"])
+        cortes.append(f"{c['arquivo']} (lidos {_tamanho(c['usados'])} de {total}{' de' if total.endswith('milhões') else ''} caracteres)")
     for a in avisos or []:
         if "foi cortado" in a:
             cortes.append(re.sub(r"^⚠️\s*", "", a).rstrip(". ").replace(" e não entra na análise", ""))

@@ -192,7 +192,7 @@ def test_rodada_gera_o_dossie_com_a_lei_e_sem_cara_de_relatorio_de_riscos(llm):
     assert r["registro"]["orcamento_na_lei"]["total_ploa"] == 8154088572
     assert "| Secretaria de Estado de Educação | R$ 6.702.485.057 | R$ 7.654.748.512 |" in md
     assert "| Dotação inicial na LOA 2026 | R$ 6.702.485.057 (órgão, com as outras unidades: R$ 7.182.384.829) |" in md
-    assert "(Caderno de RH da SEPLAG, LOA 2026 e PLOA 2027)" in md.split("\n")[1]
+    assert "(Caderno de RH da SEPLAG, LOA 2026 e PLOA 2027)" in md.split("\n")[0]
     # o dossiê não fala de riscos nem de agentes, não corta nomes e não tem "(s)"
     for fora in ("Confiança", "Analisa riscos", "agentes de IA", "(s)", "…", "os ids são", "(informado pelo órgão)"):
         assert fora not in md, fora
@@ -201,10 +201,11 @@ def test_rodada_gera_o_dossie_com_a_lei_e_sem_cara_de_relatorio_de_riscos(llm):
     assert md.rstrip().endswith("Método e conferências no arquivo de auditoria._")
     assert "; Caderno de RH da SEPLAG, LOA 2026 e PLOA 2027 entram por código, das bases oficiais." in md
     textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
-    assert "Antes de ler" in textos and "6. Orçamento" in textos
+    assert "Antes de ler" not in textos and "Panorama" in textos and "6. Orçamento" in textos
+    assert sum(len(p) for p in md.split("## Panorama")[0].split("\n")) < 520        # o preâmbulo cabe em poucas linhas
     # secretaria fora da tabela: o dossiê sai como antes, sem o quadro da lei
     outro = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)["dossie_md"]
-    assert "Orçamento na lei" not in outro and "PLOA 2027" not in outro.split("\n")[1]
+    assert "Orçamento na lei" not in outro and "PLOA 2027" not in outro.split("\n")[0]
 
 
 def test_corte_minimo_nao_vira_cerca_de_zero_por_cento(funcoes):
@@ -215,6 +216,26 @@ def test_corte_minimo_nao_vira_cerca_de_zero_por_cento(funcoes):
     _, avisos = funcoes.limpar_relatorio(texto, limite=len(texto) // 2)
     assert "(cerca de 4" in next(a for a in avisos if "foi cortado" in a) or "(cerca de 5" in next(a for a in avisos if "foi cortado" in a)
     # no dossiê, todo o material lido em parte cabe numa linha
-    md = funcoes.antes_de_ler_dossie("10/11/2026", ["A.pdf (lidos 266 mil de 435 mil caracteres)", "B.xlsx (lidos 133 mil de 12,3 milhões caracteres)"])
+    md = funcoes.antes_de_ler_dossie("10/11/2026", ["A.pdf (lidos 266 mil de 435 mil caracteres)", "B.xlsx (lidos 133 mil de 12,3 milhões de caracteres)"])
     assert md.count("Material lido em parte") == 1 and "A.pdf (lidos 266 mil de 435 mil caracteres); B.xlsx" in md
-    assert "imprensa" not in md and "Confiança" not in md
+    assert "imprensa" not in md and "Confiança" not in md and "##" not in md and "\n- " not in md
+    assert funcoes.cortes_de_leitura({"cortados": [{"arquivo": "B.xlsx", "caracteres": 12337906, "usados": 133000}]}) == [
+        "B.xlsx (lidos 133 mil de 12,3 milhões de caracteres)"]
+    com = funcoes.antes_de_ler_dossie("10/11/2026", None, ["LOA 2026"], imprensa=True)
+    assert '"fonte oficial ✔" ou "imprensa ✔" (só nas pendências). Contratos: só os que a secretaria informou._' in com
+    assert "(LOA 2026)" in com and "Material lido em parte" not in com
+
+
+def test_nota_em_italico_no_word_mesmo_com_sublinhado_no_nome_do_arquivo(funcoes):
+    import docx
+    md = ("_Material lido em parte: SEEDUC_Transicao_Modelo_2026.xlsx (lidos 133 mil de 12,3 milhões de caracteres)._\n\n"
+          "_Não se sabe:_ Organograma atualizado.\n\n_uma nota_ e depois _outra nota_\n\nTexto comum.")
+    pars = [p for p in docx.Document(io.BytesIO(funcoes.gerar_docx(md, {"orgao": "x", "assunto": "y", "tipo": "z", "data": "w"}))).paragraphs]
+    nota = next(p for p in pars if p.text.startswith("Material lido em parte"))
+    assert nota.text.endswith("caracteres).") and "SEEDUC_Transicao_Modelo_2026.xlsx" in nota.text    # sem "_" nas pontas
+    assert all(r.italic for r in nota.runs)
+    comum = next(p for p in pars if p.text == "Texto comum.")
+    assert not any(r.italic for r in comum.runs)
+    # parágrafo que só começa e termina com trechos em itálico não é uma nota inteira
+    assert any(p.text == "uma nota e depois outra nota" for p in pars)
+    assert any(p.text == "Não se sabe: Organograma atualizado." for p in pars)
