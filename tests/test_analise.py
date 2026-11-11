@@ -546,9 +546,13 @@ def test_antes_de_ler_abre_dossie_e_relatorio(llm):
     corte = "Controle.xlsx (lidos 60 mil de 93 mil caracteres)"
     # o dossiê abre e fecha como dossiê: um retrato, sem confiança de riscos nem agentes; material cortado em uma linha
     dossie_md = r["dossie_md"]
-    assert dossie_md.startswith("## Antes de ler\n- **O que é:** retrato de como a secretaria funciona hoje")
-    assert f"- **Material lido em parte:** {corte}. O que ficou de fora não entrou." in dossie_md
-    assert "Os riscos e os pontos de decisão estão no relatório de riscos." in dossie_md
+    # o preâmbulo é curto: duas notas, sem título nem lista
+    assert dossie_md.startswith("_Retrato de como a secretaria funciona hoje, gerado com IA a partir do que ela enviou")
+    preambulo = dossie_md.split("## Panorama")[0].strip().split("\n\n")
+    assert len(preambulo) == 2 and all(p.startswith("_") and p.endswith("_") and "\n" not in p for p in preambulo)
+    assert preambulo[0].endswith("Sem revisão da equipe: confira antes de usar._")
+    assert preambulo[1].endswith(f"Contratos: só os que a secretaria informou. Material lido em parte: {corte}._")
+    assert "Antes de ler" not in dossie_md
     for fora in ("Confiança", "Analisa riscos", "agentes de IA", "Material cortado"):
         assert fora not in dossie_md, fora
     assert dossie_md.rstrip().split("\n")[-1].startswith("_Dossiê gerado com IA (registro ")
