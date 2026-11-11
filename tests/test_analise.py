@@ -544,8 +544,14 @@ def test_antes_de_ler_abre_dossie_e_relatorio(llm):
     manifesto = {"cortados": [{"arquivo": "Controle.xlsx", "caracteres": 93411, "usados": 60000}]}
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG, manifesto=manifesto)
     corte = "Controle.xlsx (lidos 60 mil de 93 mil caracteres)"
-    assert r["dossie_md"].startswith("## Antes de ler\n- **O que é:**")
-    assert "**Confiança desta análise:" in r["dossie_md"] and corte in r["dossie_md"]
+    # o dossiê abre e fecha como dossiê: um retrato, sem confiança de riscos nem agentes; material cortado em uma linha
+    dossie_md = r["dossie_md"]
+    assert dossie_md.startswith("## Antes de ler\n- **O que é:** retrato de como a secretaria funciona hoje")
+    assert f"- **Material lido em parte:** {corte}. O que ficou de fora não entrou." in dossie_md
+    assert "Os riscos e os pontos de decisão estão no relatório de riscos." in dossie_md
+    for fora in ("Confiança", "Analisa riscos", "agentes de IA", "Material cortado"):
+        assert fora not in dossie_md, fora
+    assert dossie_md.rstrip().split("\n")[-1].startswith("_Dossiê gerado com IA (registro ")
     # o relatório de riscos abre em três linhas (o que é, confiança, como ler), mais o material cortado
     riscos_md = r["riscos_md"]
     abertura = riscos_md.split("**2 pontos de decisão")[0].strip().split("\n")

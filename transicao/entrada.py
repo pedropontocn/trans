@@ -51,8 +51,9 @@ def limpar_relatorio(texto, limite=None):
         avisos.append(f"{reduzido:,} caracteres de instruções, dados pessoais e espaço vazio de tabelas foram "
                       "removidos.".replace(",", "."))
     if len(texto) > limite:
+        pct = (len(texto) - limite) * 100 // len(texto)
         avisos.append(f"⚠️ O relatório tem {len(texto):,} caracteres e passou do limite de {limite:,}: o final "
-                      f"(cerca de {(len(texto) - limite) * 100 // len(texto)}%) foi cortado e não entra na análise."
+                      f"({f'cerca de {pct}%' if pct else 'menos de 1%'}) foi cortado e não entra na análise."
                       .replace(",", "."))
         texto = texto[:limite]
     return texto, avisos

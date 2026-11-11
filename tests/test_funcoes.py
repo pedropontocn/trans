@@ -861,21 +861,43 @@ def test_organograma_em_arvore(funcoes):
 
 def test_dossie_so_com_o_que_a_secretaria_informou_e_fonte_oficial(funcoes):
     from transicao import documentos
-    it = lambda t, r: {"id": "F1", "texto": t, "rotulo": r, "url": "", "origem_item": ""}
+    it = lambda t, r, o="": {"id": "F1", "texto": t, "rotulo": r, "url": "", "origem_item": o}
     diag = {"secoes": [{"titulo": "Programas e ações", "itens": [
                 it("Programa A atende 92 municípios.", "informado pelo órgão"),
-                it("Decreto fixa a meta de 10 mil casas.", "confirmado em fonte oficial"),
+                it("Decreto fixa a meta de 10 mil casas.", "confirmado em fonte oficial", "O1"),
                 it("Jornal diz que o programa atrasou.", "fonte pública conferida"),
-                it("Blog diz outra coisa.", "fonte pública não conferida")], "leitura": "x", "nao_se_sabe": []}],
+                it("Blog diz outra coisa.", "fonte pública não conferida")], "leitura": "x", "nao_se_sabe": []},
+                       {"titulo": "Pendências com controle e justiça", "itens": [
+                it("A secretaria informa uma determinação do TCE-RJ.", "informado pelo órgão"),
+                it("O TCE-RJ abriu inquérito sobre obras.", "fonte pública conferida", "O2"),
+                it("Site diz que há outra apuração.", "fonte pública não conferida")], "leitura": "", "nao_se_sabe": ["Prazo da determinação"]}],
             "indicadores": [{"nome": "LOA", "valor": "R$ 1 bi", "rotulo": "confirmado em fonte oficial"},
                             {"nome": "Segundo a imprensa", "valor": "R$ 9 bi", "rotulo": "fonte pública conferida"}],
             "organograma": [{"unidade": "Gabinete", "sigla": "", "subordinada_a": "", "titular": "", "rotulo": "informado pelo órgão"},
                             {"unidade": "Unidade da notícia", "sigla": "", "subordinada_a": "Gabinete", "titular": "",
                              "rotulo": "fonte pública conferida"}]}
-    md = documentos.markdown_capitulos(diag)
-    assert "92 municípios" in md and "10 mil casas" in md
-    assert "Jornal" not in md and "Blog" not in md and "Outros 2 fato(s) deste tema vêm de imprensa" in md
+    dossie = {"itens": [{"id": "O1", "fonte": "Decreto 50.003", "data_fonte": "19/11/2025", "url": "https://rj.gov.br/d",
+                         "tipo_fonte": "documento_oficial", "checagem": "conferido"},
+                        {"id": "O2", "fonte": "G1", "data_fonte": "06/02/2026", "url": "https://g1.globo.com/a",
+                         "tipo_fonte": "imprensa", "checagem": "conferido"}]}
+    md = documentos.markdown_capitulos(diag, dossie=dossie)
+    # o que a secretaria informou vem sem marca; a fonte oficial vem com a marca e a fonte por extenso
+    assert "- Programa A atende 92 municípios.\n" in md and "(informado pelo órgão)" not in md
+    assert "- Decreto fixa a meta de 10 mil casas. _(fonte oficial ✔: [Decreto 50.003, 19/11/2025](https://rj.gov.br/d))_" in md
+    assert "Jornal" not in md and "Blog" not in md
+    assert "_2 outros fatos deste tema vêm de imprensa ou de fonte não oficial e ficam no relatório de riscos e na auditoria._" in md
+    # só no capítulo de pendências a notícia conferida entra, com a marca de imprensa; a não conferida fica de fora
+    assert "- O TCE-RJ abriu inquérito sobre obras. _(imprensa ✔: [G1, 06/02/2026](https://g1.globo.com/a))_" in md
+    assert "Site diz" not in md
+    assert "_1 outro fato deste tema vem de fonte que não pôde ser conferida e fica no relatório de riscos e na auditoria._" in md
+    assert "\n\n_Não se sabe:_ Prazo da determinação.\n\n_1 outro fato" in md          # em parágrafos separados, com ponto
+    assert "(s)" not in md
     assert "Unidade da notícia" not in md and "Gabinete" in md
     ficha = documentos.ficha_rapida(diag)
-    assert "| LOA | R$ 1 bi |" in ficha and "Segundo a imprensa" not in ficha
+    assert "| LOA | R$ 1 bi |" in ficha and "Segundo a imprensa" not in ficha and "| Estrutura | 1 unidade no organograma |" in ficha
+    # o anexo de fontes só traz o que o corpo usa, sem códigos
+    fontes = documentos.fontes_do_dossie(diag, dossie)
+    assert "- [Decreto 50.003, 19/11/2025](https://rj.gov.br/d) · ✔ conferido na fonte" in fontes
+    assert "- [G1, 06/02/2026](https://g1.globo.com/a) · ✔ conferido na fonte" in fontes
+    assert "O1" not in fontes and "O2" not in fontes and "os ids" not in fontes
     assert len(diag["secoes"][0]["itens"]) == 4                     # o diagnóstico (que vai aos riscos) segue inteiro
