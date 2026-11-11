@@ -397,6 +397,23 @@ def para_a_pauta(cruzamento):
              "apontado_por": ["Cruzamento com o TCE-RJ"]}]
 
 
+def linha_do_dossie(cruzamento):
+    """O cruzamento em uma linha, para o item de auditorias do dossiê; "" se não houve consulta."""
+    r = (cruzamento or {}).get("resumo") or {}
+    if not cruzamento or (cruzamento.get("erros") and not cruzamento.get("penalidades")) or "desde" not in r:
+        return ""
+    marca = f" _(fonte oficial ✔: [TCE-RJ, dados abertos, consulta em {_consulta(cruzamento)}]({DOCUMENTACAO}))_"
+    if not r.get("recentes"):
+        return (f"- Multas e débitos no TCE-RJ: nenhuma condenação de {r['desde']} para cá em processos do órgão e das "
+                f"vinculadas." + marca)
+    fora = [numero for numero, lista in _por_processo(cruzamento) if not lista[0]["citado"]]
+    return (f"- Multas e débitos no TCE-RJ: de {r['desde']} para cá, {_contagem(r['multas_recentes'], r['debitos_recentes'])}, "
+            f"em {_n(r['processos_recentes'], 'processo', 'processos')} do órgão e das vinculadas"
+            + ("; todos aparecem no material enviado." if not fora else
+               f"; {_n(len(fora), 'não aparece', 'não aparecem')} no material enviado ({', '.join(fora[:4])}"
+               f"{' e outros' if len(fora) > 4 else ''}).") + marca)
+
+
 def _fora_da_contagem(cruzamento):
     """As linhas sobre nomes antigos de secretaria que podem ser antecessoras e ainda não têm ligação confirmada."""
     desde = (cruzamento.get("resumo") or {}).get("desde")

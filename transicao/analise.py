@@ -19,7 +19,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-from . import checklist, confronto as conf, revisao, documentos, entrada, folha, imagens, modelo, painel, pesquisa, produtos, riscos, tce, verificacao
+from . import (checklist, confronto as conf, revisao, documentos, entrada, folha, imagens, modelo, painel, pesquisa, produtos,
+               propostas, riscos, tce, verificacao)
 from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO, esquema_de_modelos
 
 JUNTAS = False          # no modo econômico, as etapas independentes vão juntas para a mesma fila da Batch API
@@ -218,7 +219,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     modelos_agentes = esquema["agentes"]
     # as multas e os débitos que o TCE-RJ aplicou em processos da secretaria, cruzados com o material (por código)
     cruzamento_tce = None
-    if precisa["riscos"] and tce.ligado():
+    if (precisa["riscos"] or "dossie" in escolha) and tce.ligado():
         progresso("Cruzando com as multas e os débitos do TCE-RJ...")
         cruzamento_tce = tce.cruzar(entrada.sigla_conhecida(nome.upper()) or entrada.sigla(nome) or nome, relatorio,
                                     cfg["data_corte"])
@@ -281,6 +282,16 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         neutralidade = _seguro(lambda: riscos.revisar_neutralidade(esquema["neutralidade"], montar_corpo(), uso),
                                {"modelo": esquema["neutralidade"]})()
         revisao_texto = revisao.revisar_texto(principal, resultado, uso, neutralidade.get("recomendacoes_implicitas"))
+    # itens 3 e g do roteiro (só no dossiê): gargalos institucionais e plano dos 100 dias. É o único ponto em que a IA
+    # avalia e propõe; trabalha com fatos com id e o código confere cada item
+    leitura = None
+    if "dossie" in escolha:
+        progresso("Lendo os gargalos institucionais e propondo o plano dos 100 dias...")
+        try:
+            leitura = propostas.ler(principal, nome_de_exibicao(nome),
+                                    documentos.fatos_para_a_leitura(diagnostico, vencimentos, resultado), cfg["data_corte"], uso)
+        except Exception as e:
+            problemas.append(f"gargalos e plano dos 100 dias: {type(e).__name__}: {e}"[:300])
     corpo = montar_corpo() if precisa["riscos"] else documentos.markdown_capitulos(diagnostico, contratos_criticos)
     base = "\n".join([pesquisa.texto_dossie(dossie), relatorio, material])
     numeros = verificacao.verificar_numeros(corpo, base)
@@ -291,7 +302,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
                                  + produtos.PROMPT_DIAGNOSTICO_ORGAO + produtos.PROMPT_CONTRATOS
                                  + checklist.PROMPT_CHECKLIST + riscos.PROMPT_ANALISE
                                  + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO + riscos.PROMPT_VOTO
-                                 + revisao.PROMPT_REVISAO).encode()).hexdigest()[:8]
+                                 + revisao.PROMPT_REVISAO + propostas.PROMPT_LEITURA).encode()).hexdigest()[:8]
     registro_id = f"{versao_prompt}-{hashlib.md5((material + relatorio).encode()).hexdigest()[:8]}"
     modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal,
                "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes)),
@@ -303,10 +314,10 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
                        if s["titulo"] == documentos.CAPITULO_COM_IMPRENSA for i in s["itens"])
     texto_dossie = documentos.dossie_secretaria(
         resultado, diagnostico, None, eventos, dossie, confronto, checklist.markdown(cobertura),
-        documentos.nota_dossie(registro_id, modelos, cfg["data_corte"], bases_por_codigo),
+        documentos.nota_dossie(registro_id, modelos, cfg["data_corte"], bases_por_codigo, bool(leitura)),
         cobertura=cobertura, contratos_criticos=contratos_criticos,
-        antes_md=documentos.antes_de_ler_dossie(cfg["data_corte"], cortes, bases_por_codigo, tem_imprensa),
-        orgao=nome, lei=lei, plano=cruzamento_plano)
+        antes_md=documentos.antes_de_ler_dossie(cfg["data_corte"], cortes, bases_por_codigo, tem_imprensa, bool(leitura)),
+        orgao=nome, lei=lei, plano=cruzamento_plano, leitura=leitura, tce_md=tce.linha_do_dossie(cruzamento_tce))
     texto_riscos = documentos.relatorio_riscos(
         resultado, cobertura, documentos.nota_riscos(registro_id, modelos, revisoes, conferencia_final, revisao_texto),
         diag=diagnostico, dossie=dossie, data_corte=cfg["data_corte"], confianca=confianca,
@@ -325,7 +336,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         "produtos": sorted(escolha),
         "versao": VERSAO, "versao_prompt": versao_prompt, "modelos": modelos, "avisos_relatorio": avisos,
         "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "orcamento_na_lei": dossie.get("orcamento_lei"),
-        "cruzamento_plano": cruzamento_plano,
+        "cruzamento_plano": cruzamento_plano, "gargalos_e_cem_dias": leitura,
         "confronto": confronto, "diagnostico": diagnostico,
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
@@ -377,10 +388,10 @@ COLUNAS_RESUMO = ["orgao", "situacao", "dossie", "itens_dossie", "conferidos", "
 LEIA_ME_PRODUTOS = {
     "painel": "- paineis/: os dados do painel de cada secretaria em JSON (pontos de decisão com janela, prazo, prioridade e\n"
               "  repercussão política, na mesma régua para todas), prontos para o painel unificado.",
-    "dossie": "- dossies/: o dossiê de cada secretaria: como ela funciona hoje (panorama, organograma, programas,\n"
-              "  contratos, pessoal, orçamento por unidade na LOA 2026 e no PLOA 2027, pendências, cruzamento com o\n"
-              "  plano de governo), primeiro o que ela informou, depois as fontes oficiais. O que não traz marca foi\n"
-              "  informado pela secretaria.",
+    "dossie": "- dossies/: o dossiê de cada secretaria, no roteiro da Equipe de Transição: estrutura, funcionamento,\n"
+              "  gargalos institucionais, orçamento por unidade (LOA 2026, PLOA 2027 e plano de governo), cargos,\n"
+              "  contratos, auditorias e convênios, programas, dificuldades e propostas para os primeiros 100 dias.\n"
+              "  O que não traz marca foi informado pela secretaria; os itens 3 e g são leitura e proposta da análise.",
     "riscos": "- riscos/: o relatório de riscos de cada secretaria: os riscos agrupados pela janela de decisão (prazo\n"
               "  vencido, antes da posse, 72 horas, 100 dias), cada um em linhas (o que é, valor, em que pé está, os\n"
               "  contratos do calendário, problema, consequência, ponto de decisão, prazo, o que está contestado,\n"

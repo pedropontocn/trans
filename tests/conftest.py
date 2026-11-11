@@ -146,6 +146,7 @@ class LLMFalso:
                  "trecho": "Empenhado até 23/10/2026: R$ 398.750.000,00"},
                 {"nome": "Inventado", "valor": "R$ 1 bi", "origem": "relatorio", "item": "", "trecho": "frase que não existe"}]}
         self.cruzamento_plano = {"compromissos": []}      # dossiê: cruzamento com o plano de governo
+        self.leitura_institucional = {"gargalos": [], "acoes": []}   # dossiê: gargalos e plano dos 100 dias
         self.contratos_criticos = {"contratos": [
             {"contrato": "Contrato 99/2026", "objeto": "Manutenção predial", "contratado": "Empresa X", "valor": "R$ 398.750.000,00",
              "vigencia": "15/12/2026", "motivos": ["vence em breve", "valor alto"], "observacao": "Vence antes da posse.",
@@ -303,6 +304,9 @@ class LLMFalso:
             nao = [n for n in NAO_ENCONTRADO[camada] if n["bloco"] in grupo]
             return self._resp("Pesquisei. [INÍCIO DO JSON]" + json.dumps({"itens": itens, "nao_encontrado": nao})
                               + "[FIM DO JSON]", entrada=30000, saida=3000, buscas=0 if continuacao else 4)
+        if "Você apoia a Equipe de Transição de Governo" in sistema:
+            self.pedido_leitura = ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.leitura_institucional) + "[FIM DO JSON]")
         if "Você cruza o Plano de Governo" in sistema:
             self.pedido_plano = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.cruzamento_plano) + "[FIM DO JSON]")

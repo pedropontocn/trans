@@ -256,9 +256,9 @@ with st.sidebar:
     st.caption("Marque só o que quer gerar: cada produto roda apenas as etapas de que precisa.")
     p_dossie = st.checkbox(
         "Dossiê da secretaria", value=True,
-        help="Como a secretaria funciona hoje: panorama, organograma, programas, contratos, pessoal, orçamento por "
-             "unidade orçamentária (LOA 2026 e PLOA 2027), pendências e o cruzamento com o plano de governo. Usa o "
-             "material enviado e fontes oficiais; não roda a análise de riscos.")
+        help="Como a secretaria funciona hoje, no roteiro da Equipe de Transição: estrutura, funcionamento, gargalos, "
+             "orçamento por unidade (LOA 2026, PLOA 2027 e plano de governo), cargos, contratos, auditorias e "
+             "convênios, programas, dificuldades e propostas para os primeiros 100 dias. Não roda a análise de riscos.")
     p_riscos = st.checkbox(
         "Relatório de riscos", value=True,
         help="Riscos e pontos de decisão agrupados por janela (contratos, programas, concessões, decisões pendentes "

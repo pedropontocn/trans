@@ -329,9 +329,8 @@ def test_diagnostico_so_com_afirmacoes_conferidas(funcoes, llm):
     assert ids == [f"F{k}" for k in range(1, len(ids) + 1)]                     # numerados para os riscos citarem
     md = funcoes.markdown_capitulos(diag)
     titulos = [l for l in md.splitlines() if l.startswith("## ")]
-    assert titulos == ["## 1. O que faz", "## 2. Como se organiza", "## 3. Programas e ações", "## 4. Principais contratos",
-                       "## 5. Pessoal", "## 6. Orçamento", "## 7. Pendências com controle e justiça",
-                       "## 8. Sistemas, convênios e parcerias"]
+    from test_analise import TITULOS_DO_ROTEIRO
+    assert titulos == TITULOS_DO_ROTEIRO                 # sem a leitura da análise, os itens 3 e g não aparecem
     assert "_Não se sabe:_ Organograma atualizado" in md and "40 subsecretarias" not in md
     assert "A secretaria tem pendências de controle." in md and "└── Subsecretaria de Obras" in md
 
@@ -409,13 +408,13 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
                                       "## Cobertura – o que foi procurado\n| tabela |", nota,
                                       cobertura=cobertura, contratos_criticos=criticos)
     ordem = [texto.index(t) for t in ["## Panorama", "**Ficha rápida**", "| LOA 2026 | R$ 412 mi |",
-                                      "**Lacunas: 1 de 10", "## 1. O que faz", "## 2. Como se organiza",
-                                      "## 4. Principais contratos", "| Contrato 1/2026 |", "## 5. Pessoal",
-                                      "## 8. Sistemas, convênios e parcerias", "## Anexo – Fontes",
+                                      "**Lacunas: 1 de 10", "## 1. Estrutura organizacional vigente", "## 2. Funcionamento atual",
+                                      "## b) Cargos e força de trabalho", "## c) Contratos relevantes e riscos de vencimento",
+                                      "- **Contrato 1/2026 – A** · ", "## e) Programas e serviços essenciais", "## Fontes",
                                       "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
     assert "| tabela |" not in texto and "Cobertura do checklist" not in texto   # a cobertura vai para a auditoria
-    assert texto.count("| Contrato 1/2026 |") == 1                                  # o repetido da planilha não entra duas vezes
+    assert texto.count("**Contrato 1/2026 – A**") == 1                                  # o repetido da planilha não entra duas vezes
     assert "_Não se sabe:_ Organograma atualizado" in texto
     for fora in ("Riscos por prioridade", "### R1.", "Sobre este documento", "Como este documento foi feito", "teme aditivo"):
         assert fora not in texto, fora                                            # riscos e método ficam em outros produtos
@@ -443,7 +442,7 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     assert "## Todas as fontes do dossiê" in auditoria and auditoria.rstrip().endswith("x")
     doc = docx.Document(io.BytesIO(funcoes.gerar_docx(texto, {"orgao": "Equipe", "assunto": "Secretaria de Exemplo"})))
     quebras = sum('w:br w:type="page"' in p._p.xml for p in doc.paragraphs)
-    assert quebras == 1                                                           # só o anexo de fontes em página nova
+    assert quebras == 0                                                           # as fontes seguem na mesma página
 
 
 def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):
@@ -742,7 +741,7 @@ def test_folha_do_caderno_de_rh_entra_como_dado_oficial(funcoes, tmp_path_factor
     md = funcoes.markdown_capitulos({"secoes": []}, None, None, q)
     assert "| 113 | 0 | 113 (100,0%) | R$ 0,92 mi | R$ 8.113,29 |" in md and "pode sair na troca de governo" in md
     assert "o mais recente" not in md
-    assert md.index("## 5. Pessoal") < md.index("**Folha de pessoal**") < md.index("## 6. Orçamento")
+    assert md.index("## b) Cargos e força de trabalho") < md.index("**Folha de pessoal**") < md.index("## c) Contratos")
     # no dossiê: id novo, conferido, firmeza de fonte oficial; o checklist C9 sai por código
     d = {"itens": [], "origem": "arquivo", "nao_encontrado": []}
     funcoes.acrescentar_itens(d, secid)
