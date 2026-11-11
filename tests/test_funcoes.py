@@ -407,42 +407,47 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     texto = funcoes.dossie_secretaria(resultado, diag, [("Contratos que vencem em até 180 dias", "3")], [], d, None,
                                       "## Cobertura – o que foi procurado\n| tabela |", nota,
                                       cobertura=cobertura, contratos_criticos=criticos)
-    ordem = [texto.index(t) for t in ["## Panorama", "**Ficha rápida**", "| LOA 2026 | R$ 412 mi |",
-                                      "**Lacunas: 1 de 10", "## 1. Estrutura organizacional vigente", "## 2. Funcionamento atual",
-                                      "## b) Cargos e força de trabalho", "## c) Contratos relevantes e riscos de vencimento",
-                                      "- **Contrato 1/2026 – A** · ", "## e) Programas e serviços essenciais", "## Fontes",
+    # formato executivo: primeira página com o resumo (abertura e cartões), quebra de página, capítulos curtos e as
+    # fontes numa linha
+    ordem = [texto.index(t) for t in ["## Resumo executivo", "```cartoes", "<<<QUEBRA>>>", "## 1. Orçamento",
+                                      "## 3. Contratos e convênios", "**Contrato 1/2026 – A**", "**Fontes:**",
                                       "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
     assert "| tabela |" not in texto and "Cobertura do checklist" not in texto   # a cobertura vai para a auditoria
     assert texto.count("**Contrato 1/2026 – A**") == 1                                  # o repetido da planilha não entra duas vezes
-    assert "_Não se sabe:_ Organograma atualizado" in texto
+    for fora in ("## 1. Estrutura organizacional vigente", "## 2. Funcionamento atual", "fonte oficial ✔",
+                 "_Não se sabe:_", "## Fontes", "g) Propostas"):
+        assert fora not in texto, fora                                            # o corte executivo
     for fora in ("Riscos por prioridade", "### R1.", "Sobre este documento", "Como este documento foi feito", "teme aditivo"):
         assert fora not in texto, fora                                            # riscos e método ficam em outros produtos
-    # produto 3: o relatório de riscos, em ordem de prazo e sem anexo
+    # produto 3: o relatório de riscos, executivo e sem anexo
     riscos = funcoes.relatorio_riscos(resultado, cobertura, nota, confianca={"nivel": "média", "por_que": ["x"]},
                                       data_corte="04/11/2026")
-    ordem = [riscos.index(t) for t in ["- **O que é:**", "- **Confiança: MÉDIA**", "- **Como ler:**",
-                                       "pontos de decisão, por janela:", "## ", "**R", "- **Problema:**",
-                                       "- **Consequência:**", "- **Ponto de decisão:**", "- **Prazo:**",
-                                       "## Informações que faltam: a pauta de investigação",
-                                       "| # | O que falta | Para que serve | Onde procurar | Risco | Quem apontou |",
+    ordem = [riscos.index(t) for t in ["## Resumo executivo", "| Nº | Ponto de atenção e o que está em jogo |",
+                                       "<<<QUEBRA>>>", "## 1. ", "**1.1 · ", "- **Consequência:**",
+                                       "## Informações que faltam", "| O que falta | O que esclarece | Ponto |",
+                                       "_Análise de riscos gerada com IA", "Confiança média, porque x",
                                        "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
     assert "## Situação" not in riscos and "## Antes de ler" not in riscos                 # direto ao ponto
     assert "Decisões em aberto" not in riscos and "Pedir à secretaria" not in riscos and "Quem decide" not in riscos
-    titulos = re.findall(r"^\*\*(R\d+) · ", riscos, re.M)
+    titulos = re.findall(r"^\*\*(\d+\.\d+) · ", riscos, re.M)
     assert len(titulos) == len(resultado["riscos"][:10]) and len(set(titulos)) == len(titulos)   # todos, uma vez só
-    assert "Anexo" not in riscos and "aditivo irregular" not in riscos and "1. Contratos" not in riscos
+    linhas_do_quadro = re.findall(r"^\| \d+\.\d+ \|", riscos, re.M)
+    assert len(linhas_do_quadro) == len(titulos)                                  # cada ponto também no quadro
+    assert "Anexo" not in riscos and "aditivo irregular" not in riscos
     assert not re.search(r"\((?:[FVO]\d+(?:, )?)+\)", riscos)                              # sem códigos soltos no texto
-    # agrupado por janela, na ordem das janelas
-    janelas = re.findall(r"^## (.+)$", riscos.split("## Informações que faltam")[0], re.M)
-    assert janelas and janelas == [j for j in funcoes.JANELAS_DO_RELATORIO if j in janelas]
+    # agrupado por tema, numerado na ordem
+    temas = re.findall(r"^## (\d+)\. ", riscos.split("## Informações que faltam")[0], re.M)
+    assert temas and temas == [str(k) for k in range(1, len(temas) + 1)]
     # produto 5: a auditoria legível
     auditoria = funcoes.auditoria_secretaria(resultado, d, None, "## Anexo 3 – Como este documento foi feito\nx")
     assert "## Todas as fontes do dossiê" in auditoria and auditoria.rstrip().endswith("x")
     doc = docx.Document(io.BytesIO(funcoes.gerar_docx(texto, {"orgao": "Equipe", "assunto": "Secretaria de Exemplo"})))
     quebras = sum('w:br w:type="page"' in p._p.xml for p in doc.paragraphs)
-    assert quebras == 0                                                           # as fontes seguem na mesma página
+    assert quebras == 1                                                           # só a da primeira página
+    cartoes = doc.tables[0]
+    assert cartoes.cell(0, 0).paragraphs[0].text == "R$\u00a0412 mi" and cartoes.cell(0, 0).paragraphs[1].text == "LOA 2026"   # "R$" não se separa do número
 
 
 def test_riscos_conferidos_e_ordenados_por_codigo(funcoes, llm):

@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-from . import (checklist, confronto as conf, revisao, documentos, entrada, folha, imagens, modelo, painel, pesquisa, produtos,
+from . import (checklist, confronto as conf, revisao, documentos, entrada, executivo, folha, imagens, modelo, painel, pesquisa, produtos,
                propostas, riscos, tce, verificacao)
 from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO, esquema_de_modelos
 
@@ -302,7 +302,8 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
                                  + produtos.PROMPT_DIAGNOSTICO_ORGAO + produtos.PROMPT_CONTRATOS
                                  + checklist.PROMPT_CHECKLIST + riscos.PROMPT_ANALISE
                                  + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO + riscos.PROMPT_VOTO
-                                 + revisao.PROMPT_REVISAO + propostas.PROMPT_LEITURA).encode()).hexdigest()[:8]
+                                 + revisao.PROMPT_REVISAO + propostas.PROMPT_LEITURA
+                                 + executivo.PROMPT_RESUMO_RISCOS + executivo.PROMPT_RESUMO_DOSSIE).encode()).hexdigest()[:8]
     registro_id = f"{versao_prompt}-{hashlib.md5((material + relatorio).encode()).hexdigest()[:8]}"
     modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal,
                "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes)),
@@ -310,19 +311,34 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     cortes = documentos.cortes_de_leitura(manifesto, avisos)
     lei = dossie.get("orcamento_lei")
     bases_por_codigo = (["Caderno de RH da SEPLAG"] if dossie.get("folha") else []) + (["LOA 2026", "PLOA 2027"] if lei else [])
-    tem_imprensa = any(i.get("rotulo") == "fonte pública conferida" for s in diagnostico.get("secoes") or []
-                       if s["titulo"] == documentos.CAPITULO_COM_IMPRENSA for i in s["itens"])
+    # resumo executivo da primeira página (formato que vai ao governador eleito): a IA redige, o código trava (número
+    # fora dos fatos citados, recomendação, responsável); o que não passa sai por código
+    resumo_riscos, resumo_dossie = None, None
+    if "riscos" in escolha and resultado.get("riscos"):
+        progresso("Redigindo o resumo executivo do relatório de riscos...")
+        resumo_riscos = executivo.resumir_riscos(principal, nome_de_exibicao(nome),
+                                                 documentos.riscos_para_o_resumo(resultado, cfg["data_corte"]), uso)
+    if "dossie" in escolha:
+        progresso("Redigindo o resumo executivo do dossiê...")
+        try:
+            resumo_dossie = executivo.resumir_dossie(
+                principal, nome_de_exibicao(nome),
+                documentos.fatos_para_o_resumo_do_dossie(diagnostico, vencimentos, resultado, dossie.get("folha"), lei),
+                uso, documentos.abertura_do_dossie_por_codigo(diagnostico, dossie.get("folha"), lei))
+        except Exception as e:
+            problemas.append(f"resumo executivo do dossiê: {type(e).__name__}: {e}"[:300])
+    uso_total = list(dossie.get("uso") or []) + uso                 # com as chamadas do resumo executivo
+    custo, parcial = modelo.custo_estimado(uso_total)
     texto_dossie = documentos.dossie_secretaria(
         resultado, diagnostico, None, eventos, dossie, confronto, checklist.markdown(cobertura),
-        documentos.nota_dossie(registro_id, modelos, cfg["data_corte"], bases_por_codigo, bool(leitura)),
+        documentos.nota_dossie(registro_id, modelos, cfg["data_corte"], bases_por_codigo, bool(leitura), cortes),
         cobertura=cobertura, contratos_criticos=contratos_criticos,
-        antes_md=documentos.antes_de_ler_dossie(cfg["data_corte"], cortes, bases_por_codigo, tem_imprensa, bool(leitura)),
-        orgao=nome, lei=lei, plano=cruzamento_plano, leitura=leitura, tce_md=tce.linha_do_dossie(cruzamento_tce))
+        orgao=nome, lei=lei, plano=cruzamento_plano, leitura=leitura, resumo=resumo_dossie)
     texto_riscos = documentos.relatorio_riscos(
         resultado, cobertura, documentos.nota_riscos(registro_id, modelos, revisoes, conferencia_final, revisao_texto),
         diag=diagnostico, dossie=dossie, data_corte=cfg["data_corte"], confianca=confianca,
         cortes=cortes, vencimentos=vencimentos, extras=extras(),
-        tce_md=tce.markdown(cruzamento_tce)) if "riscos" in escolha else ""
+        tce_md=tce.markdown_executivo(cruzamento_tce), resumo=resumo_riscos) if "riscos" in escolha else ""
     revisao_texto["alertas_no_documento"] = revisao.alertas_do_documento(texto_riscos)   # a última conferência
     if "dossie" not in escolha:
         texto_dossie = ""
@@ -337,6 +353,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         "versao": VERSAO, "versao_prompt": versao_prompt, "modelos": modelos, "avisos_relatorio": avisos,
         "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "orcamento_na_lei": dossie.get("orcamento_lei"),
         "cruzamento_plano": cruzamento_plano, "gargalos_e_cem_dias": leitura,
+        "resumo_executivo": {"riscos": resumo_riscos, "dossie": resumo_dossie},
         "confronto": confronto, "diagnostico": diagnostico,
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,

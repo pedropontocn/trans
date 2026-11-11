@@ -2,7 +2,7 @@
 Os itens 3 (gargalos) e g (plano dos 100 dias) são o único ponto em que a IA avalia e propõe; o código confere cada um."""
 import io
 
-from test_analise import CFG, RELATORIO, TITULOS_DO_ROTEIRO
+from test_analise import CFG, RELATORIO, TITULOS_DO_ROTEIRO, TITULOS_EXECUTIVOS
 
 FATOS = [
     {"id": "F16", "origem": "item c", "texto": "A limpeza é prestada pela AGILE CORP por meio de Termos de Ajuste de Contas, com R$ 69.395.936,65 registrados."},
@@ -133,22 +133,22 @@ def test_rodada_do_dossie_no_roteiro(llm, tmp_path):
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
     md = r["dossie_md"]
     titulos = [l for l in md.splitlines() if l.startswith("## ")]
-    assert titulos == (["## Panorama"] + TITULOS_DO_ROTEIRO[:2] + ["## 3. Sobreposições, fragmentações e gargalos institucionais"]
-                       + TITULOS_DO_ROTEIRO[2:] + ["## g) Propostas de ações para os primeiros 100 dias", "## Fontes"])
-    assert "- **Gargalo operacional: Licitações adiadas.**" in md
-    assert "- **Definir o destino das licitações adiadas.** As concorrências estão adiadas e as obras não começam." in md
-    assert "Contrato 99/2026.** O contrato vence antes da posse" not in md
+    # formato executivo: resumo na primeira página e os cinco capítulos curtos, na ordem
+    assert titulos[0] == "## Resumo executivo" and titulos[1:] == [t for t in TITULOS_EXECUTIVOS if t in titulos[1:]]
+    assert "## 5. Dificuldades e gargalos" in titulos
+    # a leitura dos gargalos entra no capítulo 5; as propostas para os 100 dias ficam no registro, fora do documento
+    assert "- **Gargalo operacional:** Licitações adiadas." in md
+    assert "Definir o destino das licitações adiadas" not in md and "Primeiros 30 dias" not in md
+    assert r["registro"]["gargalos_e_cem_dias"]["acoes"][0]["acao"] == "Definir o destino das licitações adiadas"
     assert r["registro"]["gargalos_e_cem_dias"]["recusados"][0]["motivo"] == "número que não está nos fatos citados: 99"
-    assert "relatório de riscos)_" in md and ", do calendário da secretaria e do relatório de riscos. Não indicam responsável" in md
-    assert "Descreve; só os itens 3 e g trazem leitura e proposta da análise." in md.split("\n")[0]
-    assert "a leitura dos gargalos (item 3) e as propostas para os 100 dias (item g) são da análise" in md.rstrip().split("\n")[-1]
+    assert "o resumo executivo e a leitura dos gargalos são da análise" in md.rstrip().split("\n")[-1]
     assert r["registro"]["gargalos_e_cem_dias"]["acoes"][0]["fatos"] == ["R1", "V1"]
     assert any(u["etapa"] == "dossiê: gargalos institucionais e plano dos 100 dias" for u in r["registro"]["uso_tokens"])
     # os riscos da rodada entram como fatos da leitura; o relatório de riscos continua sem proposta
     assert '"de": "relatório de riscos"' in llm.pedido_leitura and '"de": "calendário"' in llm.pedido_leitura
     assert "Propostas da análise" not in r["riscos_md"] and "Primeiros 30 dias" not in r["riscos_md"]
     textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
-    assert "g) Propostas de ações para os primeiros 100 dias" in textos and "Fontes" in textos
+    assert "Resumo executivo" in textos and "5. Dificuldades e gargalos" in textos
     # só relatório de riscos: a leitura não roda
     antes = sum("Você apoia a Equipe de Transição de Governo" in str(c["mensagens"][0]["content"]) for c in llm.chamadas)
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, dict(CFG, produtos=["riscos"]))
@@ -157,7 +157,8 @@ def test_rodada_do_dossie_no_roteiro(llm, tmp_path):
     # a leitura fora do ar não derruba o dossiê: os itens 3 e g não aparecem, e o problema fica registrado
     llm.leitura_institucional = "isto não é um objeto"
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, dict(CFG, produtos=["dossie"]))
-    assert "## c) Contratos relevantes" in r["dossie_md"] and "## Panorama" in r["dossie_md"]
+    assert "## 3. Contratos e convênios" in r["dossie_md"] and "## Resumo executivo" in r["dossie_md"]
+    assert "Leitura da análise" not in r["dossie_md"]
 
 
 def test_linha_do_tce_no_item_de_auditorias(monkeypatch, tmp_path):

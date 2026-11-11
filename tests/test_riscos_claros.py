@@ -22,27 +22,29 @@ def _risco(**extra):
 def test_janela_vem_da_data_e_nao_do_voto(funcoes):
     # R7 da SEEDUC: a data era 11/06/2027 e a tabela dizia "Primeiras 72 horas", o voto dos agentes
     md = funcoes.relatorio_riscos({"riscos": [_risco()]}, None, "", data_corte="10/11/2026")
-    assert "## Depois dos 100 dias\n**R1 · Contrato de apoio escolar vence em 11/06/2027** – 11/06/2027 · prioridade alta" in md
-    assert "72 horas" not in md                                   # o voto vencido pela data não aparece nem como disputa
+    assert "**1.1 · Contrato de apoio escolar vence em 11/06/2027**\n" in md
+    assert "_Depois dos 100 dias · 11/06/2027 · prioridade alta · impacto alto_" in md
+    assert "| 11/06/2027<br>Depois dos 100 dias | Alta<br>impacto alto |" in md       # o quadro da primeira página
+    assert "72 horas" not in md and "72 h" not in md              # o voto vencido pela data não aparece nem como disputa
     assert ("- **Prazo:** Vence em 11/06/2027. Para não haver interrupção, a decisão precisa sair até 12/05/2027, "
             "30 dias antes. Janela: depois dos 100 dias.") in md
     # sem data no material, vale o voto, e o texto diz que é voto
     sem_data = _risco(prazo_de_fato=False, data_evento=None, agir_ate=date(2027, 1, 3), horizonte="Primeiras 72 horas",
                       votos={"janela": {"nivel": "Primeiras 72 horas", "votos": 6, "total": 6, "prevaleceu": "voto"}})
     md = funcoes.relatorio_riscos({"riscos": [sem_data]}, None, "", data_corte="10/11/2026")
-    assert "## Primeiras 72 horas\n**R1 · " in md and "** – sem data · prioridade" in md
+    assert "_Decisão nas primeiras 72 horas · sem data · prioridade alta" in md and "| Sem data<br>Primeiras 72 h |" in md
     assert "Sem data no material. Janela: primeiras 72 horas, pelo voto de 6 dos 6 agentes." in md
 
 
 def test_prazo_vencido_aparece_como_vencido(funcoes):
     vencido = _risco(data_evento=date(2026, 10, 26), agir_ate=date(2026, 9, 26), horizonte="Antes da posse", vencido=True)
     md = funcoes.relatorio_riscos({"riscos": [vencido]}, None, "", data_corte="10/11/2026")
-    assert "## Prazo vencido\n**R1 · " in md and "** – 26/10/2026 · " in md and "Antes da posse" not in md
-    assert "- **Prazo:** Vence em 26/10/2026, já vencido. Janela: prazo vencido." in md
+    assert "_Prazo vencido · 26/10/2026 · " in md and "| 26/10/2026<br>Prazo vencido |" in md and "Antes da posse" not in md
+    assert "- **Prazo:**" not in md                               # vencido: a data e a janela já dizem tudo
     # o contrato ainda não venceu, mas os 30 dias de antecedência já passaram: o texto diz
     apertado = _risco(data_evento=date(2026, 12, 1), agir_ate=date(2026, 11, 1), horizonte="Antes da posse")
     md = funcoes.relatorio_riscos({"riscos": [apertado]}, None, "", data_corte="10/11/2026")
-    assert "## Antes da posse\n**R1 · " in md and "** – 01/12/2026 · " in md
+    assert "_Decisão antes da posse · 01/12/2026 · " in md
     assert "a decisão precisa sair até 01/11/2026, 30 dias antes, data que já passou" in md
 
 
@@ -53,10 +55,10 @@ def test_contestacao_acatada_nao_aparece_e_a_pendente_vem_com_a_resposta(funcoes
                  "resposta": "parcial (A glosa saiu; os ajustes sem contrato mantêm o risco.)"}]
     md = funcoes.relatorio_riscos({"riscos": [_risco(revisao={"objecoes": objecoes})]}, None, "", data_corte="10/11/2026")
     assert "SENAI" not in md                                       # já corrigida no texto: fica só na auditoria
-    assert ("- **Ponto contestado:** Fazenda: O material não registra glosa do TCE-RJ. Resposta da consolidação "
-            "(parcial): A glosa saiu; os ajustes sem contrato mantêm o risco.") in md
-    limpo = funcoes.relatorio_riscos({"riscos": [_risco()]}, None, "", data_corte="10/11/2026")
-    assert "Ponto contestado" not in limpo and "Advogado do diabo contesta" not in limpo
+    # o formato executivo não leva a disputa entre agentes para o documento: ela fica na auditoria, com a resposta
+    assert "Ponto contestado" not in md and "glosa" not in md
+    auditoria = funcoes.markdown_objecoes({"riscos": [_risco(revisao={"objecoes": objecoes})]})
+    assert "O material não registra glosa do TCE-RJ" in auditoria
 
 
 def test_cada_risco_em_linhas_rotuladas_sem_codigos_e_com_fontes(funcoes):
@@ -67,13 +69,13 @@ def test_cada_risco_em_linhas_rotuladas_sem_codigos_e_com_fontes(funcoes):
                          "url": "https://g1.globo.com/a", "tipo_fonte": "imprensa", "checagem": "conferido"}]}
     md = funcoes.relatorio_riscos({"riscos": [_risco(fatos=["F1", "V2", "F5"])]}, None, "", diag=diag, dossie=dossie,
                                   data_corte="10/11/2026")
-    bloco = md.split("## Depois dos 100 dias")[1]
-    rotulos = [l.split(":**")[0].split(" (")[0] for l in bloco.strip().split("\n")[1:]]
-    assert rotulos == ["- **Problema", "- **Consequência", "- **Ponto de decisão", "- **Prazo",
-                       "- **Repercussão possível", "- **Fontes"]
+    bloco = md.split("**1.1 · ")[1]
+    rotulos = [l.split(":**")[0].split(" (")[0] for l in bloco.split("\n") if l.startswith("- **")]
+    assert rotulos == ["- **Consequência", "- **Prazo", "- **Repercussão possível", "- **Fonte"]
     assert "(F1)" not in md and "(V2)" not in md
-    assert "- **Fontes:** material enviado pela secretaria; [G1, 06/02/2026](https://g1.globo.com/a)." in md
-    assert "prioridade alta · impacto alto · base: órgão" in md and "- **Repercussão possível (alta):**" in md
+    assert "- **Fonte:** material enviado pela secretaria; [G1, 06/02/2026](https://g1.globo.com/a)." in md
+    assert "prioridade alta · impacto alto_" in md and "- **Repercussão possível (alta):**" in md
+    assert "base: órgão" not in md and "Problema" not in md and "Ponto de decisão" not in md   # formato executivo
 
 
 def test_risco_diz_do_que_se_trata(funcoes):
@@ -91,22 +93,20 @@ def test_risco_diz_do_que_se_trata(funcoes):
                situacao_atual="Vencido em 26/10/2026; o material não informa renovação nem nova contratação",
                marco_critico="início das matrículas de 2027")
     md = funcoes.relatorio_riscos({"riscos": [r]}, None, "", data_corte="10/11/2026", vencimentos=vencimentos, extras=extras)
-    for linha in ["- **O que é:** Contrato SEEDUC nº 29/2021, com o SENAI, para implementar o Ensino Médio Integral.",
-                  "- **Valor:** R$ 18,66 mi, valor do contrato.",
-                  "- **Em que pé está:** Vencido em 26/10/2026; o material não informa renovação nem nova contratação.",
-                  "- **No calendário da secretaria:**\n  - 26/10/2026: Contrato SEEDUC nº 29/2021 – SENAI, "
-                  "R$18.660.817,34 (Fim da vigência do contrato do Ensino Médio Integral)\n  - 28/10/2026: Fim da "
-                  "requisição da ARP de absorventes, R$ 1.374.895,36\n- **Problema:**",
-                  "- **Processo:** SEI-030001/103287/2026.", "Marco: início das matrículas de 2027."]:
+    for linha in ["- **O que é:** Contrato SEEDUC nº 29/2021, com o SENAI, para implementar o Ensino Médio Integral. "
+                  "Valor: R$ 18,66 mi, valor do contrato.",
+                  "- **Status:** Vencido em 26/10/2026; o material não informa renovação nem nova contratação.",
+                  "- **Fonte:** material enviado pela secretaria; [TCE-RJ, dados abertos (multas e débitos)]"
+                  "(https://dados.tcerj.tc.br/api/v1/docs) · processo SEI-030001/103287/2026.",
+                  "| R$ 18,66 mi |"]:                                     # o valor curto no quadro da primeira página
         assert linha in md, linha
-    assert ("- **Fontes:** material enviado pela secretaria; [TCE-RJ, dados abertos (multas e débitos)]"
-            "(https://dados.tcerj.tc.br/api/v1/docs).") in md
-    # no Word, cada contrato do calendário é um subitem do risco
+    # no Word, o subitem de lista ("  - ") fica recuado sob o item
     import io
     import docx
-    pars = docx.Document(io.BytesIO(funcoes.gerar_docx(md, {"orgao": "x", "assunto": "y", "tipo": "z", "data": "w"}))).paragraphs
-    sub = next(p for p in pars if p.text.startswith("–  26/10/2026: Contrato SEEDUC nº 29/2021"))
-    item = next(p for p in pars if p.text.startswith("•  No calendário da secretaria:"))
+    sub_md = "- **Item:** texto\n  - subitem do item"
+    pars = docx.Document(io.BytesIO(funcoes.gerar_docx(sub_md, {"orgao": "x", "assunto": "y", "tipo": "z", "data": "w"}))).paragraphs
+    sub = next(p for p in pars if p.text.startswith("–  subitem"))
+    item = next(p for p in pars if p.text.startswith("•  Item:"))
     assert sub.paragraph_format.left_indent > item.paragraph_format.left_indent
 
 
@@ -159,8 +159,12 @@ def test_pauta_de_investigacao_junta_os_agentes_e_diz_quem_apontou(funcoes):
     assert pedir[2]["apontado_por"] == ["Análise", "Área-fim e usuário do serviço"]
     assert pedir[3]["apontado_por"] == []                          # quem apontou é o código que diz, não o modelo
     md = funcoes.relatorio_riscos({"riscos": [], "pedir": pedir}, None, "")
-    assert "| 2 | Decisão do TCE-RJ sobre a cautelar das obras escolares | Derrubaria o risco. | TCE-RJ | R1 | Advogado do diabo |" in md
-    assert "| R2 | Análise, Área-fim |" in md and "| – | Consolidação |" in md
+    # no relatório executivo: o que falta, o que esclarece e o ponto, por grupo; onde e quem apontou vão para a auditoria
+    assert "| O que falta | O que esclarece | Ponto |" in md and "| Onde procurar |" not in md and "Advogado do diabo" not in md
+    assert "| § Temas obrigatórios sem informação |\n| Empenhado, liquidado e pago por ação |" in md
+    completa = funcoes.pauta_completa({"pedir": pedir})
+    assert "| 2 | Decisão do TCE-RJ sobre a cautelar das obras escolares | Derrubaria o risco. | TCE-RJ | R1 | Advogado do diabo |" in completa
+    assert "| R2 | Análise, Área-fim |" in completa and "| – | Consolidação |" in completa
     # sem lista da consolidação, o código junta as lacunas brutas e tira as repetidas
     sem = funcoes.juntar_lacunas({"riscos": [], "pedir": []}, analise, revisoes)
     assert len(sem) == 2 and sem[0]["apontado_por"] == ["Análise", "Área-fim e usuário do serviço"]
@@ -191,7 +195,8 @@ def test_conferencia_final_corrige_o_que_nao_tem_apoio_nos_fatos(llm, funcoes):
     assert '"F1": "O contrato emergencial com o CDP' in llm.pedido_conferencia     # o revisor recebe o texto do fato
     md = funcoes.relatorio_riscos({"riscos": [dict(risco, firmeza="informado pelo órgão", nota=6, prioridade="Alta",
                                                    prazo_de_fato=False, horizonte="Sem prazo")]}, None, "")
-    assert "- **A confirmar:** O fato não fala em parada." in md
+    assert "- **A confirmar:** parte do que está acima não tem apoio completo nos fatos citados" in md
+    assert "O fato não fala em parada" not in md                  # o motivo da conferência fica na auditoria
 
 
 def test_rodada_inteira_gera_o_relatorio_novo(llm, tmp_path):
@@ -199,9 +204,11 @@ def test_rodada_inteira_gera_o_relatorio_novo(llm, tmp_path):
     r = analise.analisar_orgao("seeduc", RELATORIO, CFG)
     md = r["riscos_md"]
     assert "## Situação" not in md and "Advogado do diabo contesta" not in md and "6/6" not in md
-    pauta = md.split("## Informações que faltam: a pauta de investigação")[1]
-    assert "Lista de contratos vigentes com datas de término" in pauta and "Fazenda" in pauta and "Análise" in pauta
-    assert "Parecer da PGE sobre a retomada das licitações" not in pauta or "Advogado do diabo" in pauta
+    assert md.startswith("## Resumo executivo\n") and "<<<QUEBRA>>>" in md
+    pauta = md.split("## Informações que faltam")[1]
+    assert "Lista de contratos vigentes com datas de término" in pauta
+    completa = r["auditoria_md"].split("## Informações que faltam: onde procurar e quem apontou")[1]
+    assert "Fazenda" in completa and "Análise" in completa
     reg = r["registro"]
     assert reg["conferencia_final"]["corrigidos"] == [] and len(reg["lacunas_brutas"]) >= 7     # análise + 6 agentes
     assert any(l["quem"] == "Advogado do diabo" for l in reg["lacunas_brutas"])
@@ -290,9 +297,8 @@ def test_analise_le_o_material_inteiro_e_so_usa_trecho_conferido(llm):
     assert agentes and all("[P2]" in str(c["mensagens"]) and "=== MATERIAL COMPLETO" not in str(c["mensagens"])
                            for c in agentes)
     md = r["riscos_md"]
-    for linha in ["- **O que é:** Quatro concorrências de obras, adiadas sem data.",
-                  "- **Valor:** R$ 120,5 mi, valor estimado.",
-                  "- **Em que pé está:** Adiadas sem data; o material não informa o motivo.",
-                  "- **Fontes:** material enviado pela secretaria."]:
+    for linha in ["- **O que é:** Quatro concorrências de obras, adiadas sem data. Valor: R$ 120,5 mi, valor estimado.",
+                  "- **Status:** Adiadas sem data; o material não informa o motivo.",
+                  "- **Fonte:** material enviado pela secretaria."]:
         assert linha in md, linha
     assert "(P1)" not in md and "republicadas" not in md and "ninguém conferiu" not in md

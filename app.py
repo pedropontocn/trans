@@ -256,14 +256,14 @@ with st.sidebar:
     st.caption("Marque só o que quer gerar: cada produto roda apenas as etapas de que precisa.")
     p_dossie = st.checkbox(
         "Dossiê da secretaria", value=True,
-        help="Como a secretaria funciona hoje, no roteiro da Equipe de Transição: estrutura, funcionamento, gargalos, "
-             "orçamento por unidade (LOA 2026, PLOA 2027 e plano de governo), cargos, contratos, auditorias e "
-             "convênios, programas, dificuldades e propostas para os primeiros 100 dias. Não roda a análise de riscos.")
+        help="Como a secretaria funciona hoje, no formato executivo: primeira página com o resumo (abertura, números "
+             "em cartões e destaques); depois orçamento (LOA 2026 e PLOA 2027), força de trabalho, contratos e "
+             "convênios, programas e obras, dificuldades e gargalos. Não roda a análise de riscos.")
     p_riscos = st.checkbox(
         "Relatório de riscos", value=True,
-        help="Riscos e pontos de decisão agrupados por janela (contratos, programas, concessões, decisões pendentes "
-             "e outros), cada um dizendo do que se trata, revisados e votados por seis agentes. Inclui o cruzamento "
-             "com as multas e os débitos do TCE-RJ e a pauta de investigação. É a etapa mais cara.")
+        help="Formato executivo: primeira página com o resumo e o quadro dos pontos de atenção por tema (o que está "
+             "em jogo, valor, prazo e prioridade); depois os pontos por tema, o controle externo (TCE-RJ) e as "
+             "informações que faltam. Revisados e votados por seis agentes. É a etapa mais cara.")
     p_painel = st.checkbox(
         "Painel (dados para o painel unificado)", value=True,
         help="JSON com os pontos de decisão na mesma régua para todas as secretarias. Sai da análise de riscos: "

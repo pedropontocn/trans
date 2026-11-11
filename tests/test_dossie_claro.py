@@ -194,22 +194,23 @@ def test_rodada_gera_o_dossie_com_a_lei_e_sem_cara_de_relatorio_de_riscos(llm):
     assert any(i["afirmacao"].startswith("No PLOA 2027, a proposta para Secretaria de Estado de Educação") and
                i["tipo_fonte"] == "documento_oficial" and i["checagem"] == "conferido" for i in itens)
     assert r["registro"]["orcamento_na_lei"]["total_ploa"] == 8154088572
-    assert "| Secretaria de Estado de Educação | R$ 6.702.485.057 | R$ 7.654.748.512 | +R$ 952.263.455 (+14,2%) |" in md
-    assert "| Dotação inicial na LOA 2026 | R$ 6.702.485.057 (órgão, com as outras unidades: R$ 7.182.384.829) |" in md
-    assert "(Caderno de RH da SEPLAG, LOA 2026 e PLOA 2027)" in md.split("\n")[0]
+    # formato executivo: a lei em forma curta, no quadro do orçamento e nos cartões da primeira página
+    assert "| **Total do órgão** | **R$ 7,18 bi** | **R$ 8,15 bi** | **+13,5%** |" in md
+    assert "R$ 7,18 bi | LOA 2026 (dotação inicial)" in md and "R$ 8,15 bi | PLOA 2027 (+13,5%)" in md
+    assert "_O total inclui 2 outras unidades orçamentárias:" in md
+    assert "18010" not in md.split("**Fontes:**")[0]                              # sem código de unidade nem de ação
     # o dossiê não fala de riscos nem de agentes, não corta nomes e não tem "(s)"
     for fora in ("Confiança", "Analisa riscos", "agentes de IA", "(s)", "…", "os ids são", "(informado pelo órgão)"):
         assert fora not in md, fora
-    assert ("- **Contrato 99/2026 – Empresa X** · R$ 398.750.000,00 · até 15/12/2026. Manutenção predial. Vence em breve, "
-            "valor alto. Vence antes da posse.") in md
+    assert ("| 15/12/2026 | **Contrato 99/2026 – Empresa X**<br>Manutenção predial | R$ 398,75 mi | Vence em breve, "
+            "valor alto. Vence antes da posse |") in md
     assert md.rstrip().endswith("Método e conferências no arquivo de auditoria._")
     assert "; Caderno de RH da SEPLAG, LOA 2026 e PLOA 2027 entram por código, das bases oficiais." in md
     textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
-    assert "Antes de ler" not in textos and "Panorama" in textos and "a) Planejamento e execução orçamentária" in textos
-    assert sum(len(p) for p in md.split("## Panorama")[0].split("\n")) < 520        # o preâmbulo cabe em poucas linhas
-    # secretaria fora da tabela: o dossiê sai como antes, sem o quadro da lei
+    assert "Antes de ler" not in textos and "Resumo executivo" in textos and "1. Orçamento" in textos
+    # secretaria fora da tabela: o dossiê sai sem o quadro da lei
     outro = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)["dossie_md"]
-    assert "Orçamento na lei" not in outro and "PLOA 2027" not in outro.split("\n")[0]
+    assert "Total do órgão" not in outro and "PLOA 2027 (" not in outro
 
 
 def test_corte_minimo_nao_vira_cerca_de_zero_por_cento(funcoes):
@@ -342,9 +343,8 @@ def test_rodada_do_dossie_cruza_o_plano_e_so_no_dossie(llm):
                                               "fatos": ["F2", "V1"], "acoes": ["18010:12.306.0443.2421"]}]}
     r = analise.analisar_orgao("SEEDUC", RELATORIO, CFG)
     md = r["dossie_md"]
-    orcamento = md.split("## a) Planejamento e execução orçamentária")[1].split("## b) Cargos")[0]
-    assert "**Para 2027: o que o plano de governo prevê para a área**" in orcamento and "- **Estrutura digna e escola aberta** (p. 22)." in orcamento
-    assert "ação 2421, Oferta de Nutrição Escolar" in md and "Plano de Governo 2027–2030 (Plano do Rio Real) ·" in md
+    # formato executivo: o cruzamento com o plano fica no registro, fora do documento
+    assert "o que o plano de governo prevê" not in md and "Plano de Governo 2027–2030" not in md
     assert r["registro"]["cruzamento_plano"]["compromissos"][0]["id"] == "P22.9"
     assert any(u["etapa"] == "dossiê: cruzamento com o plano de governo" for u in r["registro"]["uso_tokens"])
     # os fatos do pedido: os do diagnóstico e os do calendário da secretaria

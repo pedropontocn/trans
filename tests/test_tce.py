@@ -227,7 +227,7 @@ def test_rodada_com_o_tce_traz_a_secao_os_fatos_e_a_pauta(llm, tce):
     llm.analise_riscos["riscos"][0]["fatos"] = ["F1", "O3", "T3"]
     r = analise.analisar_orgao("SEEDUC", RELATORIO, CFG)
     md = r["riscos_md"]
-    assert "## Cruzamento com o TCE-RJ: multas e débitos" in md
+    assert "## Controle externo (TCE-RJ)" in md and "3 não aparecem no material enviado pela secretaria" in md
     assert "[T3] Processo TCE-RJ 100372-5/2019 (SEC EST EDUCACAO): 2 condenações em débito" in llm.material_riscos
     assert "MULTAS E DÉBITOS NO TCE-RJ (decisões do Tribunal, dos dados abertos):" in llm.material_riscos
     r1 = next(x for x in r["riscos"] if x["id"] == "R1")
@@ -235,9 +235,11 @@ def test_rodada_com_o_tce_traz_a_secao_os_fatos_e_a_pauta(llm, tce):
     assert "[TCE-RJ, dados abertos (multas e débitos)](https://dados.tcerj.tc.br/api/v1/docs)" in md
     assert "(T3)" not in md
     # o que o TCE tem e a secretaria não citou abre a pauta de investigação
-    pauta = md.split("## Informações que faltam: a pauta de investigação")[1]
-    primeira = [l for l in pauta.split("\n") if l.startswith("| 1 |")][0]
+    pauta = md.split("## Informações que faltam")[1]
+    assert "| § Controle externo (TCE-RJ) |\n| Situação de 3 processos do TCE-RJ" in pauta
+    completa = r["auditoria_md"].split("## Informações que faltam: onde procurar e quem apontou")[1]
+    primeira = [l for l in completa.split("\n") if l.startswith("| 1 |")][0]
     assert "Situação de 3 processos do TCE-RJ" in primeira and primeira.rstrip().endswith("| TCE-RJ |")
     assert r["registro"]["cruzamento_tce"]["resumo"]["processos_recentes_nao_citados"] == 3
     textos = [p.text for p in docx.Document(io.BytesIO(r["riscos_docx"])).paragraphs]
-    assert "Cruzamento com o TCE-RJ: multas e débitos" in textos
+    assert "Controle externo (TCE-RJ)" in textos

@@ -149,7 +149,7 @@ SUBITEM = "\x00"       # marca interna de subitem de lista (linha "  - " no Mark
 def _ler_markdown(md):
     """Divide o Markdown em blocos: título, parágrafo, lista (com subitens), tabela e bloco em fonte fixa (entre ```)."""
     blocos, paragrafo = [], []
-    fixo = None
+    fixo, tipo_fixo = None, "pre"
 
     def fechar_paragrafo():
         if paragrafo:
@@ -161,9 +161,9 @@ def _ler_markdown(md):
         if s.startswith("```"):
             fechar_paragrafo()
             if fixo is None:
-                fixo = []
+                fixo, tipo_fixo = [], ("cartoes" if s[3:].strip() == "cartoes" else "pre")
             else:
-                blocos.append(("pre", fixo))
+                blocos.append((tipo_fixo, fixo))
                 fixo = None
             continue
         if fixo is not None:
@@ -225,7 +225,7 @@ def _desenhar_blocos(alvo, blocos):
             par = alvo.add_paragraph()
             par.paragraph_format.space_after = Pt(6)
             par.paragraph_format.line_spacing = 1.2
-            if re.match(r"\*\*R\d+ · ", bloco[1]):          # a linha de título de um risco: respiro antes, junto do corpo
+            if re.match(r"\*\*(R\d+|\d+\.\d+) · ", bloco[1]):   # a linha de título de um risco: respiro antes, junto do corpo
                 par.paragraph_format.space_before = Pt(10)
                 par.paragraph_format.keep_with_next = True
             if (re.fullmatch(r"_[^_].*_", bloco[1], re.S)      # parágrafo inteiro entre "_": nota, em itálico e menor
@@ -251,6 +251,9 @@ def _desenhar_blocos(alvo, blocos):
         elif tipo == "table":
             _desenhar_tabela(alvo, bloco[1])
             alvo.add_paragraph()
+        elif tipo == "cartoes":
+            _desenhar_cartoes(alvo, bloco[1])
+            alvo.add_paragraph().paragraph_format.space_after = Pt(2)
         elif tipo == "quebra":
             if hasattr(alvo, "add_page_break"):
                 alvo.add_page_break()
@@ -265,13 +268,82 @@ def _desenhar_blocos(alvo, blocos):
                 run.font.size = Pt(9)
 
 
+GRUPO = "§ "            # linha de tabela que abre um grupo ("| § 1. Continuidade de serviço |"): ocupa a largura toda
+QUEBRA_NA_CELULA = "<br>"   # dentro da célula: o que vem depois vai na linha de baixo, em cinza
+
+
+def _nivel_prioridade(txt):
+    """A prioridade (máxima, alta, média, baixa) na régua de cores das tabelas."""
+    n = _norm(txt)
+    if re.match(r"^(maxim|critic)", n):
+        return 3
+    if re.match(r"^alt", n):
+        return 2
+    if re.match(r"^(med|baix)", n):
+        return 1
+    return None
+
+
+def _e_grupo(linha):
+    return bool(linha) and linha[0].startswith(GRUPO) and not any(c.strip() for c in linha[1:])
+
+
+def _celula_com_quebras(par, texto, tamanho, cor, negrito=False, cor_primeira=None):
+    """O texto da célula; cada "<br>" vira uma linha nova, e as linhas depois da primeira saem em cinza."""
+    partes = texto.split(QUEBRA_NA_CELULA)
+    _texto_inline(par, partes[0].strip(), tamanho, cor_primeira or cor, negrito)
+    for parte in partes[1:]:
+        par.add_run().add_break()
+        _texto_inline(par, parte.strip(), Pt(tamanho.pt - 0.5), CINZA)
+
+
+def _desenhar_cartoes(alvo, linhas, por_linha=4):
+    """Os números-chave em cartões (quatro por linha): o valor grande em cima, o rótulo pequeno embaixo."""
+    cartoes = [[x.strip() for x in l.split("|", 1)] + [""] for l in linhas if l.strip()]
+    if not cartoes:
+        return
+    linhas_t = -(-len(cartoes) // por_linha)
+    tabela = alvo.add_table(rows=linhas_t, cols=por_linha)
+    tabela.autofit = False
+    largura = Cm(17 / por_linha)
+    for k in range(linhas_t * por_linha):
+        celula = tabela.cell(k // por_linha, k % por_linha)
+        celula.width = largura
+        branca = ("single", 18, "FFFFFF")
+        _bordas_celula(celula, top=branca, left=branca, bottom=branca, right=branca)
+        if k >= len(cartoes):                   # a sobra da última linha fica em branco
+            continue
+        _sombrear(celula, "EEF2F7")
+        valor, rotulo = cartoes[k][0], cartoes[k][1]
+        par = celula.paragraphs[0]
+        par.paragraph_format.space_before, par.paragraph_format.space_after = Pt(4), Pt(0)
+        run = par.add_run(valor)
+        run.bold, run.font.size, run.font.color.rgb = True, Pt(15), AZUL
+        par = celula.add_paragraph()
+        par.paragraph_format.space_after = Pt(4)
+        run = par.add_run(rotulo)
+        run.font.size, run.font.color.rgb = Pt(8), CINZA
+    for coluna in tabela.columns:
+        coluna.width = largura
+
+
 def _desenhar_tabela(alvo, linhas):
     ncol = max(len(l) for l in linhas)
     tabela = alvo.add_table(rows=len(linhas), cols=ncol)
     tabela.style = "Table Grid"
     cabecalho = [_norm(c) for c in linhas[0]]
     colunas_nivel = {i for i, c in enumerate(cabecalho) if any(k in c for k in ("probab", "impact", "nivel", "intens"))}
+    colunas_prioridade = {i for i, c in enumerate(cabecalho) if "priorid" in c}
+    grupos = {r for r, l in enumerate(linhas) if r and _e_grupo(l)}
     for r, linha in enumerate(linhas):
+        if r in grupos:                              # abre um grupo: uma faixa clara com o nome, na largura toda
+            celula = tabela.cell(r, 0).merge(tabela.cell(r, ncol - 1)) if ncol > 1 else tabela.cell(r, 0)
+            celula.text = ""
+            _sombrear(celula, "E8EDF4")
+            par = celula.paragraphs[0]
+            par.paragraph_format.keep_with_next = True
+            _texto_inline(par, linha[0][len(GRUPO):].strip(), Pt(9), AZUL, negrito=True)
+            continue
         for c in range(ncol):
             celula = tabela.cell(r, c)
             texto = linha[c] if c < len(linha) else ""
@@ -281,29 +353,33 @@ def _desenhar_tabela(alvo, linhas):
                 _sombrear(celula, "1B2A41")
                 _texto_inline(par, texto.strip("*"), Pt(9), RGBColor(0xFF, 0xFF, 0xFF), negrito=True)
                 continue
-            nivel = _nivel(texto) if c in colunas_nivel else None
+            primeira = texto.split(QUEBRA_NA_CELULA)[0]
+            nivel = (_nivel(primeira) if c in colunas_nivel else
+                     _nivel_prioridade(primeira) if c in colunas_prioridade else None)
             if nivel:
                 fundo, cor = NIVEIS[nivel]
                 _sombrear(celula, fundo)
-                _texto_inline(par, texto, Pt(9), cor, negrito=True)
+                _celula_com_quebras(par, texto, Pt(9), TEXTO, negrito=True, cor_primeira=cor)
             else:
-                _texto_inline(par, texto, Pt(9))
-    # larguras proporcionais ao tamanho médio do texto de cada coluna (17 cm úteis)
+                _celula_com_quebras(par, texto, Pt(9), TEXTO)
+    # larguras proporcionais ao tamanho médio do texto de cada coluna (17 cm úteis); as linhas de grupo não contam
+    medidas = [linhas[0]] + [[c.replace(QUEBRA_NA_CELULA, " ") for c in l] for r, l in enumerate(linhas)
+                             if r and r not in grupos]
     medias = []
     for c in range(ncol):
-        textos = [len(l[c]) if c < len(l) else 0 for l in linhas]
-        cabecalho_len = len(linhas[0][c]) if c < len(linhas[0]) else 0
-        curta = all(len(l[c]) <= 4 for l in linhas[1:] if c < len(l))      # coluna de ids (C1, R2...): estreita
-        palavra = max((len(w) for l in linhas[1:] if c < len(l) for w in re.findall(r"\S+", l[c].strip("*"))), default=0)
-        numerica = any(c < len(l) and l[c].strip("* ") for l in linhas[1:]) and all(
-            re.fullmatch(r"[\d.,%R$ –\-]*", l[c].strip("*")) for l in linhas[1:] if c < len(l))
+        textos = [len(l[c]) if c < len(l) else 0 for l in medidas]
+        cabecalho_len = len(medidas[0][c]) if c < len(medidas[0]) else 0
+        curta = all(len(l[c]) <= 4 for l in medidas[1:] if c < len(l))      # coluna de ids (C1, R2, 1.1): estreita
+        palavra = max((len(w) for l in medidas[1:] if c < len(l) for w in re.findall(r"\S+", l[c].strip("*"))), default=0)
+        numerica = any(c < len(l) and l[c].strip("* ") for l in medidas[1:]) and all(
+            re.fullmatch(r"[\d.,%R$ –\-]*", l[c].strip("*")) for l in medidas[1:] if c < len(l))
         medias.append(max(7 if curta else 12, cabecalho_len + 2, min(60, sum(textos) / len(textos)),
                           min(26, palavra + 8 if numerica else palavra * 1.5 + 3)))
     total = sum(medias)
     cm = [17 * m / total for m in medias]
     # nenhuma coluna mais estreita que a sua maior palavra (cabeçalho ou célula): "Prioridade" e "26/10/2026" não
     # quebram no meio; a diferença sai das colunas mais largas
-    minimos = [min(4.5, 0.42 + 0.185 * max((len(w) for l in linhas if c < len(l)
+    minimos = [min(4.5, 0.42 + 0.185 * max((len(w) for l in medidas if c < len(l)
                                              for w in re.findall(r"[^\s/]+(?:/[^\s/]+)*", re.sub(r"[*_]|\]\([^)]*\)", "", l[c]))),
                                             default=0)) for c in range(ncol)]
     falta = sum(max(0, m - x) for m, x in zip(minimos, cm))
@@ -314,9 +390,12 @@ def _desenhar_tabela(alvo, linhas):
     tabela.autofit = False
     for c, coluna in enumerate(tabela.columns):
         coluna.width = larguras[c]
-    for linha in tabela.rows:
-        for c, celula in enumerate(linha.cells):
-            celula.width = larguras[c]
+    for r, linha in enumerate(tabela.rows):
+        if r in grupos:
+            linha.cells[0].width = Cm(sum(cm))
+        else:
+            for c, celula in enumerate(linha.cells):
+                celula.width = larguras[c]
         # não quebra uma linha entre duas páginas
         trPr = linha._tr.get_or_add_trPr()
         nao_quebrar = OxmlElement("w:cantSplit")
@@ -355,7 +434,8 @@ def gerar_docx(memorando_md, meta):
     p.paragraph_format.space_after = Pt(2)
     run = p.add_run((meta.get("tipo") or "Memorando executivo").upper())
     run.bold, run.font.size, run.font.color.rgb = True, Pt(8.5), ACENTO
-    blocos = _ler_markdown(memorando_md)
+    # "R$" e o número não se separam no fim da linha
+    blocos = _ler_markdown(re.sub(r"R\$ (?=\d)", "R$\u00a0", memorando_md))
     titulo_memo = ""
     if blocos and blocos[0][0] == "h" and blocos[0][1] == 1:
         titulo_memo = "" if "memorando" in _norm(blocos[0][2]) and len(blocos[0][2]) < 30 else blocos[0][2]
@@ -394,6 +474,8 @@ def gerar_docx(memorando_md, meta):
             i = j
             continue
         _desenhar_blocos(doc, [b])
+        if b[0] == "p" and i + 1 < len(blocos) and blocos[i + 1][0] == "table":
+            doc.paragraphs[-1].paragraph_format.keep_with_next = True      # a nota não fica sozinha antes da tabela
         i += 1
 
     # Rodapé com numeração de páginas
@@ -835,16 +917,18 @@ def antes_de_ler_dossie(data_corte, cortes=None, bases=None, imprensa=False, com
             + f"Sem revisão da equipe: confira antes de usar._\n\n_{ler}_")
 
 
-def nota_dossie(registro_id, modelos, data_corte, bases=None, com_propostas=False):
-    """O rodapé do dossiê, em uma linha: registro, modelo e o que foi conferido. Sem riscos nem agentes."""
+def nota_dossie(registro_id, modelos, data_corte, bases=None, com_propostas=False, cortes=None):
+    """A nota do fim do dossiê, em itálico: o que o documento é, de onde vêm os dados, o que é leitura da análise e que
+    não passou por revisão da equipe. com_propostas: a rodada tem a leitura dos gargalos (o nome ficou pelo histórico)."""
     usados = list(dict.fromkeys(m for m in (modelos.get("auxiliar"), modelos.get("debate")) if m))
     return ("_Dossiê gerado com IA (registro " + registro_id + ("; modelo " + " e ".join(usados) if usados else "") + ") a "
             f"partir do que a secretaria informou e de fontes oficiais, com data de corte {data_corte or 'não informada'}. "
-            + ("Descreve; a leitura dos gargalos (item 3) e as propostas para os 100 dias (item g) são da análise e "
-               "citam fatos conferidos. " if com_propostas else "Descreve; não recomenda. ")
+            + ("Descreve; o resumo executivo e a leitura dos gargalos são da análise e citam fatos conferidos. "
+               if com_propostas else "Descreve; não recomenda; o resumo executivo é da análise e cita fatos conferidos. ")
             + "Cada dado foi conferido por código na origem"
             + (f"; {_lista(bases)} {'entra' if len(bases) == 1 else 'entram'} por código, das bases oficiais" if bases else "")
-            + ". Método e conferências no arquivo de auditoria._")
+            + "." + (" Material lido em parte: " + "; ".join(cortes) + "." if cortes else "")
+            + " Sem revisão da equipe: confira antes de usar. Método e conferências no arquivo de auditoria._")
 
 
 def _tamanho(n):
@@ -1559,22 +1643,329 @@ def fontes_do_dossie(diag, dossie, folha=None, lei=None, plano=None, tce_md=""):
                      + [f"- {nome} · {selo}" if selo else f"- {nome}" for nome, selo in fontes.values()])
 
 
+# --- DOSSIÊ EXECUTIVO --------------------------------------------------------------------------------------------
+# O dossiê vai ao governador eleito: primeira página com o resumo executivo (abertura, números em cartões e destaques)
+# e, depois, cinco capítulos curtos. Estrutura, funcionamento, pendências com controle e justiça e as propostas para os
+# 100 dias ficam fora do documento (seguem no registro e na auditoria).
+CAPITULOS_EXECUTIVOS = [
+    ("orcamento", "1. Orçamento", ["Orçamento e execução"]),
+    ("pessoal", "2. Força de trabalho", ["Pessoal"]),
+    ("contratos", "3. Contratos e convênios", ["Contratos", "Sistemas, convênios e parcerias"]),
+    ("programas", "4. Programas e obras", ["Programas e ações"]),
+    ("dificuldades", "5. Dificuldades e gargalos", ["Dificuldades e problemas"])]
+BLOCOS_EXECUTIVOS = {b for _, _, blocos in CAPITULOS_EXECUTIVOS for b in blocos}
+CARTOES = 8
+MESES_CURTOS = {"janeiro": "jan", "fevereiro": "fev", "março": "mar", "abril": "abr", "maio": "mai", "junho": "jun",
+                "julho": "jul", "agosto": "ago", "setembro": "set", "outubro": "out", "novembro": "nov", "dezembro": "dez"}
+RE_REAIS = re.compile(r"^\s*R\$\s*(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d+))?\s*$")
+
+
+def _competencia_curta(competencia):
+    """"setembro de 2026" → "set/2026"."""
+    m = re.match(r"\s*([a-zç]+)\s+de\s+(\d{4})", str(competencia or ""), re.I)
+    return f"{MESES_CURTOS.get(m.group(1).lower(), m.group(1))}/{m.group(2)}" if m else str(competencia or "")
+
+
+def _compacto(n, casas_mi=2):
+    """3237754901.47 → "R$ 3,24 bi"; 156470000 → "R$ 156,5 mi" (casas_mi=1) ou "R$ 156,47 mi"; 950000 → "R$ 950 mil"."""
+    if n is None:
+        return "–"
+    if abs(n) >= 1e9:
+        texto = f"R$ {n / 1e9:.2f} bi"
+    elif abs(n) >= 1e6:
+        texto = f"R$ {n / 1e6:.{casas_mi}f} mi"
+    elif abs(n) >= 1e3:
+        texto = f"R$ {round(n / 1e3)} mil"
+    else:
+        texto = f"R$ {n:.0f}"
+    return texto.replace(".", ",")
+
+
+def _reais_compactos(valor):
+    """O valor em reais escrito por extenso ("R$ 3.237.754.901,47") em forma curta ("R$ 3,24 bi"); outro texto fica
+    como está."""
+    m = RE_REAIS.match(str(valor or ""))
+    if not m:
+        return str(valor or "").strip()
+    n = float(m.group(1).replace(".", "") + "." + (m.group(2) or "0"))
+    return _compacto(n) if n >= 1e6 else str(valor).strip()
+
+
+def _pct(parte, total):
+    return f"{parte / total * 100:.1f}%".replace(".", ",") if total else "–"
+
+
+def _variacao_pct(antes, depois):
+    if not antes or depois is None:
+        return "–"
+    return f"{(depois - antes) / antes * 100:+.1f}%".replace(".", ",").replace("-", "−")
+
+
+def cartoes_do_dossie(diag, folha=None, lei=None, limite=CARTOES):
+    """Os números-chave da primeira página, em cartões (valor, rótulo): a folha (Caderno de RH), o orçamento na lei
+    (LOA e PLOA, em forma curta) e os indicadores conferidos da ficha rápida que ainda não apareceram."""
+    cartoes, mostrados = [], set()
+    if folha:
+        comp = _competencia_curta(folha.get("competencia"))
+        cartoes += [(str(folha.get("vinculos") or "–"), f"vínculos ativos ({comp})"),
+                    (str(folha.get("folha_mes") or "–"), "folha de pessoal do mês")]
+        mostrados |= _numeros_do_valor(folha.get("vinculos")) | _numeros_do_valor(folha.get("folha_mes"))
+    if lei:
+        if lei.get("total_loa") is not None:
+            cartoes.append((_compacto(lei["total_loa"]), "LOA 2026 (dotação inicial)"))
+            mostrados |= _numeros_do_valor(_reais_da_lei(lei["total_loa"]))
+        if lei.get("total_ploa") is not None:
+            var = _variacao_pct(lei.get("total_loa"), lei["total_ploa"])
+            cartoes.append((_compacto(lei["total_ploa"]), "PLOA 2027" + (f" ({var})" if var != "–" else "")))
+            mostrados |= _numeros_do_valor(_reais_da_lei(lei["total_ploa"]))
+    for i in (diag or {}).get("indicadores") or []:
+        if len(cartoes) >= limite:
+            break
+        valor = _reais_compactos(i.get("valor"))
+        nome = str(i.get("nome") or "")
+        da_lei = lei and re.search(r"\b(P?LOA|dota[çc][ãa]o inicial)\b", nome, re.I)    # a lei já está nos cartões
+        if not _do_dossie(i) or da_lei or (_numeros_do_valor(i.get("valor")) & mostrados) or len(valor) > 22:
+            continue
+        cartoes.append((valor, re.sub(r"\s+", " ", str(i.get("nome") or "")).strip()))
+        mostrados |= _numeros_do_valor(i.get("valor"))
+    return cartoes[:limite]
+
+
+def _titular_e_estrutura(diag):
+    unidades = [u for u in (diag or {}).get("organograma") or [] if _do_dossie(u)]
+    topo = [u for u in unidades if not u["subordinada_a"] and not u.get("vinculada") and u.get("titular")]
+    partes = []
+    if topo:
+        partes.append(f"**Titular:** {topo[0]['titular']}")
+    if unidades:
+        vinc = sum(bool(u.get("vinculada")) for u in unidades)
+        partes.append(_plural(len(unidades) - vinc, "unidade", "unidades") + " no organograma"
+                      + (f" e {_plural(vinc, 'vinculada', 'vinculadas')}" if vinc else ""))
+    return "  ·  ".join(partes)
+
+
+def abertura_do_dossie_por_codigo(diag, folha=None, lei=None):
+    """A abertura sem IA: o panorama que o diagnóstico já conferiu ou, sem ele, a folha e o orçamento na lei."""
+    panorama = [str(x).strip().rstrip(".") + "." for x in (diag or {}).get("panorama") or [] if str(x).strip()]
+    if panorama:
+        return " ".join(panorama)
+    frases = []
+    if folha:
+        frases.append(f"A secretaria tem {folha.get('vinculos', '–')} vínculos ativos e folha mensal de "
+                      f"{folha.get('folha_mes', '–')} ({folha.get('competencia', '')}).")
+    if lei and lei.get("total_loa") is not None:
+        frases.append(f"A LOA 2026 destina {_compacto(lei['total_loa'])} ao órgão"
+                      + (f"; o PLOA 2027 propõe {_compacto(lei['total_ploa'])} ({_variacao_pct(lei['total_loa'], lei['total_ploa'])})"
+                         if lei.get("total_ploa") is not None else "") + ".")
+    return " ".join(frases)
+
+
+def fatos_para_o_resumo_do_dossie(diag, vencimentos=None, resultado=None, folha=None, lei=None):
+    """Os fatos que o resumo executivo do dossiê pode citar: as bases oficiais que entram por código (B: Caderno de
+    RH, LOA e PLOA), os indicadores conferidos (I), os itens dos capítulos que ficam no dossiê (F), o calendário (V) e,
+    quando a rodada tem, os riscos (R)."""
+    fatos = []
+    if folha:
+        fatos.append({"id": "B1", "origem": "Caderno de RH (SEPLAG)",
+                      "texto": f"Caderno de RH, {folha.get('competencia', '')}: {folha.get('vinculos', '–')} vínculos ativos, "
+                               f"{folha.get('efetivos', '–')} efetivos e {folha.get('nao_efetivos', '–')} não efetivos "
+                               f"({folha.get('pct_nao_efetivos', '–')}); folha do mês de {folha.get('folha_mes', '–')}; "
+                               f"remuneração média de {folha.get('remuneracao_media', '–')}."})
+    if lei:
+        texto = []
+        if lei.get("total_loa") is not None:
+            texto.append(f"LOA 2026 do órgão: {_reais_da_lei(lei['total_loa'])} ({_compacto(lei['total_loa'])})")
+        if lei.get("total_ploa") is not None:
+            texto.append(f"PLOA 2027 do órgão: {_reais_da_lei(lei['total_ploa'])} ({_compacto(lei['total_ploa'])}), "
+                         f"variação de {_variacao_pct(lei.get('total_loa'), lei['total_ploa'])}")
+        principal = next((u for u in lei["unidades"] if u["uo"] == lei["principal"]), None)
+        if principal and principal.get("acoes"):
+            campo = "loa" if principal["loa"] is not None else "ploa"
+            total = principal[campo]
+            texto.append("maiores ações: " + "; ".join(
+                f"{a['descricao']}, LOA 2026 {_compacto(a['loa'])} e PLOA 2027 {_compacto(a['ploa'])}"
+                + (f" ({_pct(a[campo], total)} da unidade na {'LOA 2026' if campo == 'loa' else 'PLOA 2027'})"
+                   if total and a[campo] is not None else "") for a in principal["acoes"][:5]))
+        if texto:
+            fatos.append({"id": "B2", "origem": "LOA 2026 e PLOA 2027", "texto": "; ".join(texto) + "."})
+    for k, i in enumerate([i for i in (diag or {}).get("indicadores") or [] if _do_dossie(i)], 1):
+        fatos.append({"id": f"I{k}", "origem": "ficha rápida", "texto": f"{i.get('nome', '')}: {i.get('valor', '')}."})
+    fatos += [f for f in fatos_para_a_leitura(diag, vencimentos, resultado)
+              if not f["id"].startswith("F") or any(f["id"] == i["id"] for s in (diag or {}).get("secoes") or []
+                                                    if s["titulo"] in BLOCOS_EXECUTIVOS for i in s["itens"])]
+    return fatos
+
+
+def resumo_executivo_do_dossie(resumo, diag, folha=None, lei=None, leitura=None):
+    """A primeira página do dossiê: a abertura, a linha do titular, os números em cartões e os destaques."""
+    resumo = resumo or {}
+    linhas = ["## Resumo executivo"]
+    abertura = resumo.get("abertura") or abertura_do_dossie_por_codigo(diag, folha, lei)
+    if abertura:
+        linhas.append(abertura + "\n")
+    titular = _titular_e_estrutura(diag)
+    if titular:
+        linhas.append(titular + "\n")
+    cartoes = cartoes_do_dossie(diag, folha, lei)
+    if cartoes:
+        linhas += ["```cartoes"] + [f"{v} | {r}" for v, r in cartoes] + ["```"]
+    destaques = resumo.get("destaques") or []
+    if destaques:
+        linhas += ["**Destaques**"] + [f"- **{d['rotulo']}:** {d['texto']}" for d in destaques]
+    elif (leitura or {}).get("gargalos"):            # sem destaques aceitos: os gargalos que a leitura conferiu
+        linhas += ["**Destaques**"] + [f"- **{g['titulo']}.** {g['descricao'].rstrip('.')}." for g in leitura["gargalos"]]
+    return "\n".join(linhas)
+
+
+def _orcamento_executivo(lei):
+    """O orçamento na lei, enxuto: uma frase e uma tabela com o total do órgão, as cinco maiores ações da unidade
+    principal (pelo nome, sem código) e o resto somado; valores em forma curta e variação em percentual."""
+    principal = next((u for u in lei["unidades"] if u["uo"] == lei["principal"]), lei["unidades"][0])
+    acoes = principal.get("acoes") or []
+    frases = []
+    if acoes:
+        campo = "loa" if principal["loa"] is not None else "ploa"
+        lei_nome = "da LOA 2026" if campo == "loa" else "do PLOA 2027"
+        maior = max(acoes, key=lambda a: a[campo] or 0)
+        frases.append(f"A maior ação, {maior['descricao']}, concentra {_pct(maior[campo] or 0, principal[campo])} "
+                      f"{lei_nome} da unidade principal.")
+    if lei.get("total_loa") is not None and lei.get("total_ploa") is not None:
+        frases.append(f"O PLOA 2027 propõe {_compacto(lei['total_ploa'])} para o órgão, "
+                      f"{_variacao_pct(lei['total_loa'], lei['total_ploa'])} sobre a LOA 2026.")
+    linhas = [" ".join(frases)] if frases else []
+    linhas += ["| Item | LOA 2026 | PLOA 2027 | Variação |", "|---|---|---|---|",
+               f"| **Total do órgão** | **{_compacto(lei.get('total_loa'))}** | **{_compacto(lei.get('total_ploa'))}** | "
+               f"**{_variacao_pct(lei.get('total_loa'), lei.get('total_ploa'))}** |"]
+    mostradas = acoes if len(acoes) <= ACOES_POR_UNIDADE + 1 else acoes[:ACOES_POR_UNIDADE]
+    for a in mostradas:
+        variacao = ("nova no PLOA 2027" if a["loa"] is None and a["ploa"] is not None else
+                    "fora do PLOA 2027" if a["ploa"] is None and a["loa"] is not None and principal["ploa"] is not None else
+                    _variacao_pct(a["loa"], a["ploa"]))
+        linhas.append(f"| {_cel(a['descricao'])} | {_compacto(a['loa'], 1)} | {_compacto(a['ploa'], 1)} | {variacao} |")
+    resto = acoes[len(mostradas):]
+    if resto:
+        soma = lambda c: sum(a[c] or 0 for a in resto) if principal[c] is not None else None
+        linhas.append(f"| Outras {len(resto)} ações | {_compacto(soma('loa'), 1)} | {_compacto(soma('ploa'), 1)} | "
+                      f"{_variacao_pct(soma('loa'), soma('ploa'))} |")
+    outras = [u["nome"] for u in lei["unidades"] if u is not principal]
+    if outras:
+        linhas.append(f"_O total inclui {_plural(len(outras), 'outra unidade orçamentária', 'outras unidades orçamentárias')}: "
+                      + "; ".join(outras) + "._")
+    return "\n".join(linhas)
+
+
+def _pessoal_executivo(folha):
+    """A folha do órgão numa linha (Caderno de RH)."""
+    efetivos = folha.get("efetivos")
+    pct_efetivos = ""
+    try:
+        v, e = (int(re.sub(r"\D", "", str(x))) for x in (folha.get("vinculos"), efetivos))
+        pct_efetivos = f" ({_pct(e, v)})" if v else ""
+    except (TypeError, ValueError):
+        pass
+    return (f"- **Quadro:** {folha.get('vinculos', '–')} vínculos ativos, dos quais {efetivos or '–'} efetivos{pct_efetivos}; "
+            f"folha do mês de {folha.get('folha_mes', '–')} e remuneração média de {folha.get('remuneracao_media', '–')} "
+            f"(Caderno de RH, {folha.get('competencia', '')}).")
+
+
+def _data_da_vigencia(texto):
+    m = re.search(r"(\d{2})/(\d{2})/(\d{4})", str(texto or ""))
+    try:
+        return date(int(m.group(3)), int(m.group(2)), int(m.group(1))) if m else date.max
+    except ValueError:
+        return date.max
+
+
+def _contratos_executivo(contratos, limite=10):
+    """Os contratos que a secretaria informou e a leitura destacou, numa tabela por ordem de vigência."""
+    linhas_c = sorted(_juntar_contratos(contratos, limite), key=lambda c: _data_da_vigencia(c.get("vigencia")))
+    if not linhas_c:
+        return ""
+    linhas = ["| Vigência | Contrato | Valor | Destaque |", "|---|---|---|---|"]
+    for c in linhas_c:
+        quem = _inteiro(c["contrato"]) + (f" – {_inteiro(c['contratado'])}" if c.get("contratado") else "")
+        objeto = _inteiro(c.get("objeto"))
+        motivo = ", ".join(c.get("motivos") or [])
+        obs = re.sub(r"\s+", " ", str(c.get("observacao") or "")).strip(" .;")
+        destaque = ". ".join(x for x in [motivo[:1].upper() + motivo[1:], obs] if x)
+        linhas.append(f"| {_cel(c.get('vigencia') or 'não informada')} | **{_cel(quem)}**"
+                      + (f"{QUEBRA_NA_CELULA}{_cel(objeto)}" if objeto else "") + f" | "
+                      f"{_cel(_reais_compactos(c.get('valor')) or 'não informado')} | {_cel(destaque) or '–'} |")
+    return "\n".join(linhas + ["_As datas de todos os contratos informados estão no calendário (Excel)._"])
+
+
+def capitulos_executivos(diag, contratos_criticos=None, folha=None, lei=None, leitura=None):
+    """Os cinco capítulos do dossiê executivo. Cada linha do diagnóstico entra como está (já conferida), sem a marca
+    de origem: as fontes vão juntas no fim."""
+    por_titulo = {_norm(s["titulo"]): s for s in (diag or {}).get("secoes") or []}
+    linhas = []
+    for chave, titulo, blocos in CAPITULOS_EXECUTIVOS:
+        corpo = []
+        if chave == "orcamento" and lei:
+            corpo.append(_orcamento_executivo(lei))
+        if chave == "pessoal" and folha:
+            corpo.append(_pessoal_executivo(folha))
+        tabela = _contratos_executivo(contratos_criticos) if chave == "contratos" and contratos_criticos else ""
+        if tabela:
+            corpo.append(tabela)
+        for bloco in blocos:
+            sec = por_titulo.get(_norm(bloco))
+            if not sec or (bloco == "Contratos" and tabela):
+                continue
+            sec, _ = _secao_do_dossie(sec)
+            if not sec["itens"]:
+                continue
+            if len(blocos) > 1:
+                corpo += ["", f"**{SUBTITULOS.get(sec['titulo'], sec['titulo'])}**"]
+            if sec.get("leitura"):
+                corpo += ["", sec["leitura"]]
+            corpo += [f"- {i['texto']}" for i in sec["itens"]]
+            if chave == "pessoal":
+                soma = conferir_soma_do_pessoal(sec["itens"], folha)
+                if soma:
+                    corpo += ["", soma]
+        if chave == "dificuldades" and (leitura or {}).get("gargalos"):
+            corpo += ["", "_Leitura da análise (IA), a partir dos fatos deste dossiê:_"]
+            corpo += [f"- **{g['tipo'].capitalize()}:** {g['titulo']}." for g in leitura["gargalos"]]
+        if corpo:
+            linhas += [f"## {titulo}"] + corpo
+    return "\n".join(linhas)
+
+
+def fontes_executivas(diag, dossie, folha=None, lei=None):
+    """As fontes do dossiê executivo numa linha: o material da secretaria e as fontes do que aparece no corpo."""
+    por_id = {i["id"]: i for i in (dossie or {}).get("itens") or []}
+    ids = [i.get("origem_item") for s in (diag or {}).get("secoes") or [] if s["titulo"] in BLOCOS_EXECUTIVOS
+           for i in s["itens"] if _entra_no_capitulo(i, s["titulo"])]
+    ids += [i.get("origem_item") for i in (diag or {}).get("indicadores") or [] if _do_dossie(i)]
+    fontes = {"material": "material enviado pela secretaria"}
+    if folha:
+        nome = f"Caderno de RH da SEPLAG ({folha.get('competencia', '')})"
+        fontes["rh"] = f"[{nome}]({folha['url']})" if folha.get("url") else nome
+    if lei:
+        fontes["lei"] = " e ".join(dict.fromkeys([lei["fonte_loa"]] + ([lei["fonte_ploa"]] if lei.get("total_ploa") is not None else [])))
+    for item in (por_id[i] for i in ids if i in por_id):
+        nome = (item["fonte"] or "fonte") + (f", {item['data_fonte']}" if item.get("data_fonte")
+                                             and item["data_fonte"] not in (item["fonte"] or "") else "")
+        fontes.setdefault(item["url"] or item["fonte"], f"[{nome}]({item['url']})" if item["url"] else nome)
+    return "**Fontes:** " + "; ".join(fontes.values()) + "."
+
+
 def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
-                      contratos_criticos=None, antes_md="", orgao="", lei=None, plano=None, leitura=None, tce_md=""):
-    """Produto 2, o dossiê: responde "como essa secretaria funciona hoje?", na ordem do roteiro da Equipe de
-    Transição. Panorama e ficha rápida; estrutura organizacional, funcionamento, sobreposições e gargalos; itens a)
-    orçamento (por unidade orçamentária, com o plano de governo), b) cargos e força de trabalho, c) contratos, d)
-    auditorias, convênios e cooperação, e) programas, f) dificuldades, g) propostas para os 100 dias; anexo de fontes. Só dados, cada um com a origem conferida; primeiro o que a secretaria enviou,
-    depois as fontes oficiais. O confronto e a cobertura dos temas ficam na auditoria; os riscos, no relatório de
-    riscos; os prazos, no calendário."""
-    orgao = orgao or (dossie or {}).get("orgao", "")
+                      contratos_criticos=None, antes_md="", orgao="", lei=None, plano=None, leitura=None, tce_md="",
+                      resumo=None):
+    """Produto 2, o dossiê, no formato executivo (vai ao governador eleito). Primeira página: resumo executivo
+    (abertura, titular, números em cartões e destaques; a abertura e os destaques são da IA, conferidos por código em
+    executivo.resumir_dossie). Depois: 1. orçamento (frase e tabela enxuta, sem códigos), 2. força de trabalho, 3.
+    contratos e convênios, 4. programas e obras, 5. dificuldades e gargalos (com a leitura da análise); as fontes numa
+    linha e a nota do que o documento é. Estrutura, funcionamento, pendências com controle e justiça, plano de governo e
+    propostas para os 100 dias ficam no registro e na auditoria. antes_md, ficha, eventos, confronto, cobertura e
+    tce_md ficam na assinatura por compatibilidade."""
     folha = (dossie or {}).get("folha")
     lei = lei if lei is not None else (dossie or {}).get("orcamento_lei")
-    partes = [antes_md, resumo_do_dossie(resultado, cobertura, None, diag or {}, folha, orgao, lei),
-              markdown_capitulos(diag, contratos_criticos, None, folha, orgao, dossie, lei, plano, leitura, tce_md,
-                                 com_riscos=bool((resultado or {}).get("riscos"))),
-              fontes_do_dossie(diag, dossie, folha, lei, plano, tce_md),
-              nota_md]
+    partes = [resumo_executivo_do_dossie(resumo, diag or {}, folha, lei, leitura), "<<<QUEBRA>>>",
+              capitulos_executivos(diag, contratos_criticos, folha, lei, leitura),
+              fontes_executivas(diag, dossie, folha, lei), nota_md]
     return "\n\n".join(p for p in partes if p)
 
 
@@ -1793,71 +2184,211 @@ def _no_calendario(r, vencimentos, limite=8):
     return partes[:limite] + ([f"e mais {len(partes) - limite} no calendário"] if len(partes) > limite else [])
 
 
+JANELA_NA_LINHA = {"Prazo vencido": "Prazo vencido", "Antes da posse": "Decisão antes da posse",
+                   "Primeiras 72 horas": "Decisão nas primeiras 72 horas",
+                   "Primeiros 100 dias": "Decisão nos primeiros 100 dias", "Depois dos 100 dias": "Depois dos 100 dias",
+                   "Sem prazo": "Sem prazo"}
+JANELA_NO_QUADRO = {"Primeiras 72 horas": "Primeiras 72 h", "Primeiros 100 dias": "Primeiros 100 dias"}
+TEMA_SEM_CATEGORIA = "Outros pontos de atenção"
+RE_QUANTIA = re.compile(r"R\$\s?\d[\d.,]*(?:\s?(?:mil|mi|bi|milhões|milhão|bilhões|bilhão)\b)?", re.I)
+
+
+def _cel(texto):
+    """Texto para dentro de uma célula de tabela em Markdown: sem barra vertical e numa linha só."""
+    return re.sub(r"\s+", " ", str(texto or "")).replace("|", "/").strip()
+
+
+def _valor_curto(texto):
+    """O valor em jogo para o quadro-resumo: a primeira quantia em reais do campo "valor" ("R$ 3,68 mi, valor do
+    contrato" → "R$ 3,68 mi"); sem quantia, "Não informado" ou "–"."""
+    m = RE_QUANTIA.search(str(texto or ""))
+    if m:
+        return m.group(0)
+    return "Não informado" if re.search(r"n[ãa]o informad", str(texto or ""), re.I) else "–"
+
+
+def riscos_por_tema(resultado, hoje=None, limite_riscos=10):
+    """Os riscos agrupados por tema (a categoria que a análise deu a cada um e a consolidação conferiu), para o
+    relatório executivo. Dentro do tema, por janela de decisão (prazo vencido primeiro) e prazo; os temas, pelo ponto
+    mais urgente de cada um. Cada ponto ganha o número que o documento usa ("1.1", "1.2", "2.1"). Devolve
+    [(número do tema, tema, [ponto]), ...]; ponto = {"r", "num", "prazo", "janela", "linha"}."""
+    ordem_j = {j: k for k, j in enumerate(JANELAS_DO_RELATORIO)}
+    pontos = []
+    for r in (resultado.get("riscos") or [])[:limite_riscos]:
+        prazo, janela, linha = _prazo_do_risco(r, hoje)
+        pontos.append({"r": r, "prazo": prazo, "janela": janela.replace(" ⚠", ""), "linha": linha,
+                       "tema": r.get("categoria") or TEMA_SEM_CATEGORIA})
+    chave = lambda x: (ordem_j.get(x["janela"], len(ordem_j)),
+                       x["r"].get("data_evento") or x["r"].get("agir_ate") or date.max, -(x["r"].get("nota") or 0))
+    temas = {}
+    for x in sorted(pontos, key=chave):
+        temas.setdefault(x["tema"], []).append(x)
+    saida = []
+    for k, tema in enumerate(sorted(temas, key=lambda t: chave(temas[t][0])), 1):
+        for n, x in enumerate(temas[tema], 1):
+            x["num"] = f"{k}.{n}"
+        saida.append((k, tema, temas[tema]))
+    return saida
+
+
+def _data_de_corte(data_corte):
+    from .produtos import _ler_data
+    return (_ler_data(data_corte) or (None,))[0] if data_corte else None
+
+
+def riscos_para_o_resumo(resultado, data_corte=None, limite_riscos=10):
+    """Os pontos do relatório como a IA do resumo executivo os recebe (executivo.resumir_riscos): o tema, a janela, o
+    prazo e os campos já conferidos e revisados. "texto_conferido" é o que o código usa para conferir os números."""
+    saida = []
+    for _, tema, pontos in riscos_por_tema(resultado, _data_de_corte(data_corte), limite_riscos):
+        for x in pontos:
+            r = x["r"]
+            campos = {"titulo": _sem_ids(r.get("titulo")), "o_que_e": _frase(r.get("o_que_e")), "valor": _frase(r.get("valor")),
+                      "situacao": _frase(r.get("situacao_atual")), "em_curso": _frase(r.get("em_curso")),
+                      "consequencia": _frase(r.get("consequencia")),
+                      "repercussao": _frase(r.get("motivo_sensibilidade"))}
+            saida.append(dict({"id": r["id"], "tema": tema, "janela": x["janela"],
+                               "prazo": x["prazo"] if x["prazo"] != "sem data" else "sem data",
+                               "prioridade": str(r.get("prioridade") or "").lower(),
+                               "impacto": str(r.get("impacto") or "").lower()}, **campos,
+                              texto_conferido=" ".join(v for v in campos.values() if v) + " " + x["linha"]))
+    return saida
+
+
+def sobre_o_relatorio(confianca, data_corte, cortes=None):
+    """O que o relatório é e quanto confiar nele, numa nota curta no fim (a primeira página é do resumo executivo)."""
+    partes = [f"Análise de riscos gerada com IA a partir do material da secretaria e de fontes públicas, com data de "
+              f"corte {data_corte or 'não informada'}. Descreve; não recomenda. Sem revisão da equipe: confira antes de "
+              "usar."]
+    if confianca:
+        por_que = "; ".join(confianca.get("por_que") or [])
+        partes.append(f"Confiança {confianca['nivel']}" + (f", porque {por_que}" if por_que else "")
+                      + ". A confiança mede o quanto a análise se apoia em informação conferida, não a gravidade dos riscos.")
+    if cortes:
+        partes.append("Material lido em parte: " + "; ".join(cortes) + ".")
+    return "_" + " ".join(partes) + "_"
+
+
+def _grupo_da_lacuna(p, num_de):
+    """O grupo de uma informação que falta na tabela: o tema do ponto a que ela serve; sem ponto, a origem."""
+    m = re.search(r"R\d+", str(p.get("serve_a") or ""))
+    if m and m.group(0) in num_de:
+        return num_de[m.group(0)]
+    quem = p.get("apontado_por") or []
+    if "Cruzamento com o TCE-RJ" in quem:
+        return (None, "Controle externo (TCE-RJ)")
+    if "Checklist obrigatório" in quem:
+        return (None, "Temas obrigatórios sem informação")
+    return (None, "Outras informações")
+
+
 def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=10, limite_pedir=15, antes_md="", diag=None,
                      dossie=None, data_corte=None, confianca=None, cortes=None, vencimentos=None, extras=None,
-                     tce_md=""):
-    """Produto 3, o relatório de riscos, direto ao ponto e agrupado por janela de decisão (prazo vencido, antes da
-    posse, primeiras 72 horas, primeiros 100 dias, depois). Cada risco diz do que se trata (o que é, valor, em que pé
-    está), o problema, a consequência, o ponto de decisão e o prazo, com os contratos do calendário da secretaria por
-    extenso, o que continua contestado e as fontes. Depois, o cruzamento com o TCE-RJ e a pauta de investigação.
-    Analisa; não recomenda, não sugere caminho nem responsável. Votos e objeções completas ficam na auditoria."""
-    from .produtos import _ler_data
-    hoje = (_ler_data(data_corte) or (None,))[0] if data_corte else None
-    riscos = (resultado.get("riscos") or [])[:limite_riscos]
-    bases = list(dict.fromkeys(BASE_CURTA.get(r["firmeza"], r["firmeza"]) for r in riscos))
-    md = [antes_md if antes_md else antes_de_ler_riscos(confianca, data_corte, cortes, bases)]
-    grupos = {j: [] for j in JANELAS_DO_RELATORIO}
-    for r in riscos:
-        prazo, janela, linha = _prazo_do_risco(r, hoje)
-        grupos.setdefault(janela.replace(" ⚠", ""), []).append((r, prazo, linha, "⚠" in janela))
-    if riscos:
-        contagem = "; ".join(f"{len(v)} {JANELA_NA_CONTAGEM.get(j, j.lower())}" for j, v in grupos.items() if v)
-        quantos = "1 ponto de decisão" if len(riscos) == 1 else f"{len(riscos)} pontos de decisão"
-        md.append(f"**{quantos}, por janela:** {contagem}. Dentro de cada janela, em ordem de prazo. "
-                  "⚠ marca divergência entre os seis agentes de IA que revisaram e votaram cada risco.")
-    for janela, itens in grupos.items():
-        if not itens:
-            continue
-        md.append(f"## {janela}")
-        for r, prazo, linha, diverge in sorted(itens, key=lambda x: (x[0].get("data_evento") or x[0].get("agir_ate") or date.max,
-                                                                     -x[0]["nota"])):
-            v = r.get("votos") or {}
-            marca = lambda eixo: " ⚠" if (v.get(eixo) or {}).get("divergencia") else ""
-            quando = prazo if prazo != "sem data" else (_curto(_sem_ids(r.get("marco_critico")), 60) or "sem data")
-            md.append(f"**{r['id']} · {_sem_ids(r['titulo'])}** – {quando} · prioridade {r['prioridade'].lower()} · "
-                      f"impacto {str(r.get('impacto') or '').lower()}{marca('impacto')} · base: "
-                      f"{BASE_CURTA.get(r['firmeza'], r['firmeza'])}")
+                     tce_md="", resumo=None):
+    """Produto 3, o relatório de riscos, no formato executivo (vai ao governador eleito, para as reuniões com as áreas
+    técnicas). Primeira página: o resumo executivo (abertura e quadro-resumo denso, por tema: o ponto e o que está em
+    jogo, o valor, o prazo com a janela e a prioridade com o impacto). Depois, os pontos agrupados por tema, cada um com
+    o que é, em que pé está, a consequência, a repercussão possível e a fonte; o controle externo (TCE-RJ); as
+    informações que faltam, pelos mesmos temas; e, no fim, a nota sobre o que o documento é. Analisa; não recomenda.
+    resumo: o que executivo.resumir_riscos devolveu (sem ele, a abertura sai por código e o "em jogo" é a consequência).
+    Votos, objeções, pontos contestados, onde procurar e quem apontou ficam na auditoria."""
+    from . import executivo
+    hoje = _data_de_corte(data_corte)
+    grupos = riscos_por_tema(resultado, hoje, limite_riscos)
+    resumo = resumo or {}
+    em_jogo, intro = resumo.get("em_jogo") or {}, resumo.get("temas") or {}
+    md = ["## Resumo executivo"]
+    if not grupos:
+        md.append("_A análise não apontou ponto de atenção sustentado pelos fatos desta rodada._")
+    else:
+        md.append(resumo.get("abertura") or executivo.abertura_dos_riscos_por_codigo(
+            riscos_para_o_resumo(resultado, data_corte, limite_riscos)))
+        md += ["| Nº | Ponto de atenção e o que está em jogo | Valor | Prazo | Prioridade |", "|---|---|---|---|---|"]
+        for k, tema, pontos in grupos:
+            md.append(f"| {GRUPO}{k}. {tema} |")
+            for x in pontos:
+                r = x["r"]
+                jogo = em_jogo.get(r["id"]) or _frase(r.get("consequencia"))
+                prazo = x["prazo"] if x["prazo"] != "sem data" else "Sem data"
+                quando = ("Sem prazo" if x["janela"] == "Sem prazo" and prazo == "Sem data" else
+                          f"{prazo}{QUEBRA_NA_CELULA}{JANELA_NO_QUADRO.get(x['janela'], x['janela'])}")
+                md.append(f"| {x['num']} | **{_cel(_sem_ids(r['titulo']))}**{QUEBRA_NA_CELULA}{_cel(jogo)} | "
+                          f"{_cel(_valor_curto(r.get('valor')))} | {quando} | {str(r.get('prioridade') or '').capitalize()}"
+                          f"{QUEBRA_NA_CELULA}impacto {str(r.get('impacto') or '').lower()} |")
+        md.append("<<<QUEBRA>>>")
+    for k, tema, pontos in grupos:
+        md.append(f"## {k}. {tema}")
+        if intro.get(tema):
+            md.append(f"_{intro[tema]}_\n")
+        for x in pontos:
+            r = x["r"]
+            prazo = x["prazo"] if x["prazo"] != "sem data" else (
+                _curto(_sem_ids(r.get("marco_critico")), 60) or "sem data")
+            md.append(f"**{x['num']} · {_sem_ids(r['titulo'])}**\n")
+            quando = ("Sem prazo definido" if x["janela"] == "Sem prazo" and prazo == "sem data" else
+                      f"{JANELA_NA_LINHA.get(x['janela'], x['janela'])} · {prazo}")
+            md.append(f"_{quando} · prioridade {str(r.get('prioridade') or '').lower()} · impacto "
+                      f"{str(r.get('impacto') or '').lower()}_")
+            o_que = _frase(r.get("o_que_e"))
+            valor = _frase(r.get("valor"))
+            if valor and not re.match(r"n[ãa]o informad", valor, re.I):
+                o_que = ((o_que + " ") if o_que else "") + "Valor: " + (
+                    valor if valor.startswith("R$") else valor[:1].lower() + valor[1:])
+            status = " ".join(x for x in [_frase(r.get("situacao_atual")),
+                                           ("Em curso: " + _frase(r["em_curso"])) if r.get("em_curso") else ""] if x)
+            prazo_linha = x["linha"][0].upper() + x["linha"][1:]
             sens = str(r.get("sensibilidade") or "").lower()
-            linhas = [("O que é", _frase(r.get("o_que_e"))), ("Valor", _frase(r.get("valor"))),
-                      ("Em que pé está", _frase(r.get("situacao_atual"))),
-                      ("No calendário da secretaria", "\n".join([""] + [f"  - {c}" for c in _no_calendario(r, vencimentos)])
-                       if _no_calendario(r, vencimentos) else ""),
-                      ("Problema", _frase(r["causa"])), ("Consequência", _frase(r["consequencia"])),
-                      ("Ponto de decisão", _frase(r.get("decisao"))),
-                      ("Prazo", linha[0].upper() + linha[1:]
-                       + (f" Marco: {_frase(r['marco_critico'])}" if r.get("marco_critico") and prazo != "sem data" else "")),
-                      ("Processo", _frase(r.get("processo"))), ("Já em curso", _frase(r.get("em_curso"))),
-                      (f"Repercussão possível ({sens}{marca('sensibilidade')})" if sens else "Repercussão possível",
-                       _frase(r.get("motivo_sensibilidade"))),
-                      ("Ponto contestado", _ponto_contestado(r)),
-                      ("A confirmar", " ".join(_frase(a["motivo"]) for a in r.get("a_confirmar") or [])),
-                      ("Fontes", _frase(fontes_do_risco(r, diag, dossie, extras=extras)))]
-            md += [f"- **{rotulo}:**{'' if texto.startswith(chr(10)) else ' '}{texto}" for rotulo, texto in linhas if texto]
+            fonte = _frase(fontes_do_risco(r, diag, dossie, extras=extras))
+            processo = _sem_ids(r.get("processo"))
+            linhas = [("O que é", o_que), ("Status", status), ("Consequência", _frase(r.get("consequencia"))),
+                      # o prazo por extenso só quando diz algo além da data (a data-limite para decidir, o voto)
+                      ("Prazo", prazo_linha if ("decisão precisa sair" in prazo_linha or "pelo voto" in prazo_linha) else ""),
+                      (f"Repercussão possível ({sens})" if sens else "Repercussão possível", _frase(r.get("motivo_sensibilidade"))),
+                      ("A confirmar", "parte do que está acima não tem apoio completo nos fatos citados; o detalhe está "
+                                      "no arquivo de auditoria." if r.get("a_confirmar") else ""),
+                      ("Fonte", (fonte.rstrip(".") + (f" · processo {processo}" if processo else "") + ".") if fonte else
+                       (f"Processo {processo}." if processo else ""))]
+            md += [f"- **{rotulo}:** {texto}" for rotulo, texto in linhas if texto]
     if tce_md:
         md.append(tce_md)
     pedir = (resultado.get("pedir") or [])[:limite_pedir]
     if pedir:
-        md += ["## Informações que faltam: a pauta de investigação",
-               "_O que não está no material e mudaria a leitura dos riscos, apontado pela análise e por cada um dos seis "
-               "agentes, pelo seu olhar. Primeiro o que vem do cruzamento com o TCE-RJ e os temas obrigatórios sem "
-               "informação; depois, pela prioridade do risco a que serve._",
-               "| # | O que falta | Para que serve | Onde procurar | Risco | Quem apontou |", "|---|---|---|---|---|---|"]
-        for k, p in enumerate(pedir, 1):
-            quem = ", ".join(PAPEL_CURTO.get(q, q) for q in p.get("apontado_por") or []) or "Consolidação"
-            md.append(f"| {k} | {_sem_ids(p['o_que'])} | {_sem_ids(p.get('para_que')) or '–'} | "
-                      f"{_sem_ids(p.get('onde')) or '–'} | {p.get('serve_a') or '–'} | {quem} |")
+        num_de = {x["r"]["id"]: (k, tema) for k, tema, pontos in grupos for x in pontos}
+        ponto_de = {x["r"]["id"]: x["num"] for _, _, pontos in grupos for x in pontos}
+        ordem = [(k, t) for k, t, _ in grupos] + [(None, "Controle externo (TCE-RJ)"),
+                                                  (None, "Temas obrigatórios sem informação"), (None, "Outras informações")]
+        por_grupo = {}
+        for p in pedir:
+            por_grupo.setdefault(_grupo_da_lacuna(p, num_de), []).append(p)
+        md += ["## Informações que faltam",
+               "_O que não está no material e mudaria a leitura dos pontos de atenção, agrupado pelos mesmos temas. Onde "
+               "procurar e quem apontou cada item estão no arquivo de auditoria._",
+               "| O que falta | O que esclarece | Ponto |", "|---|---|---|"]
+        for k, tema in ordem:
+            if not por_grupo.get((k, tema)):
+                continue
+            md.append(f"| {GRUPO}{f'{k}. ' if k else ''}{tema} |")
+            for p in por_grupo[(k, tema)]:
+                m = re.search(r"R\d+", str(p.get("serve_a") or ""))
+                md.append(f"| {_cel(_sem_ids(p['o_que']))} | {_cel(_sem_ids(p.get('para_que'))) or '–'} | "
+                          f"{ponto_de.get(m.group(0), '–') if m else '–'} |")
+    md.append((antes_md or sobre_o_relatorio(confianca, data_corte, cortes)) + "\n")
     md.append(nota_md)
     return "\n".join(m for m in md if m)
+
+
+def pauta_completa(resultado, limite_pedir=15):
+    """Para a auditoria: as informações que faltam como estavam no relatório antigo, com onde procurar e quem apontou."""
+    pedir = (resultado.get("pedir") or [])[:limite_pedir]
+    if not pedir:
+        return ""
+    md = ["## Informações que faltam: onde procurar e quem apontou",
+          "| # | O que falta | Para que serve | Onde procurar | Risco | Quem apontou |", "|---|---|---|---|---|---|"]
+    for k, p in enumerate(pedir, 1):
+        quem = ", ".join(PAPEL_CURTO.get(q, q) for q in p.get("apontado_por") or []) or "Consolidação"
+        md.append(f"| {k} | {_cel(_sem_ids(p['o_que']))} | {_cel(_sem_ids(p.get('para_que'))) or '–'} | "
+                  f"{_cel(_sem_ids(p.get('onde'))) or '–'} | {p.get('serve_a') or '–'} | {quem} |")
+    return "\n".join(md)
 
 
 def auditoria_secretaria(resultado, dossie, confronto, metodo_md, cobertura_md="", diag=None):
@@ -1870,6 +2401,7 @@ def auditoria_secretaria(resultado, dossie, confronto, metodo_md, cobertura_md="
         + (f", subordinada a {u['subordinada_a']}" if u.get("subordinada_a") else "")
         + (f" — {u['titular']}" if u.get("titular") else "") + f" _({u['rotulo']})_" for u in unidades)) if unidades else ""
     partes = [markdown_confronto(dossie, confronto), cobertura_md, organo, markdown_objecoes(resultado),
+              pauta_completa(resultado),
               "## Todas as fontes do dossiê\n" + markdown_fontes(dossie, confronto).split("\n", 1)[1],
               metodo_md]
     return "\n\n".join(p for p in partes if p)
