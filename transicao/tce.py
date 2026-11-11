@@ -467,3 +467,46 @@ def markdown(cruzamento, limite=12):
         if len(linhas) > limite:
             md.append(f"_Mais {_n(len(linhas) - limite, 'processo', 'processos')} no arquivo de auditoria._")
     return "\n".join(md)
+
+
+def markdown_executivo(cruzamento, limite=6):
+    """A seção do relatório de riscos no formato executivo: um parágrafo com o que o Tribunal decidiu e o que a
+    secretaria não citou e, se houver condenação recente, a tabela curta dos processos. O detalhe completo (unidades
+    consideradas, todos os processos) fica na auditoria."""
+    if not cruzamento:
+        return ""
+    r = cruzamento.get("resumo") or {}
+    md = ["## Controle externo (TCE-RJ)"]
+    if cruzamento.get("erros") and not cruzamento.get("penalidades"):
+        return "\n".join(md + ["Cruzamento com os dados abertos do TCE-RJ não realizado nesta rodada: "
+                               + "; ".join(cruzamento["erros"])[:200] + "."])
+    consulta = f"Dados abertos do TCE-RJ, consultados em {_consulta(cruzamento)}"
+    if not r.get("condenacoes"):
+        return "\n".join(md + [f"{consulta}: nenhuma multa ou débito em processos do órgão e das vinculadas."]
+                         + _fora_da_contagem(cruzamento))
+    if r.get("recentes"):
+        fora = [numero for numero, lista in _por_processo(cruzamento) if not lista[0]["citado"]]
+        texto = (f"{consulta}: de {r['desde']} para cá, {_contagem(r['multas_recentes'], r['debitos_recentes'])}, em "
+                 f"{_n(r['processos_recentes'], 'processo', 'processos')}"
+                 + ("; todos aparecem no material enviado." if not fora else
+                    f"; {_n(len(fora), 'não aparece', 'não aparecem')} no material enviado pela secretaria."))
+    else:
+        texto = f"{consulta}: nenhuma condenação de {r['desde']} para cá."
+    texto += (f" Ao todo, a base registra {_contagem(r['multas'], r['debitos'])}, em "
+              f"{_n(r['processos'], 'processo', 'processos')}. Valores não informados: a base não indica a unidade "
+              "(R$ ou UFIR-RJ).")
+    md.append(texto)
+    md += _fora_da_contagem(cruzamento)
+    if cruzamento.get("erros"):
+        md.append("_Contagem incompleta: parte da base não pôde ser consultada nesta rodada._")
+    linhas = _por_processo(cruzamento)
+    if linhas:
+        md += ["| Processo | Última sessão | Multas | Débitos | No material |", "|---|---|---|---|---|"]
+        for numero, lista in linhas[:limite]:
+            sessoes = sorted({p["sessao"] for p in lista if p["sessao"]})
+            md.append(f"| {numero} | {f'{sessoes[-1]:%d/%m/%Y}' if sessoes else '–'} | "
+                      f"{_condenacoes(lista, 'multa') or '–'} | {_condenacoes(lista, 'débito') or '–'} | "
+                      f"{'sim' if lista[0]['citado'] else 'não'} |")
+        if len(linhas) > limite:
+            md.append(f"_Mais {_n(len(linhas) - limite, 'processo', 'processos')} no arquivo de auditoria._")
+    return "\n".join(md)

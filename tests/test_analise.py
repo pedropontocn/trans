@@ -1,6 +1,7 @@
 """Testes do fluxo completo: um órgão, vários órgãos e o modo econômico (Batch API falsa). Nenhuma API é chamada."""
 import csv
 import io
+import re
 import json
 import time
 import zipfile
@@ -19,6 +20,14 @@ TITULOS_DO_ROTEIRO = ['## 1. Estrutura organizacional vigente',
                       '## d) Auditorias, convênios e instrumentos de cooperação',
                       '## e) Programas e serviços essenciais',
                       '## f) Principais dificuldades e problemas identificados']
+
+TITULOS_EXECUTIVOS = ['## 1. Orçamento', '## 2. Força de trabalho', '## 3. Contratos e convênios',
+                      '## 4. Programas e obras', '## 5. Dificuldades e gargalos']
+
+
+def r1_decisao(reg):
+    return next(x for x in reg["riscos"]["riscos"] if x["titulo"] == "Licitações adiadas")["decisao"]
+
 
 CFG = {"modelo_pesquisa": "anthropic/claude-haiku-5-5", "modelo_auxiliar": "anthropic/claude-sonnet-5-5",
        "modelo": "anthropic/claude-opus-5-5", "data_corte": "04/11/2026",
@@ -117,11 +126,12 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
     # produto 2: o dossiê da secretaria, atualizado com o que ela informou
     textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
-    for titulo in ["Panorama", "Ficha rápida"] + [x[3:] for x in TITULOS_DO_ROTEIRO] + ["Fontes"]:
+    for titulo in ["Resumo executivo", "Destaques"] + [x[3:] for x in TITULOS_EXECUTIVOS if x[3:] in textos]:
         assert titulo in textos, titulo
-    # o organograma em árvore, em fonte fixa, só com as unidades conferidas
-    assert "│   └── Subsecretaria de Obras (SUBOB) — vago" in textos and "│       └── Superintendência de Projetos" in textos
-    assert "└── Vinculadas" in textos and "    └── EMOP" in textos
+    assert any(t.startswith("Fontes: ") for t in textos)
+    # formato executivo: estrutura, funcionamento e o organograma em árvore ficam fora do dossiê (vão para a auditoria)
+    for fora in [x[3:] for x in TITULOS_DO_ROTEIRO[:2]] + ["│   └── Subsecretaria de Obras (SUBOB) — vago"]:
+        assert fora not in textos, fora
     assert not any("Inventada" in t for t in textos)
     # riscos, confronto e cobertura não ficam no dossiê: vão para o relatório de riscos e a auditoria
     for fora in ("Riscos por prioridade", "6. Cobertura do checklist obrigatório",
@@ -130,9 +140,11 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert not any(t.startswith(("Riscos por prioridade", "Sobre este documento", "Anexo 3")) for t in textos)
     # produto 3: o relatório de riscos, focado nas decisões urgentes, sem anexo
     riscos_txt = [p.text for p in docx.Document(io.BytesIO(r["riscos_docx"])).paragraphs]
-    for titulo in ["Primeiras 72 horas", "Informações que faltam: a pauta de investigação"]:   # agrupado por janela
+    for titulo in ["Resumo executivo", "Informações que faltam"]:
         assert titulo in riscos_txt, titulo
-    assert any(t.startswith("2 pontos de decisão, por janela: 2 nas primeiras 72 horas.") for t in riscos_txt)
+    assert any(t.startswith("2 pontos de atenção") for t in riscos_txt)            # a abertura do resumo executivo
+    temas = [t for t in riscos_txt if re.match(r"\d+\. ", t)]
+    assert temas and all(t[3:] in __import__("transicao.riscos", fromlist=["x"]).CATEGORIAS for t in temas)   # por tema
     assert "Situação" not in riscos_txt and "Antes de ler" not in riscos_txt       # direto ao ponto
     assert not any(t.startswith(("1. Contratos", "Anexo")) for t in riscos_txt)
     # produto 5: a auditoria é só o registro JSON, com a versão legível dentro dele
@@ -140,9 +152,9 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     for titulo in ["Revisão dos agentes, risco a risco", "Todas as fontes do dossiê", "Anexo 3 – Como este documento foi feito"]:
         assert titulo in r["registro"]["auditoria_md"], titulo
     md = r["dossie_md"]
-    assert md.index("## Panorama") < md.index("## 1. Estrutura organizacional vigente") < md.index("## c) Contratos relevantes") < md.index("## Fontes")
-    assert "| LOA 2026 | R$ 412 mi |" in md and "| Empenhado | R$ 398,75 mi |" in md and "Inventado" not in md
-    assert "- **Contrato 99/2026 – Empresa X** · " in md and "Contrato 7/2025" not in md and "Contrato sem origem" not in md
+    assert md.index("## Resumo executivo") < md.index("<<<QUEBRA>>>") < md.index("## 3. Contratos e convênios") < md.index("**Fontes:**")
+    assert "R$ 412 mi | LOA 2026" in md and "R$ 398,75 mi | Empenhado" in md and "Inventado" not in md    # os cartões
+    assert "**Contrato 99/2026 – Empresa X**" in md and "Contrato 7/2025" not in md and "Contrato sem origem" not in md
     auditoria = r["registro"]["auditoria_md"]                   # o confronto e a cobertura ficam na auditoria
     assert "**As fontes mostram:**" in auditoria or "Não mencionado pela secretaria" in auditoria
     assert "Cobertura" in auditoria and "## Organograma completo" in auditoria
@@ -163,10 +175,10 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert reg["riscos"]["decisoes"] == []                 # sem opções nem caminhos: o relatório não sugere
     assert "revisao_do_texto" in reg["verificacao"] and "revisão de tom: 1 trecho reescrito" in r["riscos_md"]
     # a revisão do texto reescreveu o ponto de decisão no tom de análise (sem listar caminhos)
-    assert "Destino das licitações adiadas" in r["riscos_md"] and "Retomar ou cancelar" not in r["riscos_md"]
+    assert r1_decisao(reg) == "Destino das licitações adiadas." and "Retomar ou cancelar" not in r["riscos_md"]
     assert reg["verificacao"]["revisao_do_texto"]["aceitos"][0]["campo"].endswith(".decisao")
-    # a contestação que ficou sem resposta da consolidação aparece como ponto contestado
-    assert "- **Ponto contestado:** Advogado do diabo: o risco inventado não tem fato no material." in r["riscos_md"]
+    # a contestação que ficou sem resposta da consolidação fica na auditoria (o formato executivo não a mostra)
+    assert "Ponto contestado" not in r["riscos_md"] and "o risco inventado não tem fato no material" in r["auditoria_md"]
     assert "- Fazenda e orçamento vê exagero: sem base" in r["auditoria_md"]
     # votação item a item: seis votantes; o código apurou impacto, janela e repercussão de cada risco
     assert sorted(llm.votantes) == sorted(p[1] for p in __import__("transicao.riscos", fromlist=["x"]).PAPEIS)
@@ -174,8 +186,8 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     assert r1["votos"]["impacto"]["nivel"] == "Alto" and r1["votos"]["impacto"]["votos"] == 6
     assert r1["votos"]["sensibilidade"]["nivel"] == "Alta" and r1["votos"]["sensibilidade"]["votos"] == 5
     assert r1["votos"]["sensibilidade"]["divergencia"][0]["papel"] == "Fazenda e orçamento"   # votou Baixa: 2 níveis longe
-    assert "- **Repercussão possível (alta ⚠):**" in r["riscos_md"] and "5/6" not in r["riscos_md"]   # o placar fica na auditoria
-    assert "- **Ponto contestado:** Fazenda votou repercussão política baixa" in r["riscos_md"]
+    # o formato executivo mostra o resultado; o placar e a divergência ficam no registro e na auditoria
+    assert "- **Repercussão possível (alta):**" in r["riscos_md"] and "5/6" not in r["riscos_md"] and "⚠" not in r["riscos_md"]
     assert reg["votacao_dos_agentes"] and len(reg["votacao_dos_agentes"]) == 6
     # a consolidação falsa não informa id_anterior: o casamento é pelo título
     assert all(x["revisao"]["agentes"] == 6 for x in riscos)
@@ -427,7 +439,7 @@ def test_com_dossie_enviado_o_app_nao_pesquisa_o_orgao(llm, tmp_path):
     pedidos = [json.dumps(c["mensagens"][0]["content"], ensure_ascii=False) for c in llm.chamadas]
     assert not any("Monte a camada" in p and 'camada\\n\\"Estado\\"' not in p for p in pedidos)   # só o Estado
     texto = "\n".join(p.text for p in docx.Document(next((tmp_path / "dossies").glob("*_dossie.docx"))).paragraphs)
-    assert "c) Contratos relevantes e riscos de vencimento" in texto and "Cobertura do checklist obrigatório" not in texto
+    assert "Resumo executivo" in texto and "Cobertura do checklist obrigatório" not in texto
     import openpyxl
     calendarios = list((tmp_path / "calendarios").glob("*_calendario.xlsx"))
     celulas = [str(c.value) for f in calendarios for ws in openpyxl.load_workbook(f).worksheets
@@ -530,7 +542,9 @@ def test_folha_da_seplag_entra_no_dossie_da_secretaria(llm):
     r = analise.analisar_orgao("Secretaria de Estado das Cidades - SECID", RELATORIO, CFG)
     itens = [i for i in r["registro"]["dossie"]["itens"] if i["fonte"].startswith("Caderno de RH")]
     assert len(itens) == 2 and all(i["url"].startswith("https://www.rj.gov.br/gesperj/") for i in itens)
-    assert "| 113 | 0 | 113 (100,0%) | R$ 0,92 mi |" in r["dossie_md"]
+    assert ("- **Quadro:** 113 vínculos ativos, dos quais 0 efetivos (0,0%); folha do mês de R$ 0,92 mi"
+            in r["dossie_md"])
+    assert "113 | vínculos ativos (" in r["dossie_md"]                                # e nos cartões da primeira página
     c9 = next(c for c in r["registro"]["checklist"] if c["id"] == "C9")
     assert c9["estado"] == "encontrado"
 
@@ -552,25 +566,20 @@ def test_antes_de_ler_abre_dossie_e_relatorio(llm):
     manifesto = {"cortados": [{"arquivo": "Controle.xlsx", "caracteres": 93411, "usados": 60000}]}
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG, manifesto=manifesto)
     corte = "Controle.xlsx (lidos 60 mil de 93 mil caracteres)"
-    # o dossiê abre e fecha como dossiê: um retrato, sem confiança de riscos nem agentes; material cortado em uma linha
+    # formato executivo: os dois documentos abrem pelo resumo executivo; o que o documento é, a confiança e o material
+    # cortado vão para a nota do fim, numa linha só
     dossie_md = r["dossie_md"]
-    # o preâmbulo é curto: duas notas, sem título nem lista
-    assert dossie_md.startswith("_Retrato de como a secretaria funciona hoje, na ordem do roteiro da Equipe de Transição, "
-                                "gerado com IA a partir do que ela enviou")
-    preambulo = dossie_md.split("## Panorama")[0].strip().split("\n\n")
-    assert len(preambulo) == 2 and all(p.startswith("_") and p.endswith("_") and "\n" not in p for p in preambulo)
-    assert preambulo[0].endswith("Sem revisão da equipe: confira antes de usar._")
-    assert preambulo[1].endswith(f"Contratos: só os que a secretaria informou. Material lido em parte: {corte}._")
-    assert "Antes de ler" not in dossie_md
-    for fora in ("Confiança", "Analisa riscos", "agentes de IA", "Material cortado"):
+    assert dossie_md.startswith("## Resumo executivo\n")
+    nota = dossie_md.rstrip().split("\n")[-1]
+    assert nota.startswith("_Dossiê gerado com IA (registro ") and f"Material lido em parte: {corte}." in nota
+    assert "Sem revisão da equipe: confira antes de usar." in nota
+    for fora in ("Confiança", "Analisa riscos", "agentes de IA", "Material cortado", "Antes de ler"):
         assert fora not in dossie_md, fora
-    assert dossie_md.rstrip().split("\n")[-1].startswith("_Dossiê gerado com IA (registro ")
-    # o relatório de riscos abre em três linhas (o que é, confiança, como ler), mais o material cortado
     riscos_md = r["riscos_md"]
-    abertura = riscos_md.split("**2 pontos de decisão")[0].strip().split("\n")
-    assert len(abertura) == 4 and abertura[0].startswith("- **O que é:**") and abertura[2].startswith("- **Como ler:**")
-    assert abertura[1].startswith("- **Confiança: ") and corte in abertura[3]
-    assert riscos_md.count("confira antes de usar") == 1 and riscos_md.count("Mede quanto a análise") == 1   # não repete
+    assert riscos_md.startswith("## Resumo executivo\n")
+    sobre = next(l for l in riscos_md.split("\n") if l.startswith("_Análise de riscos gerada com IA"))
+    assert "Confiança " in sobre and f"Material lido em parte: {corte}." in sobre
+    assert riscos_md.count("confira antes de usar") == 1 and riscos_md.count("A confiança mede") == 1   # não repete
 
 
 def test_pesquisa_do_estado_e_reaproveitada_no_mesmo_dia(llm, tmp_path):

@@ -147,6 +147,8 @@ class LLMFalso:
                 {"nome": "Inventado", "valor": "R$ 1 bi", "origem": "relatorio", "item": "", "trecho": "frase que não existe"}]}
         self.cruzamento_plano = {"compromissos": []}      # dossiê: cruzamento com o plano de governo
         self.leitura_institucional = {"gargalos": [], "acoes": []}   # dossiê: gargalos e plano dos 100 dias
+        self.resumo_riscos = None        # resumo executivo do relatório de riscos; None: montado a partir do pedido
+        self.resumo_dossie = None        # resumo executivo do dossiê; None: montado a partir do pedido
         self.contratos_criticos = {"contratos": [
             {"contrato": "Contrato 99/2026", "objeto": "Manutenção predial", "contratado": "Empresa X", "valor": "R$ 398.750.000,00",
              "vigencia": "15/12/2026", "motivos": ["vence em breve", "valor alto"], "observacao": "Vence antes da posse.",
@@ -304,6 +306,27 @@ class LLMFalso:
             nao = [n for n in NAO_ENCONTRADO[camada] if n["bloco"] in grupo]
             return self._resp("Pesquisei. [INÍCIO DO JSON]" + json.dumps({"itens": itens, "nao_encontrado": nao})
                               + "[FIM DO JSON]", entrada=30000, saida=3000, buscas=0 if continuacao else 4)
+        if "RESUMO EXECUTIVO do relatório de riscos" in sistema:
+            pedido = json.loads(ultimo)
+            self.pedido_resumo_riscos = pedido
+            riscos_ = pedido["riscos"]
+            resposta = self.resumo_riscos or {
+                "abertura": f"{len(riscos_)} pontos de atenção pedem leitura antes das reuniões com as áreas técnicas.",
+                "fatos": [riscos_[0]["id"]],
+                "temas": [{"tema": t, "texto": "Pontos que afetam a continuidade do serviço."}
+                          for t in dict.fromkeys(r["tema"] for r in riscos_)],
+                "em_jogo": [{"risco": r["id"], "texto": r["consequencia"] or "Sem consequência informada."} for r in riscos_]}
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(resposta) + "[FIM DO JSON]")
+        if "RESUMO EXECUTIVO do dossiê" in sistema:
+            pedido = json.loads(ultimo)
+            self.pedido_resumo_dossie = pedido
+            fatos_ = pedido["fatos"]
+            resposta = self.resumo_dossie or {
+                "abertura": "Retrato da secretaria a partir do material enviado e das bases oficiais.",
+                "fatos": [fatos_[0]["id"]] if fatos_ else [],
+                "destaques": [{"rotulo": f"Ponto {k}", "texto": f["texto"], "fatos": [f["id"]]}
+                              for k, f in enumerate(fatos_[:2], 1)]}
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(resposta) + "[FIM DO JSON]")
         if "Você apoia a Equipe de Transição de Governo" in sistema:
             self.pedido_leitura = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.leitura_institucional) + "[FIM DO JSON]")
@@ -458,7 +481,7 @@ def llm(monkeypatch):
     return falso
 
 
-MODULOS = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist", "riscos", "documentos",
+MODULOS = ["config", "modelo", "entrada", "folha", "pesquisa", "verificacao", "confronto", "produtos", "checklist", "riscos", "documentos", "executivo",
            "revisao", "painel", "secao3", "caderno", "analise"]
 
 

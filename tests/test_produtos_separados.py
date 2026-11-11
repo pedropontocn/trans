@@ -42,7 +42,7 @@ def test_so_dossie_nao_roda_a_analise_de_riscos(llm, tmp_path):
     assert _arquivos(tmp_path) == ["LEIA-ME.txt", "dossies/setur_turismo_dossie.docx", "resumo.csv"]
     registro = json.loads((tmp_path / "auditoria" / "setur_turismo.json").read_text(encoding="utf-8"))
     assert registro["produtos"] == ["dossie"] and registro["riscos"]["riscos"] == []
-    assert "## Panorama" in registro["dossie_md"]
+    assert "## Resumo executivo" in registro["dossie_md"]
 
 
 def test_so_painel_roda_os_riscos_mas_so_grava_o_painel(llm, tmp_path):
