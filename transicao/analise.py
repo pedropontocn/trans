@@ -204,6 +204,16 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     cobertura = checklist.conferir(respostas_checklist.get("respostas") or {}, dossie, relatorio, eventos)
 
     vencimentos = riscos.vencimentos_numerados(eventos)
+    # cruzamento com o plano de governo (só para o dossiê): os compromissos que tratam da área da secretaria e o que os
+    # fatos do material (os do diagnóstico e os do calendário) e o orçamento trazem hoje sobre cada um. O modelo
+    # classifica; o código confere
+    cruzamento_plano = None
+    if "dossie" in escolha:
+        try:
+            cruzamento_plano = caderno.cruzar_plano(auxiliar, nome_de_exibicao(nome), dossie.get("orcamento_lei"),
+                                                    documentos.fatos_para_o_plano(diagnostico, vencimentos), uso)
+        except Exception as e:
+            problemas.append(f"cruzamento com o plano de governo: {type(e).__name__}: {e}"[:300])
     esquema = esquema_de_modelos(principal, auxiliar, cfg.get("modelos_agentes"), cfg.get("familias"))
     modelos_agentes = esquema["agentes"]
     # as multas e os débitos que o TCE-RJ aplicou em processos da secretaria, cruzados com o material (por código)
@@ -296,7 +306,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         documentos.nota_dossie(registro_id, modelos, cfg["data_corte"], bases_por_codigo),
         cobertura=cobertura, contratos_criticos=contratos_criticos,
         antes_md=documentos.antes_de_ler_dossie(cfg["data_corte"], cortes, bases_por_codigo, tem_imprensa),
-        orgao=nome, lei=lei)
+        orgao=nome, lei=lei, plano=cruzamento_plano)
     texto_riscos = documentos.relatorio_riscos(
         resultado, cobertura, documentos.nota_riscos(registro_id, modelos, revisoes, conferencia_final, revisao_texto),
         diag=diagnostico, dossie=dossie, data_corte=cfg["data_corte"], confianca=confianca,
@@ -315,6 +325,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         "produtos": sorted(escolha),
         "versao": VERSAO, "versao_prompt": versao_prompt, "modelos": modelos, "avisos_relatorio": avisos,
         "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "orcamento_na_lei": dossie.get("orcamento_lei"),
+        "cruzamento_plano": cruzamento_plano,
         "confronto": confronto, "diagnostico": diagnostico,
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
@@ -367,8 +378,9 @@ LEIA_ME_PRODUTOS = {
     "painel": "- paineis/: os dados do painel de cada secretaria em JSON (pontos de decisão com janela, prazo, prioridade e\n"
               "  repercussão política, na mesma régua para todas), prontos para o painel unificado.",
     "dossie": "- dossies/: o dossiê de cada secretaria: como ela funciona hoje (panorama, organograma, programas,\n"
-              "  contratos, pessoal, orçamento com a LOA 2026 e o PLOA 2027, pendências), primeiro o que ela informou,\n"
-              "  depois as fontes oficiais. O que não traz marca foi informado pela secretaria.",
+              "  contratos, pessoal, orçamento por unidade na LOA 2026 e no PLOA 2027, pendências, cruzamento com o\n"
+              "  plano de governo), primeiro o que ela informou, depois as fontes oficiais. O que não traz marca foi\n"
+              "  informado pela secretaria.",
     "riscos": "- riscos/: o relatório de riscos de cada secretaria: os riscos agrupados pela janela de decisão (prazo\n"
               "  vencido, antes da posse, 72 horas, 100 dias), cada um em linhas (o que é, valor, em que pé está, os\n"
               "  contratos do calendário, problema, consequência, ponto de decisão, prazo, o que está contestado,\n"
