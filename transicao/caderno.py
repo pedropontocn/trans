@@ -108,6 +108,60 @@ def unidades_da_secretaria(nome, loa, nome_por_extenso="", sigla=""):
     return sorted(u for u in loa["uos"] if u[:2] == melhor[:2]), melhor
 
 
+def orcamento_na_lei(sigla):
+    """O orçamento da secretaria nas leis embutidas, para o dossiê: cada unidade orçamentária do órgão com o total da
+    LOA 2026 e do PLOA 2027, e as atribuições da unidade principal como estão na LOA. Só para sigla da tabela
+    conferida (bases_embutidas/siglas_2026.json); sem ela, None. Total que não fecha com a soma das ações não entra."""
+    loa, ploa = orcamento()
+    principal = _unidade_da_sigla(sigla)
+    if not loa or not principal or principal not in loa["uos"]:
+        return None
+    ploa_uos = (ploa or {}).get("uos") or {}
+    codigos = sorted({u for base in (loa["uos"], ploa_uos) for u in base if u[:2] == principal[:2]})
+
+    def total(base, u):
+        d = base.get(u) or {}
+        return d.get("total_declarado") if d.get("confere") and isinstance(d.get("total_declarado"), (int, float)) else None
+    # o nome é o mais atual: o do PLOA 2027, quando a unidade está nele
+    unidades = [{"uo": u, "nome": (ploa_uos.get(u) or loa["uos"].get(u) or {}).get("nome", ""),
+                 "nome_loa": (loa["uos"].get(u) or {}).get("nome", ""), "nome_ploa": (ploa_uos.get(u) or {}).get("nome", ""),
+                 "loa": total(loa["uos"], u), "ploa": total(ploa_uos, u)} for u in codigos]
+    unidades = [u for u in unidades if u["nome"] and (u["loa"] is not None or u["ploa"] is not None)]
+    if not unidades:
+        return None
+    soma = lambda campo: sum(u[campo] for u in unidades if u[campo] is not None) if any(
+        u[campo] is not None for u in unidades) else None
+    p = loa["uos"][principal]
+    return {"sigla": (sigla or "").strip().upper(), "principal": principal, "nome": p.get("nome", ""),
+            "unidades": unidades, "total_loa": soma("loa"), "total_ploa": soma("ploa"),
+            "atribuicoes": re.sub(r"\s+", " ", str(p.get("atribuicoes") or "")).strip(),
+            "pagina_atribuicoes": p.get("pagina_atribuicoes"),
+            "fonte_loa": "LOA 2026, Volume II", "fonte_ploa": "PLOA 2027, Volume II"}
+
+
+def itens_da_lei(q):
+    """O orçamento na lei como fatos para o dossiê do órgão (itens brutos, de documento oficial): o total da LOA 2026 e
+    do PLOA 2027 de cada unidade e as atribuições da secretaria. Assim o diagnóstico e a análise de riscos os veem."""
+    if not q:
+        return []
+    base = {"camada": "orgao", "url": "", "trecho": "", "tipo_fonte": "documento_oficial", "confianca": "alta",
+            "checagem": "conferido", "data_fonte": "2026"}
+    brutos = []
+    for u in q["unidades"]:
+        if u["loa"] is not None:
+            brutos.append(dict(base, bloco="orcamento_execucao", fonte=q["fonte_loa"],
+                               afirmacao=f"Na LOA 2026, a dotação inicial de {u['nome_loa']} (unidade orçamentária {u['uo']}) "
+                                         f"é de R$ {_reais_inteiros(u['loa'])}."))
+        if u["ploa"] is not None:
+            brutos.append(dict(base, bloco="orcamento_execucao", fonte=q["fonte_ploa"],
+                               afirmacao=f"No PLOA 2027, a proposta para {u['nome_ploa']} (unidade orçamentária {u['uo']}) é "
+                                         f"de R$ {_reais_inteiros(u['ploa'])}."))
+    if q.get("atribuicoes"):
+        brutos.append(dict(base, bloco="mandato_estrutura", fonte=q["fonte_loa"],
+                           afirmacao=f"Atribuições de {q['nome']} na LOA 2026: {q['atribuicoes']}"))
+    return brutos
+
+
 def acoes_da_secretaria(uos, loa, ploa):
     """Cada ação das unidades da secretaria, com o valor na LOA 2026 e na PLOA 2027. Chave: "UO:código"."""
     acoes = {}

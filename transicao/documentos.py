@@ -807,6 +807,41 @@ def antes_de_ler(confianca, data_corte, cortes=None):
     return "\n".join(linhas)
 
 
+def _lista(nomes):
+    """"A", "A e B", "A, B e C"."""
+    nomes = [n for n in nomes or [] if n]
+    return nomes[0] if len(nomes) == 1 else ", ".join(nomes[:-1]) + " e " + nomes[-1] if nomes else ""
+
+
+def antes_de_ler_dossie(data_corte, cortes=None, bases=None, imprensa=False):
+    """A abertura do dossiê: o que é (um retrato, sem riscos), como ler a base de cada informação, o material lido em
+    parte (em uma linha só) e as ressalvas. bases: as bases oficiais embutidas que entraram por código."""
+    de_onde = "do que ela enviou e de fontes oficiais" + (f" ({_lista(bases)})" if bases else "")
+    linhas = ["## Antes de ler",
+              f"- **O que é:** retrato de como a secretaria funciona hoje, gerado com IA a partir {de_onde}, com data de "
+              f"corte {data_corte or 'não informada'}. Descreve; não avalia nem recomenda. Os riscos e os pontos de "
+              "decisão estão no relatório de riscos.",
+              "- **Base de cada informação:** o que não traz marca foi informado pela secretaria. O que vem de outra "
+              "fonte traz a marca: \"fonte oficial ✔\" é documento ou dado oficial conferido"
+              + ("; \"imprensa ✔\" é notícia conferida na página, e só entra no capítulo de pendências." if imprensa else ".")]
+    if cortes:
+        linhas.append("- **Material lido em parte:** " + "; ".join(cortes) + ". O que ficou de fora não entrou.")
+    linhas.append("- **Contratos:** só o que a secretaria informou. Bases externas (SIGA, PNCP, portais) não são "
+                  "usadas, por trazerem datas defasadas; contrato que a secretaria não citou não aparece aqui.")
+    linhas.append("- **Sem revisão da equipe:** confira antes de usar.")
+    return "\n".join(linhas)
+
+
+def nota_dossie(registro_id, modelos, data_corte, bases=None):
+    """O rodapé do dossiê, em uma linha: registro, modelo e o que foi conferido. Sem riscos nem agentes."""
+    usados = list(dict.fromkeys(m for m in (modelos.get("auxiliar"), modelos.get("debate")) if m))
+    return ("_Dossiê gerado com IA (registro " + registro_id + ("; modelo " + " e ".join(usados) if usados else "") + ") a "
+            f"partir do que a secretaria informou e de fontes oficiais, com data de corte {data_corte or 'não informada'}. "
+            "Descreve; não recomenda. Cada dado foi conferido por código na origem"
+            + (f"; {_lista(bases)} {'entra' if len(bases) == 1 else 'entram'} por código, das bases oficiais" if bases else "")
+            + ". Método e conferências no arquivo de auditoria._")
+
+
 def _tamanho(n):
     """331632 → "332 mil"; 12337906 → "12,3 milhões"."""
     return f"{n / 1e6:.1f}".replace(".", ",") + " milhões" if n >= 1e6 else f"{round(n / 1000)} mil"
@@ -824,16 +859,16 @@ def cortes_de_leitura(manifesto=None, avisos=None):
     return cortes
 
 
-def resumo_do_dossie(resultado, cobertura=None, indicadores=None, diag=None, folha=None, orgao=""):
+def resumo_do_dossie(resultado, cobertura=None, indicadores=None, diag=None, folha=None, orgao="", lei=None):
     """A abertura do dossiê: o panorama da secretaria em poucas frases, a ficha rápida e, numa linha, os temas
     básicos que ficaram sem informação. Sem riscos: eles ficam no relatório de riscos."""
     from .checklist import linha_essencial
     diag = diag if diag is not None else {"indicadores": indicadores or []}
     panorama = diag.get("panorama") or []
     linhas = ["## Panorama"] + [f"- {x}" for x in panorama]
-    ficha = ficha_rapida(diag, folha, orgao)
+    ficha = ficha_rapida(diag, folha, orgao, lei)
     if ficha:
-        linhas += ["**Ficha rápida**", ficha]
+        linhas += ["", "**Ficha rápida**", ficha]
     lacunas = linha_essencial(cobertura) if cobertura else ""
     if lacunas:
         linhas.append(lacunas.replace(" Ver a tabela de cobertura no Capítulo 1.", " A tabela está na auditoria."))
@@ -910,36 +945,35 @@ def _curto(texto, n):
     return saida.strip(" .;")
 
 
-def _rotulo(texto, n):
-    """Para nomes em célula de tabela (contrato, objeto): corta na palavra, com reticências."""
-    texto = re.sub(r"\s+", " ", str(texto or "")).strip(" .;")
-    if len(texto) <= n:
-        return texto
-    return texto[:n].rsplit(" ", 1)[0].rstrip(" ,;-") + "…"
+def _inteiro(texto):
+    """Nome ou objeto por inteiro, numa linha só, como está no material: nada cortado no meio e nada mudado de caixa
+    (mudar a caixa estraga sigla: "SENAC ARRJ" viraria "Senac Arrj")."""
+    return re.sub(r"\s+", " ", str(texto or "")).strip(" .;").replace("|", "/")
 
 
-def _nome(texto, n):
-    texto = _rotulo(texto, n)
-    return texto.title() if texto.isupper() else texto
-
-
-def markdown_contratos_criticos(contratos, limite=15):
-    """A tabela dos contratos que a nova gestão precisa conhecer: os que a secretaria informou, apontados
-    no material e conferidos (origem e valor), juntos por número de contrato, no máximo `limite` linhas."""
+def markdown_contratos_criticos(contratos, limite=12):
+    """Os contratos que a nova gestão precisa conhecer: os que a secretaria informou, apontados no material e
+    conferidos (origem e valor), juntos por número de contrato. Uma tabela enxuta (contrato, contratado, objeto,
+    valor, vigência), com os nomes por inteiro, e depois o que destaca cada um, em uma linha por contrato."""
     linhas_c = _juntar_contratos(contratos, limite)
     if not linhas_c:
         return ""
-    linhas = ["| Contrato | Objeto | Contratado | Valor | Vigência | Destaques | Base |",
-              "|---|---|---|---|---|---|---|"]
+    linhas = ["| Contrato | Contratado | Objeto | Valor | Vigência |", "|---|---|---|---|---|"]
     for c in linhas_c:
-        motivo = ", ".join(c["motivos"]) + (f". {_curto(c['observacao'], 90)}" if c.get("observacao") else "")
-        linhas.append(f"| {_rotulo(c['contrato'], 28)} | {_nome(c.get('objeto'), 60) or '–'} | "
-                      f"{_nome(c.get('contratado'), 36) or '–'} | {c.get('valor') or '–'} | {c.get('vigencia') or '–'} | "
-                      f"{motivo} | {_base_curta(c)} |")
-    nota = (f"{len(contratos)} contrato(s) apontados; os {len(linhas_c)} mais críticos acima. Todos no calendário "
-            "consolidado (Excel). " if len(contratos or []) > len(linhas_c) else "")
-    if nota:
-        linhas.append(f"_{nota.strip()}_")
+        linhas.append(f"| {_inteiro(c['contrato'])} | {_inteiro(c.get('contratado')) or '–'} | {_inteiro(c.get('objeto')) or '–'} | "
+                      f"{c.get('valor') or '–'} | {c.get('vigencia') or '–'} |")
+    bases = {BASE_CURTA.get(c["rotulo"], c["rotulo"]) for c in linhas_c}
+    juntos = len(_juntar_contratos(contratos, 10 ** 6))
+    nota = ("Todos informados pela secretaria. " if bases == {"órgão"} else "")
+    nota += (f"Os {len(linhas_c)} mais críticos dos {juntos} que a leitura do material destacou. " if juntos > len(linhas_c) else "")
+    nota += "As datas de todos os contratos informados estão no calendário (Excel)."
+    linhas += [f"_{nota}_", "", "**O que destaca cada contrato**"]
+    for c in linhas_c:
+        quem = _inteiro(c["contrato"]) + (f" ({_inteiro(c['contratado'])})" if c.get("contratado") else "")
+        motivo = ", ".join(c["motivos"])
+        obs = re.sub(r"\s+", " ", str(c.get("observacao") or "")).strip(" .;")
+        base = "" if BASE_CURTA.get(c["rotulo"], c["rotulo"]) == "órgão" else f" _({_base_curta(c)})_"
+        linhas.append(f"- **{quem}:** " + ". ".join(x for x in [motivo, obs] if x) + "." + base)
     return "\n".join(linhas)
 
 
@@ -955,19 +989,102 @@ def _secao_diagnostico(sec):
     return linhas
 
 
-# no dossiê ("como funciona hoje") só entra o que a secretaria informou e o que está em fonte oficial conferida; o
-# que vem de imprensa ou de fonte não oficial fica para os riscos e a contraprova, onde mostra o que vai repercutir
+# no dossiê ("como funciona hoje") só entra o que a secretaria informou e o que está em fonte oficial conferida. O que
+# vem de imprensa fica para os riscos e a contraprova, com uma exceção: no capítulo de pendências com controle e
+# justiça entra a notícia conferida na página, com a marca "imprensa ✔" (inquérito, operação, decisão que a
+# secretaria não citou); sem isso o capítulo passaria a impressão de que quase não há pendência
 ROTULOS_DO_DOSSIE = {"informado pelo órgão", "confirmado em fonte oficial"}
+CAPITULO_COM_IMPRENSA = "Pendências com controle e justiça"
 
 
 def _do_dossie(x):
     return x.get("rotulo") in ROTULOS_DO_DOSSIE
 
 
+def _entra_no_capitulo(item, titulo):
+    return _do_dossie(item) or (titulo == CAPITULO_COM_IMPRENSA and item.get("rotulo") == "fonte pública conferida")
+
+
 def _secao_do_dossie(sec):
-    itens = [i for i in sec["itens"] if _do_dossie(i)]
+    itens = [i for i in sec["itens"] if _entra_no_capitulo(i, sec["titulo"])]
     fora = len(sec["itens"]) - len(itens)
     return dict(sec, itens=itens, leitura=sec.get("leitura") if itens and not fora else ""), fora
+
+
+def _marca_do_dossie(i, por_id):
+    """A marca de origem de uma linha do dossiê: nada para o que a secretaria informou; para o resto, o tipo de fonte
+    e a fonte por extenso, com o link."""
+    if i.get("rotulo") == "informado pelo órgão":
+        return ""
+    item = (por_id or {}).get(i.get("origem_item")) or {}
+    tipo = "fonte oficial ✔" if i.get("rotulo") == "confirmado em fonte oficial" else (
+        "imprensa ✔" if item.get("tipo_fonte", "imprensa") in ("imprensa", "declaracao_politica") else "fonte pública ✔")
+    fonte = (item.get("fonte") or "") + (f", {item['data_fonte']}" if item.get("data_fonte") and
+                                         item["data_fonte"] not in (item.get("fonte") or "") else "")
+    url = i.get("url") or item.get("url") or ""
+    if not fonte:
+        return f" _([{tipo}]({url}))_" if url else f" _({tipo})_"
+    return f" _({tipo}: [{fonte}]({url}))_" if url else f" _({tipo}: {fonte})_"
+
+
+RE_CONTAGEM_DE_PESSOAL = re.compile(
+    r"(?<![\d.,$])(\d{1,3}(?:\.\d{3})+|\d{2,6})(?![\d.,%])\s+(?:[a-zà-ú]+\s+){0,2}?"
+    r"(?:professor|servidor|inspetor|funcion[aá]ri|comissionad|tempor[aá]ri|efetiv|terceirizad|cedid|estagi[aá]ri|"
+    r"policia|agente|militar|m[eé]dic|t[eé]cnic|analista|empregad|contratad|requisitad)", re.I)
+RE_PARTE_DE_OUTRO = re.compile(r"\b(dos quais|das quais|sendo|incluindo|inclusive|entre eles|entre os quais|desses|destes)\b", re.I)
+
+
+def conferir_soma_do_pessoal(itens, folha):
+    """Conferência por código: quando a secretaria lista as categorias da equipe numa frase (três ou mais contagens) e
+    a soma fica perto, mas diferente, do total de vínculos do Caderno de RH, o dossiê diz as duas contas. Não
+    interpreta: só mostra que os números não fecham. Devolve a frase, ou ""."""
+    total = int(re.sub(r"\D", "", str((folha or {}).get("vinculos") or "")) or 0)
+    if not total:
+        return ""
+    for i in itens or []:
+        if i.get("rotulo") != "informado pelo órgão" or RE_PARTE_DE_OUTRO.search(i["texto"]):
+            continue
+        contagens = [int(n.replace(".", "")) for n in RE_CONTAGEM_DE_PESSOAL.findall(i["texto"])]
+        contagens = [n for n in contagens if not (1990 <= n <= 2100)]
+        soma = sum(contagens)
+        if len(contagens) >= 3 and 0.85 * total <= soma <= 1.15 * total and abs(soma - total) > max(1, 0.005 * total):
+            ponto = lambda n: f"{n:,}".replace(",", ".")
+            return (f"_Conferência por código: as {len(contagens)} categorias que a secretaria lista acima somam "
+                    f"{ponto(soma)}; o Caderno de RH ({folha.get('competencia', '')}) registra {ponto(total)} vínculos "
+                    f"ativos, diferença de {ponto(abs(soma - total))}. A lista pode não cobrir toda a equipe, e as bases e "
+                    "as datas podem não ser as mesmas._")
+    return ""
+
+
+def _nao_se_sabe_sem_o_que_o_app_tem(lista, lei, folha=None):
+    """Tira do "não se sabe" o que o próprio dossiê traz de base oficial embutida: o valor no PLOA, a dotação da LOA,
+    o ato de criação que a LOA registra e, com o Caderno de RH, o custo da folha e o total de vínculos."""
+    lei = lei or {}
+    fora = []
+    if folha:
+        fora.append(r"\b(custo|valor|despesa|gasto)( mensal| total)? (da|com a?) folha|\bfolha (mensal|de pagamento)\b|"
+                    r"\b(n[úu]mero|total|quantidade)( total)? de (servidores|v[íi]nculos)( ativos)?\s*$")
+    if lei.get("total_ploa") is not None:
+        fora.append(r"\bPLOA\b|proposta or[çc]ament[áa]ria (de|para) 2027|or[çc]amento (de|para) 2027")
+    if lei.get("total_loa") is not None:
+        fora.append(r"dota[çc][ãa]o (inicial )?(da|na) LOA|valor (da|na) LOA")
+    if re.search(r"\bcriad[ao]\b", lei.get("atribuicoes") or "", re.I):
+        fora.append(r"\b(lei|ato|norma|decreto) de cria[çc][ãa]o\b")
+    padrao = re.compile("|".join(fora), re.I) if fora else None
+    return [x for x in lista or [] if not (padrao and padrao.search(x))]
+
+
+def _quadro_da_lei(lei):
+    """O orçamento do órgão na lei, por código: cada unidade orçamentária na LOA 2026 e no PLOA 2027."""
+    valor = lambda n: _reais_da_lei(n) if n is not None else "–"
+    linhas = [f"**Orçamento na lei** ({lei['fonte_loa']} e {lei['fonte_ploa']}; fonte oficial ✔)",
+              "| Unidade orçamentária | LOA 2026 (dotação inicial) | PLOA 2027 (proposta) |", "|---|---|---|"]
+    linhas += [f"| {u['nome']} | {valor(u['loa'])} | {valor(u['ploa'])} |" for u in lei["unidades"]]
+    if len(lei["unidades"]) > 1:
+        linhas.append(f"| **Total do órgão** | **{valor(lei.get('total_loa'))}** | **{valor(lei.get('total_ploa'))}** |")
+    if any(u["loa"] is None or u["ploa"] is None for u in lei["unidades"]):
+        linhas.append("_\"–\": a unidade não está neste órgão naquela lei._")
+    return "\n".join(linhas)
 
 
 CAPITULOS = [("1. O que faz", ["O que faz"]), ("2. Como se organiza", ["Como se organiza"]),
@@ -1020,12 +1137,27 @@ def organograma_em_arvore(unidades, orgao="", max_linhas=32):
         descer(" topo ", "", 1, set())
     sobra = len(unidades) - (len(linhas) - 1)
     if sobra > 0 and len(linhas) >= max_linhas:
-        linhas.append(f"… e mais {sobra} unidade(s) no registro de auditoria")
+        linhas.append(f"… e mais {_plural(sobra, 'unidade', 'unidades')} no registro de auditoria")
     return "\n".join(["```"] + linhas + ["```"])
 
 
-def ficha_rapida(diag, folha=None, orgao=""):
-    """A ficha rápida do topo do dossiê: os números-chave conferidos, a folha (Caderno de RH) e a estrutura."""
+def _plural(quantos, um, muitos):
+    return f"{quantos} {um if quantos == 1 else muitos}"
+
+
+def _numeros_do_valor(valor):
+    """Os números de um valor da ficha, para comparar ("R$ 6.702.485.057,00" e "R$ 6.702.485.057" são o mesmo;
+    "R$ 320,92 mi" e "R$ 320,92 milhões" também)."""
+    return {re.sub(r",0+$", "", n.replace(".", "")) for n in re.findall(r"\d[\d.]*(?:,\d+)?", str(valor or ""))}
+
+
+def _reais_da_lei(n):
+    return "R$ " + f"{n:,.0f}".replace(",", ".")
+
+
+def ficha_rapida(diag, folha=None, orgao="", lei=None):
+    """A ficha rápida do topo do dossiê: os números-chave conferidos, a folha (Caderno de RH), o orçamento na lei (LOA
+    e PLOA) e a estrutura. O número que o código já mostra de base oficial não se repete na linha da secretaria."""
     linhas = ["| Item | Valor | Base |", "|---|---|---|"]
     unidades = [u for u in (diag or {}).get("organograma") or [] if _do_dossie(u)]
     topo = [u for u in unidades if not u["subordinada_a"] and not u.get("vinculada") and u.get("titular")]
@@ -1033,13 +1165,26 @@ def ficha_rapida(diag, folha=None, orgao=""):
         linhas.append(f"| Titular | {topo[0]['titular']} | {_base_curta(topo[0])} |")
     if unidades:
         vinc = sum(bool(u.get("vinculada")) for u in unidades)
-        linhas.append(f"| Estrutura | {len(unidades) - vinc} unidade(s)" + (f" e {vinc} vinculada(s)" if vinc else "")
-                      + " no organograma | conferido no material |")
+        linhas.append(f"| Estrutura | {_plural(len(unidades) - vinc, 'unidade', 'unidades')}"
+                      + (f" e {_plural(vinc, 'vinculada', 'vinculadas')}" if vinc else "") + " no organograma | conferido no material |")
+    mostrados = set()
     if folha:
-        linhas.append(f"| Vínculos ativos (folha do mês) | {folha.get('vinculos', '–')} ({folha.get('folha_mes', '–')}) | "
-                      f"Caderno de RH (SEPLAG, {folha.get('competencia', '')}) |")
+        linhas.append(f"| Vínculos ativos e folha do mês | {folha.get('vinculos', '–')} vínculos; {folha.get('folha_mes', '–')} | "
+                      f"fonte oficial ✔ (Caderno de RH, SEPLAG, {folha.get('competencia', '')}) |")
+        mostrados |= _numeros_do_valor(folha.get("vinculos")) | _numeros_do_valor(folha.get("folha_mes"))
+    if lei:
+        principal = next((u for u in lei["unidades"] if u["uo"] == lei["principal"]), None)
+        varias = len(lei["unidades"]) > 1
+        for campo, total, nome, fonte in (("loa", lei.get("total_loa"), "Dotação inicial na LOA 2026", lei["fonte_loa"]),
+                                          ("ploa", lei.get("total_ploa"), "Proposta no PLOA 2027", lei["fonte_ploa"])):
+            if principal and principal[campo] is not None:
+                linhas.append(f"| {nome} | {_reais_da_lei(principal[campo])}"
+                              + (f" (órgão, com as outras unidades: {_reais_da_lei(total)})"
+                                 if varias and total is not None and total != principal[campo] else "")
+                              + f" | fonte oficial ✔ ({fonte}) |")
+                mostrados |= _numeros_do_valor(_reais_da_lei(principal[campo]))
     for i in (diag or {}).get("indicadores") or []:
-        if _do_dossie(i):
+        if _do_dossie(i) and not (_numeros_do_valor(i["valor"]) & mostrados):
             linhas.append(f"| {i['nome']} | {i['valor']} | {_base_curta(i)} |")
     return "\n".join(linhas) if len(linhas) > 2 else ""
 
@@ -1060,20 +1205,31 @@ def _quadro_folha(q):
             f"{q['competencia']}._"] if q.get("fora_do_mais_recente") else []))
 
 
-def markdown_capitulos(diag, contratos_criticos=None, ficha=None, folha=None, orgao=""):
+def markdown_capitulos(diag, contratos_criticos=None, ficha=None, folha=None, orgao="", dossie=None, lei=None):
     """Os capítulos do dossiê, que respondem "como essa secretaria funciona hoje?": o que faz, como se organiza (com
     o organograma em árvore), programas e ações, principais contratos, pessoal, orçamento, pendências com controle e
-    justiça, e sistemas, convênios e parcerias. Cada afirmação traz a origem conferida."""
+    justiça, e sistemas, convênios e parcerias. O que a secretaria informou vem sem marca; o resto traz a fonte.
+    A folha (Caderno de RH) e o orçamento na lei (LOA e PLOA) entram por código."""
     por_titulo = {_norm(s["titulo"]): s for s in (diag or {}).get("secoes") or []}
+    por_id = {i["id"]: i for i in (dossie or {}).get("itens") or []}
+    da_lei = lambda i: str((por_id.get(i.get("origem_item")) or {}).get("afirmacao") or "").startswith("Atribuições de ")
     linhas = []
     for titulo, blocos in CAPITULOS:
         linhas.append(f"## {titulo}")
+        if titulo.startswith("1.") and lei and lei.get("atribuicoes"):
+            pagina = f", p. {lei['pagina_atribuicoes']}" if lei.get("pagina_atribuicoes") else ""
+            linhas.append(f"- Na LOA 2026: {_curto(lei['atribuicoes'], 420)}. _(fonte oficial ✔: {lei['fonte_loa']}{pagina})_")
         if titulo.startswith("2.") and (diag or {}).get("organograma"):
             linhas.append(organograma_em_arvore(diag["organograma"], orgao))
+        if titulo.startswith("2.") and lei and len(lei["unidades"]) > 1:
+            linhas.append("- Unidades orçamentárias do órgão na LOA 2026 e no PLOA 2027: "
+                          + "; ".join(u["nome"] for u in lei["unidades"]) + f". _(fonte oficial ✔: {lei['fonte_loa']})_")
         if titulo.startswith("4.") and contratos_criticos:
-            linhas.append(markdown_contratos_criticos(contratos_criticos, limite=10))
+            linhas.append(markdown_contratos_criticos(contratos_criticos))
         if titulo.startswith("5.") and folha:
             linhas.append(_quadro_folha(folha))
+        if titulo.startswith("6.") and lei:
+            linhas.append(_quadro_da_lei(lei))
         for bloco in blocos:
             sec = por_titulo.get(_norm(bloco))
             if not sec:
@@ -1081,10 +1237,24 @@ def markdown_capitulos(diag, contratos_criticos=None, ficha=None, folha=None, or
             if len(blocos) > 1:
                 linhas.append(f"### {sec['titulo']}")
             sec, fora = _secao_do_dossie(sec)
-            linhas += _secao_diagnostico(sec)
+            itens = [i for i in sec["itens"] if not (lei and titulo.startswith("1.") and da_lei(i))]
+            if sec.get("leitura"):
+                linhas += ["", sec["leitura"]]
+            linhas += [f"- {i['texto']}{_marca_do_dossie(i, por_id)}" for i in itens]
+            if titulo.startswith("5."):
+                soma = conferir_soma_do_pessoal(itens, folha)
+                if soma:
+                    linhas += ["", soma]
+            falta = _nao_se_sabe_sem_o_que_o_app_tem(sec.get("nao_se_sabe"), lei, folha if titulo.startswith("5.") else None)
+            if not itens and not falta:
+                linhas.append("_Sem informação conferida._")
+            if falta:
+                linhas += ["", "_Não se sabe:_ " + "; ".join(x.rstrip(". ") for x in falta) + "."]
             if fora:
-                linhas.append(f"_Outros {fora} fato(s) deste tema vêm de imprensa ou de fonte não oficial e ficam no "
-                              "relatório de riscos e na auditoria._")
+                resto = ("de fonte que não pôde ser conferida" if sec["titulo"] == CAPITULO_COM_IMPRENSA
+                         else "de imprensa ou de fonte não oficial")
+                linhas += ["", f"_{_plural(fora, 'outro fato deste tema vem', 'outros fatos deste tema vêm')} {resto} e "
+                               f"{'fica' if fora == 1 else 'ficam'} no relatório de riscos e na auditoria._"]
     return "\n".join(linhas)
 
 
@@ -1140,18 +1310,48 @@ def _papeis():
     return PAPEIS
 
 
+def fontes_do_dossie(diag, dossie, folha=None, lei=None):
+    """O anexo de fontes do dossiê: só as fontes do que aparece no corpo (linhas dos capítulos, ficha e organograma) e
+    as bases oficiais que entram por código, uma linha por fonte, sem códigos."""
+    por_id = {i["id"]: i for i in (dossie or {}).get("itens") or []}
+    ids = [i.get("origem_item") for s in (diag or {}).get("secoes") or [] for i in s["itens"]
+           if _entra_no_capitulo(i, s["titulo"])]
+    ids += [i.get("origem_item") for i in (diag or {}).get("indicadores") or [] if _do_dossie(i)]
+    ids += [u.get("origem_item") for u in (diag or {}).get("organograma") or [] if _do_dossie(u)]
+    fontes = {}
+    for item in (por_id[i] for i in ids if i in por_id):
+        nome = (item["fonte"] or "fonte") + (f", {item['data_fonte']}" if item.get("data_fonte")
+                                             and item["data_fonte"] not in (item["fonte"] or "") else "")
+        selo = "✔ equipe" if item.get("conferido_pela_equipe") else SELO_CHECAGEM.get(item["checagem"], "")
+        fontes.setdefault(item["url"] or item["fonte"], (f"[{nome}]({item['url']})" if item["url"] else nome, selo))
+    if folha:
+        fontes.setdefault(folha.get("url") or "caderno de rh",
+                          (f"[Caderno de RH (SEPLAG), folha de {folha.get('competencia', '')}]({folha.get('url', '')})"
+                           if folha.get("url") else f"Caderno de RH (SEPLAG), folha de {folha.get('competencia', '')}",
+                           "✔ base oficial, lida por código"))
+    if lei:
+        for fonte in dict.fromkeys([lei["fonte_loa"]] + ([lei["fonte_ploa"]] if lei.get("total_ploa") is not None else [])):
+            fontes[fonte] = (fonte, "✔ base oficial, lida por código")
+    if not fontes:
+        return ""
+    return "\n".join(["## Anexo – Fontes",
+                      "_O que a secretaria informou vem do material enviado. As outras fontes usadas no documento:_"]
+                     + [f"- {nome} · {selo}" if selo else f"- {nome}" for nome, selo in fontes.values()])
+
+
 def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
-                      contratos_criticos=None, antes_md="", orgao=""):
-    """Produto 2, o dossiê: responde "como essa secretaria funciona hoje?", em até 5 páginas. Panorama e ficha
-    rápida; os oito capítulos (o que faz, organização com organograma, programas, contratos, pessoal, orçamento,
-    pendências, sistemas e parcerias); o anexo de fontes. Só dados, cada um com a origem conferida; primeiro o que a
-    secretaria enviou, depois as fontes públicas. O confronto e a cobertura dos temas ficam na auditoria; os riscos,
-    no relatório de riscos; os prazos, no calendário."""
+                      contratos_criticos=None, antes_md="", orgao="", lei=None):
+    """Produto 2, o dossiê: responde "como essa secretaria funciona hoje?". Panorama e ficha rápida; os oito
+    capítulos (o que faz, organização com organograma, programas, contratos, pessoal, orçamento, pendências, sistemas
+    e parcerias); o anexo de fontes. Só dados, cada um com a origem conferida; primeiro o que a secretaria enviou,
+    depois as fontes oficiais. O confronto e a cobertura dos temas ficam na auditoria; os riscos, no relatório de
+    riscos; os prazos, no calendário."""
     orgao = orgao or (dossie or {}).get("orgao", "")
     folha = (dossie or {}).get("folha")
-    partes = [antes_md, resumo_do_dossie(resultado, cobertura, None, diag or {}, folha, orgao),
-              markdown_capitulos(diag, contratos_criticos, None, folha, orgao),
-              markdown_fontes(dossie, None, ids_citados(diag, resultado, contratos_criticos)),
+    lei = lei if lei is not None else (dossie or {}).get("orcamento_lei")
+    partes = [antes_md, resumo_do_dossie(resultado, cobertura, None, diag or {}, folha, orgao, lei),
+              markdown_capitulos(diag, contratos_criticos, None, folha, orgao, dossie, lei),
+              fontes_do_dossie(diag, dossie, folha, lei),
               nota_md]
     return "\n\n".join(p for p in partes if p)
 

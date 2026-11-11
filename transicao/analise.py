@@ -153,6 +153,16 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
 
     _so_contratos_da_secretaria(dossie)
 
+    # orçamento na lei (LOA 2026 e PLOA 2027, bases embutidas): dado oficial, entra por código, depois do teste de
+    # dossiê mínimo (não conta para ele). O diagnóstico e a análise de riscos passam a ver esses fatos
+    from . import caderno
+    try:
+        dossie["orcamento_lei"] = caderno.orcamento_na_lei(sigla_orgao)
+    except Exception:
+        dossie["orcamento_lei"] = None
+    pesquisa.acrescentar_itens(dossie, caderno.itens_da_lei(dossie["orcamento_lei"]))
+    resumo_dos = pesquisa.resumo_dossie(dossie)
+
     # confronto, calendário, diagnóstico e checklist leem o mesmo material (em cache): na Batch API vão juntos
     progresso("Diagnóstico, calendário, checklist e confronto com as fontes...")
     tarefas = [_seguro(lambda: conf.confrontar(auxiliar, dossie, relatorio),
@@ -276,13 +286,17 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal,
                "agentes": dict(zip((p[1] for p in riscos.PAPEIS), modelos_agentes)),
                "neutralidade": esquema["neutralidade"], "familias_de_fora": esquema["familias"]}
-    nota = documentos.nota_final(registro_id, modelos, confianca, cfg["data_corte"], neutralidade, revisoes,
-                                 revisao_texto)
-    antes = documentos.antes_de_ler(confianca, cfg["data_corte"], documentos.cortes_de_leitura(manifesto, avisos))
-    texto_dossie = documentos.dossie_secretaria(
-        resultado, diagnostico, None, eventos, dossie, confronto, checklist.markdown(cobertura), nota,
-        cobertura=cobertura, contratos_criticos=contratos_criticos, antes_md=antes, orgao=nome)
     cortes = documentos.cortes_de_leitura(manifesto, avisos)
+    lei = dossie.get("orcamento_lei")
+    bases_por_codigo = (["Caderno de RH da SEPLAG"] if dossie.get("folha") else []) + (["LOA 2026", "PLOA 2027"] if lei else [])
+    tem_imprensa = any(i.get("rotulo") == "fonte pública conferida" for s in diagnostico.get("secoes") or []
+                       if s["titulo"] == documentos.CAPITULO_COM_IMPRENSA for i in s["itens"])
+    texto_dossie = documentos.dossie_secretaria(
+        resultado, diagnostico, None, eventos, dossie, confronto, checklist.markdown(cobertura),
+        documentos.nota_dossie(registro_id, modelos, cfg["data_corte"], bases_por_codigo),
+        cobertura=cobertura, contratos_criticos=contratos_criticos,
+        antes_md=documentos.antes_de_ler_dossie(cfg["data_corte"], cortes, bases_por_codigo, tem_imprensa),
+        orgao=nome, lei=lei)
     texto_riscos = documentos.relatorio_riscos(
         resultado, cobertura, documentos.nota_riscos(registro_id, modelos, revisoes, conferencia_final, revisao_texto),
         diag=diagnostico, dossie=dossie, data_corte=cfg["data_corte"], confianca=confianca,
@@ -300,7 +314,8 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         "id": registro_id, "orgao": nome, "gerado_em": datetime.now().isoformat(timespec="seconds"),
         "produtos": sorted(escolha),
         "versao": VERSAO, "versao_prompt": versao_prompt, "modelos": modelos, "avisos_relatorio": avisos,
-        "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "confronto": confronto, "diagnostico": diagnostico,
+        "dossie": json.loads(pesquisa.dossie_para_json(dossie)), "orcamento_na_lei": dossie.get("orcamento_lei"),
+        "confronto": confronto, "diagnostico": diagnostico,
         "calendario": para_json(eventos), "calendario_descartados": calendario.get("descartados") or [],
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
         "votacao_dos_agentes": votacoes, "conferencia_final": conferencia_final,
@@ -352,7 +367,8 @@ LEIA_ME_PRODUTOS = {
     "painel": "- paineis/: os dados do painel de cada secretaria em JSON (pontos de decisão com janela, prazo, prioridade e\n"
               "  repercussão política, na mesma régua para todas), prontos para o painel unificado.",
     "dossie": "- dossies/: o dossiê de cada secretaria: como ela funciona hoje (panorama, organograma, programas,\n"
-              "  contratos, pessoal, orçamento, passivos), primeiro o que ela informou, depois as fontes oficiais.",
+              "  contratos, pessoal, orçamento com a LOA 2026 e o PLOA 2027, pendências), primeiro o que ela informou,\n"
+              "  depois as fontes oficiais. O que não traz marca foi informado pela secretaria.",
     "riscos": "- riscos/: o relatório de riscos de cada secretaria: os riscos agrupados pela janela de decisão (prazo\n"
               "  vencido, antes da posse, 72 horas, 100 dias), cada um em linhas (o que é, valor, em que pé está, os\n"
               "  contratos do calendário, problema, consequência, ponto de decisão, prazo, o que está contestado,\n"
