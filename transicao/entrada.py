@@ -86,9 +86,34 @@ EXTENSOES = {".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".csv", ".txt", ".md", "
              *imagens.EXTENSOES_IMAGEM}
 
 
+RE_PALAVRA = re.compile(r"[\"'“”(\[*_]*[A-Za-zÀ-ÿ]+(?:-[A-Za-zÀ-ÿ]+)*[\"'“”)\]*_.,;:!?ºª]*")
+RE_VOGAL = re.compile(r"[aeiouyáàâãéêíóôõúü]", re.I)
+MINIMO_PARA_JULGAR = 400          # caracteres: texto menor que isto não é julgado
+PALAVRAS_PARA_SER_TEXTO = 0.35    # fração dos termos com letra que têm de ser palavra
+
+
+def ilegivel(texto):
+    """O texto extraído é lixo? Acontece com PDF cuja fonte não traz o mapa de caracteres: a página se lê na tela, mas
+    o texto sai como "LghGghVgViAGg?VG" ou "(cid:28)(cid:3)". Julga pelos termos que têm letra (números e valores de
+    planilha não contam): se menos de 35% deles são palavras, é lixo. Esse lixo não informa nada e, somado aos outros
+    arquivos, ocupava o limite de leitura e cortava o que prestava."""
+    texto = str(texto or "")
+    if len(texto) < MINIMO_PARA_JULGAR:
+        return False
+    # códigos (nota de empenho, número de processo, natureza de despesa) têm letra e não são palavra nem lixo
+    termos = [t for t in re.split(r"[\s|]+", texto) if re.search(r"[A-Za-zÀ-ÿ]", t)
+              and not (re.search(r"\d", t) and re.fullmatch(r"[A-Za-zÀ-ÿ0-9./ºª°-]+[.,;:)]*", t))]
+    if len(termos) < 60:
+        return False
+    palavras = sum(1 for t in termos if RE_PALAVRA.fullmatch(t) and (len(t) <= 2 or RE_VOGAL.search(t)))
+    return palavras / len(termos) < PALAVRAS_PARA_SER_TEXTO
+
+
 def texto_do_arquivo(converter, nome, dados, origem, manifesto):
     """O texto de um arquivo: o digitado (MarkItDown) mais a transcrição do que está em imagem (páginas digitalizadas,
-    slides, prints, fotos), quando a rodada liga a transcrição. Devolve "" se não houver texto; erro vai ao manifesto."""
+    slides, prints, fotos), quando a rodada liga a transcrição. Devolve "" se não houver texto; erro vai ao manifesto.
+    PDF com texto ilegível (fonte sem mapa de caracteres): o texto é descartado e as páginas são lidas como imagem, se
+    a leitura de imagens estiver ligada; o arquivo fica registrado em manifesto["ilegiveis"]."""
     texto = ""
     if Path(nome).suffix.lower() not in imagens.EXTENSOES_IMAGEM:
         try:
@@ -97,13 +122,23 @@ def texto_do_arquivo(converter, nome, dados, origem, manifesto):
             manifesto["erros"].append({"arquivo": origem, "erro": f"{type(e).__name__}: {e}"[:300]})
             if Path(nome).suffix.lower() != ".pdf":
                 return ""
+    if Path(nome).suffix.lower() == ".pdf" and ilegivel(texto):
+        transcrito = imagens.transcrever_arquivo(nome, dados, origem, paginas_inteiras=True)
+        manifesto.setdefault("ilegiveis", []).append({"arquivo": origem, "caracteres": len(texto),
+                                                      "lido_como_imagem": bool(transcrito)})
+        if transcrito:
+            manifesto.setdefault("com_imagem_transcrita", []).append(origem)
+        return transcrito
     transcrito = imagens.transcrever_arquivo(nome, dados, origem)
     if transcrito:
         manifesto.setdefault("com_imagem_transcrita", []).append(origem)
     return (texto.rstrip() + transcrito) if transcrito else texto
 
 
-def _motivo_sem_texto(nome):
+def _motivo_sem_texto(nome, manifesto=None, origem=None):
+    if any(i["arquivo"] == (origem or nome) for i in (manifesto or {}).get("ilegiveis") or []):
+        return ("texto ilegível: a fonte do PDF não permite extrair o texto" +
+                ("" if imagens.ativa() else "; a leitura de imagens está desligada"))
     if Path(nome).suffix.lower() in imagens.EXTENSOES_IMAGEM | {".pdf", ".pptx", ".docx"} and not imagens.ativa():
         return "sem texto digitado; está em imagem e a leitura de imagens está desligada"
     return "sem texto legível (nem digitado, nem em imagem)"
@@ -256,7 +291,7 @@ def ler_documentos(drive, orgao, converter, limite_total):
             textos.append((origem, limpar_dados_pessoais(texto)))
             _guardar_secao3(manifesto, origem, nome, dados)
         elif len(manifesto["erros"]) == n_erros:
-            manifesto["pulados"].append({"arquivo": origem, "motivo": _motivo_sem_texto(nome)})
+            manifesto["pulados"].append({"arquivo": origem, "motivo": _motivo_sem_texto(nome, manifesto, origem)})
 
     for pasta in orgao["pastas"]:
         for arq in drive.listar(pasta["id"]):
@@ -549,7 +584,8 @@ def orgaos_do_envio(arquivos, cada_pasta=False):
                 textos.append((r["arquivo"], texto))
                 _guardar_secao3(manifesto, r["arquivo"], r["arquivo"], r["conteudo"])
             elif len(manifesto["erros"]) == n_erros:
-                manifesto["pulados"].append({"arquivo": r["arquivo"], "motivo": _motivo_sem_texto(r["arquivo"])})
+                manifesto["pulados"].append({"arquivo": r["arquivo"],
+                                             "motivo": _motivo_sem_texto(r["arquivo"], manifesto)})
         # vários arquivos: o mesmo limite dividido entre eles (sem isso, o corte no fim levaria o último inteiro)
         return montar_material(textos, manifesto, LIMITE_CARACTERES), manifesto
 

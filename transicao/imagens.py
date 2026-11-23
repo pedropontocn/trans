@@ -109,14 +109,18 @@ def _grande(img):
     return ImageStat.Stat(amostra).stddev[0] >= VARIACAO_MINIMA
 
 
-def imagens_do_pdf(dados):
-    """[(rótulo, jpeg)]: as páginas digitalizadas inteiras e, nas páginas com texto, só as imagens grandes."""
+def imagens_do_pdf(dados, paginas_inteiras=False):
+    """[(rótulo, jpeg)]: as páginas digitalizadas inteiras e, nas páginas com texto, só as imagens grandes.
+    paginas_inteiras: todas as páginas, cada uma como imagem (PDF cujo texto sai ilegível)."""
     import pdfplumber
     import pypdfium2 as pdfium
     saida = []
     with pdfplumber.open(io.BytesIO(dados)) as pdf:
         escolhas = []
         for n, pg in enumerate(pdf.pages, 1):
+            if paginas_inteiras:
+                escolhas.append((n, None, float(pg.width), float(pg.height)))
+                continue
             area = float(pg.width * pg.height) or 1.0
             letras = [c for c in pg.chars if c["text"].strip()]
             caixas = []
@@ -201,10 +205,10 @@ def imagens_embutidas(dados, pasta):
     return saida
 
 
-def imagens_do_arquivo(nome, dados):
+def imagens_do_arquivo(nome, dados, paginas_inteiras=False):
     ext = Path(nome).suffix.lower()
     if ext == ".pdf":
-        return imagens_do_pdf(dados)
+        return imagens_do_pdf(dados, paginas_inteiras)
     if ext == ".pptx":
         return imagens_do_pptx(dados)
     if ext == ".docx":
@@ -233,14 +237,14 @@ def _transcrever(modelo, jpeg, uso):
     return texto
 
 
-def transcrever_arquivo(nome, dados, origem):
+def transcrever_arquivo(nome, dados, origem, paginas_inteiras=False):
     """O texto das imagens do arquivo, pronto para juntar ao texto digitado, ou "" (transcrição desligada, nenhuma
     imagem que importe, ou teto da secretaria já atingido). Registra no manifesto o que fez."""
     r = ativa()
     if r is None:
         return ""
     try:
-        imagens = imagens_do_arquivo(nome, dados)
+        imagens = imagens_do_arquivo(nome, dados, paginas_inteiras)
     except Exception as e:
         r["erros"].append({"arquivo": origem, "erro": f"imagens: {type(e).__name__}: {e}"[:300]})
         return ""

@@ -182,3 +182,48 @@ def test_fundo_com_texto_digitado_e_imagem_lisa_ficam_de_fora(llm):
     p.insert_text((50, 100), "Segunda linha de texto digitado, para a página não parecer digitalizada.")
     p.insert_image(pymupdf.Rect(50, 300, 545, 650), stream=branca.getvalue())
     assert imagens.imagens_do_arquivo("capa.pdf", doc.tobytes()) == []
+
+
+LIXO = ("LghGghVgViAGg?VG (cid:30)17(cid:28)$.5>6151<9,2(cid:28)VgH ;1 !7. 1842,<-,&D067=,A;1:12;./9,;.A/40.2;7<,E/1A<,F.25,;., "
+        "RVS&.6@=7,$7:761<=,57<Q,2C,.:12<,;.2/481/9B.;1>2.>./9,.2-,51<9C27, ") * 40
+
+
+def test_texto_ilegivel_e_reconhecido_sem_confundir_planilha_nem_texto_curto():
+    from conftest import RELATORIO
+    from transicao import entrada
+    assert entrada.ilegivel(LIXO)
+    assert not entrada.ilegivel(RELATORIO) and not entrada.ilegivel(LIXO[:300]) and not entrada.ilegivel("")
+    planilha = "\n".join(f"|2026NE{k:05d}|33.90.39|{k * 1234.56:.2f}|{k}/2026|SEI-360001/{k:06d}/2026|" for k in range(400))
+    assert not entrada.ilegivel(planilha)                       # códigos e números não são lixo
+    tabela = "\n".join(f"|Contrato {k}/2026|Empresa de Serviços Ltda.|R$ {k}.000,00|vigente|" for k in range(200))
+    assert not entrada.ilegivel(tabela)
+
+
+def test_pdf_com_texto_ilegivel_nao_entra_como_lixo_nem_gasta_o_limite(llm):
+    """O caso do Anexo II da SEPOL: PDF que se lê na tela, mas cuja fonte não traz o mapa de caracteres. O texto saía
+    como lixo, entrava no material e, pelo tamanho, fazia cortar as abas de contratos e convênios de outro anexo."""
+    import pymupdf
+    from transicao import documentos, entrada, imagens
+    doc = pymupdf.open()
+    for pagina in (1, 2):
+        p = doc.new_page()
+        for k in range(30):
+            p.insert_text((50, 60 + 22 * k), f"Art. {pagina}{k}. A Polícia Civil, instituição permanente de segurança pública.")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("SEPOL/lei_organica.pdf", doc.tobytes())
+    orgaos = entrada.orgaos_do_envio([("envio.zip", buf.getvalue())], cada_pasta=True)
+    llm.texto_relatorio = LIXO                        # é o que o conversor de texto devolve para esse PDF
+    # leitura de imagens ligada: as páginas são lidas como imagem, todas, e o lixo não entra
+    with imagens.leitura("anthropic/claude-opus-5-5") as lidas:
+        texto, manifesto = orgaos[0]["ler"]()
+    assert lidas["transcritas"] == 2 and texto.count("(transcrição de imagem)") == 2 and "(cid:" not in texto
+    assert manifesto["ilegiveis"] == [{"arquivo": "lei_organica.pdf", "caracteres": len(LIXO), "lido_como_imagem": True}]
+    assert not manifesto["pulados"] and documentos.cortes_de_leitura(manifesto) == []
+    # desligada: o arquivo fica de fora, com o motivo, e o documento avisa
+    with imagens.leitura("anthropic/claude-opus-5-5", ligado=False):
+        texto, manifesto = orgaos[0]["ler"]()
+    assert not texto.strip() and manifesto["pulados"] == [{
+        "arquivo": "lei_organica.pdf",
+        "motivo": "texto ilegível: a fonte do PDF não permite extrair o texto; a leitura de imagens está desligada"}]
+    assert documentos.cortes_de_leitura(manifesto) == ["lei_organica.pdf (não lido: o texto do PDF sai ilegível)"]
