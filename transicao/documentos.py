@@ -943,6 +943,9 @@ def cortes_de_leitura(manifesto=None, avisos=None):
     for c in (manifesto or {}).get("cortados") or []:
         total = _tamanho(c["caracteres"])
         cortes.append(f"{c['arquivo']} (lidos {_tamanho(c['usados'])} de {total}{' de' if total.endswith('milhões') else ''} caracteres)")
+    for i in (manifesto or {}).get("ilegiveis") or []:
+        if not i.get("lido_como_imagem"):
+            cortes.append(f"{i['arquivo']} (não lido: o texto do PDF sai ilegível)")
     for a in avisos or []:
         if "foi cortado" in a:
             cortes.append(re.sub(r"^⚠️\s*", "", a).rstrip(". ").replace(" e não entra na análise", ""))
