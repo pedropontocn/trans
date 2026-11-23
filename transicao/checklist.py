@@ -35,6 +35,10 @@ PERGUNTAS = [
      ["pessoal"], "Portal da Transparência e contratos de terceirização"),
     ("C10", "Sistemas críticos", "Sistemas e serviços de TI de que a operação depende, com os contratos que os sustentam",
      ["riscos_continuidade", "contratos_convenios"], "Proderj e contratos de TI"),
+    # os meios de trabalho: o dado de estado que não tem data nem contrato (e que vira notícia)
+    ("C11", "Patrimônio e frota", "Frota de veículos (total e em operação), imóveis (quantos e a situação documental) e "
+     "equipamentos essenciais à operação", ["riscos_continuidade"],
+     "seção 4.4 do Relatório de Transição e setor de patrimônio e transportes da secretaria"),
 ]
 
 ESTADOS = ["encontrado", "procurado e não encontrado", "não procurado"]
@@ -173,7 +177,7 @@ def markdown(checklist):
         return ""
     r = resumo(checklist)
     linhas = ["## Cobertura dos temas básicos",
-              f"Dez temas básicos que toda secretaria precisa ter verificados. Estado conferido por código: "
+              f"Onze temas básicos que toda secretaria precisa ter verificados. Estado conferido por código: "
               f"{r['encontrado']} encontrado(s), {r['procurado e não encontrado']} procurado(s) sem resultado, "
               f"{r['não procurado']} sem informação. **Tema sem informação não significa que não há risco: nem o material da secretaria nem as "
               "fontes trazem nada conferível sobre ele.** Estado: ✔ encontrado · ○ procurado, sem resultado · ✖ sem informação.",

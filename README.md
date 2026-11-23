@@ -24,7 +24,7 @@ Um `.zip` com os produtos pedidos:
 | Arquivo | O que é |
 |---|---|
 | `paineis/<sigla>_painel.json` | **1. Dados do painel, por secretaria:** os pontos de decisão com janela (antes da posse, 72 horas, 100 dias, depois), prazo, prioridade e repercussão política votada pelos seis agentes, na mesma régua para todas; prontos para o painel unificado. O painel em Word por secretaria saiu: repetia a tabela do relatório de riscos |
-| `dossies/<secretaria>_dossie.docx` | **2. Dossiê: como a secretaria funciona hoje**, no **formato executivo** (vai ao governador eleito, para as reuniões com as áreas técnicas). **Primeira página, o resumo executivo:** uma abertura de três a cinco frases, a linha do titular, os números-chave em cartões (vínculos e folha do Caderno de RH, LOA 2026 e PLOA 2027 em forma curta e os indicadores conferidos) e até seis destaques de uma linha. Depois, cinco capítulos curtos: **1. Orçamento** (uma frase e uma tabela com o total do órgão e as cinco maiores ações, pelo nome e sem código, valores em forma curta e variação em percentual), **2. Força de trabalho** (a folha numa linha e o que a secretaria informa), **3. Contratos e convênios** (tabela por ordem de vigência, mais convênios e cooperação), **4. Programas e obras**, **5. Dificuldades e gargalos** (o que a secretaria aponta e, por tipo, a leitura dos gargalos pela análise). As fontes numa linha e, no fim, a nota do que o documento é (IA, data de corte, material lido em parte, sem revisão da equipe). **A abertura e os destaques são da IA, com trava por código** (`transicao/executivo.py`): cada texto cita fatos com id (bases oficiais, indicadores, capítulos, calendário e riscos), e cai o que traz número fora dos fatos citados, palavra de recomendação, responsável, código de fato ou texto cortado; sem abertura aceita, entra a montada por código. Ficam fora do documento, no registro e na auditoria: estrutura e organograma, funcionamento, pendências com controle e justiça, cruzamento com o plano de governo e as propostas para os 100 dias |
+| `dossies/<secretaria>_dossie.docx` | **2. Dossiê: como a secretaria funciona hoje**, no **formato executivo** (vai ao governador eleito, para as reuniões com as áreas técnicas). **Primeira página, o resumo executivo:** uma abertura de três a cinco frases, a linha do titular, os números-chave em cartões (vínculos e folha do Caderno de RH, LOA 2026 e PLOA 2027 em forma curta e os indicadores conferidos) e até seis destaques de uma linha. Depois, até seis capítulos curtos, numerados na ordem em que aparecem: **1. Orçamento** (uma frase e uma tabela com o total do órgão e as cinco maiores ações, pelo nome e sem código, valores em forma curta e variação em percentual), **2. Força de trabalho** (a folha numa linha e o que a secretaria informa), **3. Contratos e convênios** (tabela por ordem de vigência, mais convênios e cooperação), **4. Programas e obras**, **5. Frota, patrimônio e meios operacionais** (quantos existem e quantos funcionam; com os achados da leitura de repercussão pública na frente), **6. Dificuldades e gargalos** (o que a secretaria aponta e, por tipo, a leitura dos gargalos pela análise). As fontes numa linha e, no fim, a nota do que o documento é (IA, data de corte, material lido em parte, sem revisão da equipe). **A abertura e os destaques são da IA, com trava por código** (`transicao/executivo.py`): cada texto cita fatos com id (bases oficiais, indicadores, capítulos, calendário e riscos), e cai o que traz número fora dos fatos citados, palavra de recomendação, responsável, código de fato ou texto cortado; sem abertura aceita, entra a montada por código. Ficam fora do documento, no registro e na auditoria: estrutura e organograma, funcionamento, pendências com controle e justiça, cruzamento com o plano de governo e as propostas para os 100 dias |
 | `riscos/<secretaria>_riscos.docx` | **3. Relatório de riscos**, no **formato executivo** (vai ao governador eleito). **Primeira página, o resumo executivo:** uma abertura de três a cinco frases e o **quadro-resumo**, agrupado por tema (a categoria que cada risco recebe na análise): número do ponto, título e o que está em jogo, valor, prazo com a janela de decisão e prioridade com o impacto. Depois, os pontos **por tema** (o tema do ponto mais urgente primeiro; dentro do tema, por janela e prazo), numerados 1.1, 1.2, 2.1: o que é (com o valor), status (com o que já está em curso), consequência, a data-limite para decidir quando há, repercussão possível e fonte (com o processo). Em seguida, **controle externo (TCE-RJ)** num parágrafo e uma tabela curta, e as **informações que faltam**, pelos mesmos temas, com o que falta, o que esclarece e o ponto a que servem. No fim, a nota do que o documento é e da confiança. A abertura, a frase de cada tema e o "em jogo" de cada ponto são da IA, com a mesma trava por código do dossiê; o que não passa sai por código (o "em jogo" vira a consequência). Ficam na auditoria: ponto contestado, votos e divergências, o motivo do "a confirmar", onde procurar e quem apontou cada informação que falta. A janela vem da data do documento (prazo já passado aparece como vencido); sem data, do voto dos agentes. Tom de análise: sem recomendação, sem caminho sugerido, sem responsável, repercussão sempre no condicional |
 | `auditoria/<secretaria>.json` | **5. Auditoria**: o registro completo de cada análise: dossiê e conferências, análise inicial, revisões e votos dos seis agentes, consolidação, objeções risco a risco, método, descartes, custo |
 | `calendarios/<sigla>_calendario.xlsx` | **4. Calendário, por secretaria:** os vencimentos com filtro em todas as colunas; as três primeiras são para filtrar: secretaria (sigla), janela (antes da posse, 72 horas, 100 dias, depois) e mês. A aba Prioridades vem primeiro. Só as datas que a secretaria informou |
@@ -92,19 +92,37 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
    contraprova). Cada afirmação cita o dossiê ou um trecho literal do
    relatório; o que não confere é retirado. Os fatos que pesam na transição entram sem juízo e servem à análise de
    riscos.
-3. **Checklist obrigatório.** Dez temas básicos que toda secretaria precisa ter verificados (contratos a vencer, emergenciais,
-   execução, restos a pagar, TCE-RJ, judicialização, convênios federais, obras, pessoal, sistemas críticos). Cada um
+3. **Checklist obrigatório.** Onze temas básicos que toda secretaria precisa ter verificados (contratos a vencer, emergenciais,
+   execução, restos a pagar, TCE-RJ, judicialização, convênios federais, obras, pessoal, sistemas críticos, patrimônio e
+   frota). Cada um
    sai com estado conferido por código: **encontrado** (com os fatos), **procurado e não encontrado** (a pesquisa
    registrou a busca, ou o órgão informou que não há) ou **sem informação**. O que ficou em branco aparece na primeira
    página do documento, entra no que pedir à secretaria e derruba a confiança: alta só sem nenhum ponto em branco.
    A pesquisa do app recebe os pontos como obrigatórios e registra os que não achou.
 4. **Vencimentos.** Régua de risco por código: serviço essencial, impacto, data-limite para agir, tempo para nova
    licitação e prioridade (impacto × urgência).
+
+   **Sensibilidade ao que pode virar notícia** (`alertas.py`). O calendário, os contratos e os pontos críticos procuram
+   o que tem data ou contrato; o dado de estado (menos da metade da frota em operação, efetivo abaixo do previsto em
+   lei, imóveis sem regularização) não tem nenhum dos dois. Três peças cuidam dele:
+   - **Sinais, por código, sem modelo:** o material inteiro é varrido, frase a frase e linha de tabela a linha de
+     tabela, atrás de quantidade junto de sinal de alerta (inoperante, fora de operação, déficit, sem saldo,
+     pendência, reintegração de posse) ou de proporção de disponibilidade (quantos existem e quantos funcionam). São
+     pista para as leituras do modelo.
+   - **Leitura de repercussão pública, com o modelo principal:** o material é lido como um repórter leria. Cada achado
+     traz o trecho literal, conferido por código no material, e uma frase descritiva cujos números têm de estar no
+     trecho. Os achados entram no diagnóstico (bloco "Patrimônio, frota e meios operacionais", "Pessoal" ou o que
+     couber; no dossiê, capítulo próprio) e na análise de riscos, como pontos críticos. O que a análise não transformar
+     em ponto de atenção sai, por código, na lista "Outros dados com possível repercussão pública" do relatório.
+   - **Conta, por código:** no fim da rodada, a auditoria diz em quais produtos cada achado apareceu e quais sinais
+     fortes do material não chegaram a nenhum. Achado fora de algum produto vai para a coluna de observação.
 5. **Análise de riscos.** Antes dela, o funil é alargado: (a) os **pontos críticos** que a secretaria informou (até
-   20), de todos os tipos de questão urgente e não só contratos (concessão ou PPP em andamento, decisão pendente em
-   tribunal, acordo com órgão de controle, auditoria em curso, recurso federal com marco, programa em fase crítica,
-   obra, evento, contingência sazonal, pessoal, ato pendente, obrigação fiscal), cada um com o trecho literal
-   conferido por código no material; (b) as **multas e débitos do TCE-RJ** (ver abaixo). A análise recebe os fatos
+   24, alternando os das fichas do relatório e os que o modelo acha no resto do material), de todos os tipos de questão
+   urgente e não só contratos (concessão ou PPP em andamento, decisão pendente em tribunal, acordo com órgão de
+   controle, auditoria em curso, recurso federal com marco, programa em fase crítica, obra, evento, contingência
+   sazonal, pessoal, ato pendente, obrigação fiscal) e as **condições de estado**, mesmo sem prazo (meio de trabalho
+   parado, efetivo abaixo do previsto, patrimônio irregular, serviço abaixo do necessário), cada um com o trecho
+   literal conferido por código no material, mais os achados da leitura de repercussão pública; (b) as **multas e débitos do TCE-RJ** (ver abaixo). A análise recebe os fatos
    com id (diagnóstico F, vencimentos V, dossiê O, pontos críticos P, TCE-RJ T) e, depois deles, **o material inteiro
    da secretaria**. Propõe de 5 a 10 riscos (causa → consequência), cada um identificado (o que é, valor, em que pé
    está, marco, processo), o ponto de decisão (descrito, sem caminhos) e as informações que faltam. Tudo que o risco
@@ -167,6 +185,7 @@ transicao/
   painel.py            painel estadual
   produtos.py          calendário, régua de risco dos vencimentos e diagnóstico
   checklist.py         checklist obrigatório: o estado de cada ponto (encontrado, procurado, não procurado)
+  alertas.py           sensibilidade ao que pode virar notícia: sinais por código, leitura de repercussão e conta
   verificacao.py       conferência dos números do documento
   documentos.py        Word e Excel
   executivo.py         resumo executivo da primeira página (relatório de riscos e dossiê), com trava por código

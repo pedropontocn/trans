@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-from . import (checklist, confronto as conf, revisao, documentos, entrada, executivo, folha, imagens, modelo, painel, pesquisa, produtos,
+from . import (alertas, checklist, confronto as conf, revisao, documentos, entrada, executivo, folha, imagens, modelo, painel, pesquisa, produtos,
                propostas, riscos, tce, verificacao)
 from .config import MIN_ITENS_DOSSIE, PARALELOS_DIRETO, VERSAO, esquema_de_modelos
 
@@ -164,26 +164,34 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     pesquisa.acrescentar_itens(dossie, caderno.itens_da_lei(dossie["orcamento_lei"]))
     resumo_dos = pesquisa.resumo_dossie(dossie)
 
+    # sensibilidade a questões que podem virar notícia: por código, os sinais de alerta do material inteiro (quantidade
+    # junto de "inoperante", "déficit", "sem saldo"...); são pista para as leituras abaixo e a régua da conta final
+    sinais = alertas.sinais(relatorio)
+    sem_repercussao = {"achados": [], "recusados": [], "uso": []}
     # confronto, calendário, diagnóstico e checklist leem o mesmo material (em cache): na Batch API vão juntos
-    progresso("Diagnóstico, calendário, checklist e confronto com as fontes...")
+    progresso("Diagnóstico, calendário, checklist, confronto com as fontes e leitura de repercussão pública...")
     tarefas = [_seguro(lambda: conf.confrontar(auxiliar, dossie, relatorio),
                        {"divergencias": [], "descartadas": 0, "uso": []}),
                _seguro(lambda: produtos.extrair_calendario(auxiliar, dossie, relatorio, nome, cfg["data_corte"])
                        if precisa["datas"] else {"eventos": [], "descartados": [], "uso": []},
                        {"eventos": [], "descartados": [], "uso": []}),
-               _seguro(lambda: produtos.extrair_diagnostico(auxiliar, dossie, relatorio, nome),
+               _seguro(lambda: produtos.extrair_diagnostico(auxiliar, dossie, relatorio, nome, sinais),
                        {"secoes": [], "descartados": 0, "uso": []}),
                _seguro(lambda: checklist.responder(auxiliar, dossie, relatorio, nome), {"respostas": {}, "uso": []}),
                _seguro(lambda: produtos.extrair_contratos_criticos(auxiliar, dossie, relatorio, nome),
                        {"contratos": [], "descartados": 0, "uso": []}),
                # o que alarga o funil da análise de riscos: os pontos críticos que a secretaria informou (todos os
                # tipos de questão urgente, não só contratos), cada um com o trecho conferido no material
-               _seguro(lambda: riscos.pontos_criticos(auxiliar, relatorio, manifesto, dossie) if precisa["riscos"]
-                       else {"pontos": {}, "descartados": 0, "uso": []}, {"pontos": {}, "descartados": 0, "uso": []})]
+               _seguro(lambda: riscos.pontos_criticos(auxiliar, relatorio, manifesto, dossie, sinais) if precisa["riscos"]
+                       else {"pontos": {}, "descartados": 0, "uso": []}, {"pontos": {}, "descartados": 0, "uso": []}),
+               # a leitura de repercussão pública: o material inteiro lido como um repórter leria (o dado de estado que
+               # vira notícia, mesmo sem prazo e sem contrato). Com o modelo principal: é a etapa que não pode deixar passar
+               _seguro(lambda: alertas.repercussao(principal, relatorio, sinais, dossie)
+                       if "dossie" in escolha or precisa["riscos"] else dict(sem_repercussao), dict(sem_repercussao))]
     feitos = modelo._em_paralelo(tarefas) if JUNTAS else [t() for t in tarefas]
-    confronto, calendario, diagnostico, respostas_checklist, criticos, pontos = feitos
+    confronto, calendario, diagnostico, respostas_checklist, criticos, pontos, leitura_publica = feitos
     for parte, rotulo in zip(feitos, ("confronto", "calendário", "diagnóstico", "checklist", "contratos críticos",
-                                      "pontos críticos")):
+                                      "pontos críticos", "leitura de repercussão pública")):
         uso.extend(parte.pop("uso", None) or [])
         if parte.get("erro"):
             problemas.append(f"{rotulo}: {parte['erro']}")
@@ -198,6 +206,11 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         if sec["titulo"] == "Contratos":
             sec["itens"] = [i for i in sec["itens"] if i["rotulo"] == "informado pelo órgão"]
     produtos.avaliar_riscos(eventos, cfg["data_corte"])
+    # os achados da leitura de repercussão entram no diagnóstico (no bloco a que pertencem) e nos pontos críticos: o
+    # dossiê e a análise de riscos passam a vê-los como fato com id
+    achados = leitura_publica.get("achados") or []
+    achados_no_diagnostico = produtos.incorporar_achados(diagnostico, achados)
+    achado_para_ponto = riscos.juntar_achados(pontos["pontos"], achados) if precisa["riscos"] else {}
     if not any(s["itens"] for s in diagnostico.get("secoes") or []):
         raise ErroAnalise("o diagnóstico não trouxe nenhuma afirmação conferida"
                           + (f" ({diagnostico['erro']})" if diagnostico.get("erro") else ""))
@@ -302,7 +315,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
                                  + produtos.PROMPT_DIAGNOSTICO_ORGAO + produtos.PROMPT_CONTRATOS
                                  + checklist.PROMPT_CHECKLIST + riscos.PROMPT_ANALISE
                                  + riscos.PROMPT_AGENTE + riscos.PROMPT_CONSOLIDACAO + riscos.PROMPT_VOTO
-                                 + revisao.PROMPT_REVISAO + propostas.PROMPT_LEITURA
+                                 + revisao.PROMPT_REVISAO + propostas.PROMPT_LEITURA + alertas.PROMPT_REPERCUSSAO
                                  + executivo.PROMPT_RESUMO_RISCOS + executivo.PROMPT_RESUMO_DOSSIE).encode()).hexdigest()[:8]
     registro_id = f"{versao_prompt}-{hashlib.md5((material + relatorio).encode()).hexdigest()[:8]}"
     modelos = {"pesquisa": cfg["modelo_pesquisa"], "auxiliar": auxiliar, "debate": principal,
@@ -334,14 +347,25 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         documentos.nota_dossie(registro_id, modelos, cfg["data_corte"], bases_por_codigo, bool(leitura), cortes),
         cobertura=cobertura, contratos_criticos=contratos_criticos,
         orgao=nome, lei=lei, plano=cruzamento_plano, leitura=leitura, resumo=resumo_dossie)
+    # o achado de repercussão que não virou ponto de atenção sai em lista própria: não fica fora do documento
+    fora_dos_riscos = documentos.achados_fora_dos_riscos(achados, resultado, achado_para_ponto)
     texto_riscos = documentos.relatorio_riscos(
         resultado, cobertura, documentos.nota_riscos(registro_id, modelos, revisoes, conferencia_final, revisao_texto),
         diag=diagnostico, dossie=dossie, data_corte=cfg["data_corte"], confianca=confianca,
         cortes=cortes, vencimentos=vencimentos, extras=extras(),
-        tce_md=tce.markdown_executivo(cruzamento_tce), resumo=resumo_riscos) if "riscos" in escolha else ""
-    revisao_texto["alertas_no_documento"] = revisao.alertas_do_documento(texto_riscos)   # a última conferência
+        tce_md=tce.markdown_executivo(cruzamento_tce), resumo=resumo_riscos,
+        repercussao=fora_dos_riscos) if "riscos" in escolha else ""
+    revisao_texto["alertas_no_documento"] = revisao.alertas_do_documento(                # a última conferência
+        texto_riscos, fora=(documentos.sobre_o_relatorio(confianca, cfg["data_corte"], cortes),))
     if "dossie" not in escolha:
         texto_dossie = ""
+    # a conta, por código: em quais produtos cada achado e cada sinal forte do material apareceu
+    repercussao_publica = alertas.conta(
+        leitura_publica, sinais, {"dossiê": texto_dossie, "relatório de riscos": texto_riscos},
+        cobertos={"relatório de riscos": {a["id"] for a in achados} - {a["id"] for a in fora_dos_riscos}})
+    repercussao_publica.update(no_diagnostico=achados_no_diagnostico, nos_pontos_criticos=achado_para_ponto)
+    if alertas.observacao(repercussao_publica):
+        problemas.append(alertas.observacao(repercussao_publica))
     meta = {"orgao": cfg.get("orgao_emissor", ""), "unidade": cfg.get("unidade", ""), "para": cfg.get("para", ""),
             "assunto": nome_de_exibicao(nome), "tipo": "Dossiê da secretaria: como funciona hoje",
             "data": documentos._data_extenso(date.today()),
@@ -359,6 +383,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         "analise_inicial": analise, "revisoes_dos_agentes": revisoes, "consolidacao": final,
         "votacao_dos_agentes": votacoes, "conferencia_final": conferencia_final,
         "pontos_criticos": pontos, "trechos_citados_pela_analise": trechos_da_analise,
+        "repercussao_publica": repercussao_publica,
         "cruzamento_tce": para_json(cruzamento_tce) if cruzamento_tce else None,
         "lacunas_brutas": [{"quem": q, **l} for q, l in riscos.lacunas_brutas(analise, revisoes)],
         "riscos": para_json(resultado), "checklist": cobertura, "contratos_criticos": contratos_criticos,
@@ -373,6 +398,7 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
                                                       checklist.markdown(cobertura), diagnostico)
     if precisa["riscos"]:
         texto_auditoria += "\n\n" + documentos.auditoria_da_conferencia(conferencia_final, registro["lacunas_brutas"])
+    texto_auditoria += "\n\n" + alertas.markdown_da_conta(repercussao_publica)
     registro["auditoria_md"] = texto_auditoria
     return {"dossie_docx": documentos.gerar_docx(texto_dossie, meta) if texto_dossie else None,
             "dossie_md": texto_dossie,

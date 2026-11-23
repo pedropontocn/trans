@@ -1354,7 +1354,8 @@ def markdown_cem_dias(leitura, com_riscos=False):
 # (chave, título como no roteiro, blocos do diagnóstico que entram nele)
 CAPITULOS = [
     ("estrutura", "1. Estrutura organizacional vigente", ["Como se organiza"]),
-    ("funcionamento", "2. Funcionamento atual", ["O que faz", "Funcionamento das unidades"]),
+    ("funcionamento", "2. Funcionamento atual",
+     ["O que faz", "Funcionamento das unidades", "Patrimônio, frota e meios operacionais"]),
     ("gargalos", "3. Sobreposições, fragmentações e gargalos institucionais", []),
     ("orcamento", "a) Planejamento e execução orçamentária", ["Orçamento e execução"]),
     ("pessoal", "b) Cargos e força de trabalho", ["Pessoal"]),
@@ -1366,6 +1367,7 @@ CAPITULOS = [
     ("cem_dias", "g) Propostas de ações para os primeiros 100 dias", [])]
 # o rótulo de cada bloco quando o capítulo junta dois
 SUBTITULOS = {"O que faz": "O que faz", "Funcionamento das unidades": "Como as unidades atuam",
+              "Patrimônio, frota e meios operacionais": "Frota, patrimônio e meios operacionais",
               "Pendências com controle e justiça": "Auditorias, controle e justiça",
               "Sistemas, convênios e parcerias": "Convênios, cooperação e sistemas"}
 ITENS_COM_A_TABELA_DE_CONTRATOS = 2      # com a tabela de contratos, o capítulo não repete tudo em itens
@@ -1645,14 +1647,16 @@ def fontes_do_dossie(diag, dossie, folha=None, lei=None, plano=None, tce_md=""):
 
 # --- DOSSIÊ EXECUTIVO --------------------------------------------------------------------------------------------
 # O dossiê vai ao governador eleito: primeira página com o resumo executivo (abertura, números em cartões e destaques)
-# e, depois, cinco capítulos curtos. Estrutura, funcionamento, pendências com controle e justiça e as propostas para os
-# 100 dias ficam fora do documento (seguem no registro e na auditoria).
+# e, depois, os capítulos curtos, numerados na ordem em que aparecem (capítulo sem conteúdo não entra). Estrutura,
+# funcionamento, pendências com controle e justiça e as propostas para os 100 dias ficam fora do documento (seguem no
+# registro e na auditoria); o que a leitura de repercussão pública achar nesses blocos entra em "Dificuldades e gargalos".
 CAPITULOS_EXECUTIVOS = [
-    ("orcamento", "1. Orçamento", ["Orçamento e execução"]),
-    ("pessoal", "2. Força de trabalho", ["Pessoal"]),
-    ("contratos", "3. Contratos e convênios", ["Contratos", "Sistemas, convênios e parcerias"]),
-    ("programas", "4. Programas e obras", ["Programas e ações"]),
-    ("dificuldades", "5. Dificuldades e gargalos", ["Dificuldades e problemas"])]
+    ("orcamento", "Orçamento", ["Orçamento e execução"]),
+    ("pessoal", "Força de trabalho", ["Pessoal"]),
+    ("contratos", "Contratos e convênios", ["Contratos", "Sistemas, convênios e parcerias"]),
+    ("programas", "Programas e obras", ["Programas e ações"]),
+    ("meios", "Frota, patrimônio e meios operacionais", ["Patrimônio, frota e meios operacionais"]),
+    ("dificuldades", "Dificuldades e gargalos", ["Dificuldades e problemas"])]
 BLOCOS_EXECUTIVOS = {b for _, _, blocos in CAPITULOS_EXECUTIVOS for b in blocos}
 CARTOES = 8
 MESES_CURTOS = {"janeiro": "jan", "fevereiro": "fev", "março": "mar", "abril": "abr", "maio": "mai", "junho": "jun",
@@ -1790,9 +1794,13 @@ def fatos_para_o_resumo_do_dossie(diag, vencimentos=None, resultado=None, folha=
             fatos.append({"id": "B2", "origem": "LOA 2026 e PLOA 2027", "texto": "; ".join(texto) + "."})
     for k, i in enumerate([i for i in (diag or {}).get("indicadores") or [] if _do_dossie(i)], 1):
         fatos.append({"id": f"I{k}", "origem": "ficha rápida", "texto": f"{i.get('nome', '')}: {i.get('valor', '')}."})
-    fatos += [f for f in fatos_para_a_leitura(diag, vencimentos, resultado)
-              if not f["id"].startswith("F") or any(f["id"] == i["id"] for s in (diag or {}).get("secoes") or []
-                                                    if s["titulo"] in BLOCOS_EXECUTIVOS for i in s["itens"])]
+    # os itens dos blocos que ficam no dossiê e, de qualquer bloco, os da leitura de repercussão pública
+    no_dossie = {i["id"]: bool(i.get("repercussao")) for s in (diag or {}).get("secoes") or [] for i in s["itens"]
+                 if s["titulo"] in BLOCOS_EXECUTIVOS or i.get("repercussao")}
+    for f in fatos_para_a_leitura(diag, vencimentos, resultado):
+        if f["id"].startswith("F") and f["id"] not in no_dossie:
+            continue
+        fatos.append(dict(f, origem=f["origem"] + "; repercussão pública") if no_dossie.get(f["id"]) else f)
     return fatos
 
 
@@ -1895,10 +1903,13 @@ def _contratos_executivo(contratos, limite=10):
 
 
 def capitulos_executivos(diag, contratos_criticos=None, folha=None, lei=None, leitura=None):
-    """Os cinco capítulos do dossiê executivo. Cada linha do diagnóstico entra como está (já conferida), sem a marca
-    de origem: as fontes vão juntas no fim."""
+    """Os capítulos do dossiê executivo, numerados na ordem em que aparecem. Cada linha do diagnóstico entra como
+    está (já conferida), sem a marca de origem: as fontes vão juntas no fim."""
     por_titulo = {_norm(s["titulo"]): s for s in (diag or {}).get("secoes") or []}
-    linhas = []
+    # o que a leitura de repercussão pública achou em bloco que não tem capítulo aqui não pode sumir do documento
+    de_fora = [i for s in (diag or {}).get("secoes") or [] if s["titulo"] not in BLOCOS_EXECUTIVOS
+               for i in s["itens"] if i.get("repercussao") and _entra_no_capitulo(i, s["titulo"])]
+    linhas, numero = [], 0
     for chave, titulo, blocos in CAPITULOS_EXECUTIVOS:
         corpo = []
         if chave == "orcamento" and lei:
@@ -1924,11 +1935,14 @@ def capitulos_executivos(diag, contratos_criticos=None, folha=None, lei=None, le
                 soma = conferir_soma_do_pessoal(sec["itens"], folha)
                 if soma:
                     corpo += ["", soma]
+        if chave == "dificuldades" and de_fora:
+            corpo += [f"- {i['texto']}" for i in de_fora]
         if chave == "dificuldades" and (leitura or {}).get("gargalos"):
             corpo += ["", "_Leitura da análise (IA), a partir dos fatos deste dossiê:_"]
             corpo += [f"- **{g['tipo'].capitalize()}:** {g['titulo']}." for g in leitura["gargalos"]]
         if corpo:
-            linhas += [f"## {titulo}"] + corpo
+            numero += 1
+            linhas += [f"## {numero}. {titulo}"] + corpo
     return "\n".join(linhas)
 
 
@@ -1957,7 +1971,8 @@ def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobert
     """Produto 2, o dossiê, no formato executivo (vai ao governador eleito). Primeira página: resumo executivo
     (abertura, titular, números em cartões e destaques; a abertura e os destaques são da IA, conferidos por código em
     executivo.resumir_dossie). Depois: 1. orçamento (frase e tabela enxuta, sem códigos), 2. força de trabalho, 3.
-    contratos e convênios, 4. programas e obras, 5. dificuldades e gargalos (com a leitura da análise); as fontes numa
+    contratos e convênios, 4. programas e obras, 5. frota, patrimônio e meios operacionais, 6. dificuldades e gargalos
+    (com a leitura da análise); capítulo sem conteúdo não entra e a numeração é corrida; as fontes numa
     linha e a nota do que o documento é. Estrutura, funcionamento, pendências com controle e justiça, plano de governo e
     propostas para os 100 dias ficam no registro e na auditoria. antes_md, ficha, eventos, confronto, cobertura e
     tce_md ficam na assinatura por compatibilidade."""
@@ -2282,15 +2297,34 @@ def _grupo_da_lacuna(p, num_de):
     return (None, "Outras informações")
 
 
+LIMITE_OUTROS_DADOS = 8        # achados de repercussão pública que não viraram ponto de atenção
+
+
+def achados_fora_dos_riscos(achados, resultado, de_para=None, limite_riscos=10):
+    """Os achados da leitura de repercussão pública que não estão em nenhum ponto de atenção do relatório: nem citados
+    como fato (o ponto crítico P em que o achado virou) nem com os números no texto do risco."""
+    from .alertas import chegou
+    riscos = (resultado or {}).get("riscos") or []
+    riscos = riscos[:limite_riscos]
+    citados = {f for r in riscos for f in r.get("fatos") or []}
+    texto = "\n".join(" ".join(str(r.get(c) or "") for c in ("titulo", "o_que_e", "valor", "situacao_atual", "causa",
+                                                             "consequencia", "em_jogo", "em_curso", "decisao"))
+                      for r in riscos)
+    return [a for a in achados or [] if (de_para or {}).get(a["id"]) not in citados
+            and not chegou(a["texto"], texto)]
+
+
 def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=10, limite_pedir=15, antes_md="", diag=None,
                      dossie=None, data_corte=None, confianca=None, cortes=None, vencimentos=None, extras=None,
-                     tce_md="", resumo=None):
+                     tce_md="", resumo=None, repercussao=None):
     """Produto 3, o relatório de riscos, no formato executivo (vai ao governador eleito, para as reuniões com as áreas
     técnicas). Primeira página: o resumo executivo (abertura e quadro-resumo denso, por tema: o ponto e o que está em
     jogo, o valor, o prazo com a janela e a prioridade com o impacto). Depois, os pontos agrupados por tema, cada um com
     o que é, em que pé está, a consequência, a repercussão possível e a fonte; o controle externo (TCE-RJ); as
     informações que faltam, pelos mesmos temas; e, no fim, a nota sobre o que o documento é. Analisa; não recomenda.
     resumo: o que executivo.resumir_riscos devolveu (sem ele, a abertura sai por código e o "em jogo" é a consequência).
+    repercussao: os achados da leitura de repercussão pública que não viraram ponto de atenção (alertas.repercussao):
+    saem numa lista própria, por código, para o dado não ficar fora do documento.
     Votos, objeções, pontos contestados, onde procurar e quem apontou ficam na auditoria."""
     from . import executivo
     hoje = _data_de_corte(data_corte)
@@ -2349,6 +2383,11 @@ def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=10, limite_ped
                       ("Fonte", (fonte.rstrip(".") + (f" · processo {processo}" if processo else "") + ".") if fonte else
                        (f"Processo {processo}." if processo else ""))]
             md += [f"- **{rotulo}:** {texto}" for rotulo, texto in linhas if texto]
+    if repercussao:
+        md += ["## Outros dados com possível repercussão pública",
+               "_Dados que a secretaria informou e que não estão nos pontos de atenção acima. A leitura é da IA; o trecho "
+               "de cada um foi conferido por código no material._"]
+        md += [f"- **{a['assunto']}.** {a['texto']}" for a in repercussao[:LIMITE_OUTROS_DADOS]]
     if tce_md:
         md.append(tce_md)
     pedir = (resultado.get("pedir") or [])[:limite_pedir]

@@ -410,7 +410,7 @@ def test_documento_curto_montado_por_codigo(funcoes, llm):
     # formato executivo: primeira página com o resumo (abertura e cartões), quebra de página, capítulos curtos e as
     # fontes numa linha
     ordem = [texto.index(t) for t in ["## Resumo executivo", "```cartoes", "<<<QUEBRA>>>", "## 1. Orçamento",
-                                      "## 3. Contratos e convênios", "**Contrato 1/2026 – A**", "**Fontes:**",
+                                      ". Contratos e convênios", "**Contrato 1/2026 – A**", "**Fontes:**",
                                       "_Apoio à decisão gerado com IA (registro abc"]]
     assert ordem == sorted(ordem)
     assert "| tabela |" not in texto and "Cobertura do checklist" not in texto   # a cobertura vai para a auditoria

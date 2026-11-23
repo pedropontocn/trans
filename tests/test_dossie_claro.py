@@ -174,7 +174,10 @@ def test_mais_itens_nos_blocos_mais_densos(llm, funcoes):
     assert quantos["Programas e ações"] == quantos["Contratos"] == quantos["Pendências com controle e justiça"] == 8
     assert quantos["Pessoal"] == 6
     pedido = funcoes.PROMPT_DIAGNOSTICO_ORGAO
-    for trecho_do_pedido in ['até 8 em "Programas e ações", "Contratos", "Pendências com controle e justiça" e',
+    for trecho_do_pedido in ['até 8 em "Programas e ações", "Contratos", "Patrimônio, frota e meios operacionais",',
+                             "- Patrimônio, frota e meios operacionais: os meios de que a operação depende",
+                             "quantos existem e quantos funcionam", "o efetivo ou quadro previsto em lei e o existente",
+                             "depois a DISPONIBILIDADE dos meios",
                              "- Funcionamento das unidades: como cada subsecretaria ou unidade principal atua",
                              "- Dificuldades e problemas: os entraves que a própria secretaria aponta",
                              "cargos existentes, ocupados e vagos", "execução por ação orçamentária em 2025 e 2026",

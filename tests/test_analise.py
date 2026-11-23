@@ -21,8 +21,16 @@ TITULOS_DO_ROTEIRO = ['## 1. Estrutura organizacional vigente',
                       '## e) Programas e serviços essenciais',
                       '## f) Principais dificuldades e problemas identificados']
 
-TITULOS_EXECUTIVOS = ['## 1. Orçamento', '## 2. Força de trabalho', '## 3. Contratos e convênios',
-                      '## 4. Programas e obras', '## 5. Dificuldades e gargalos']
+# os capítulos do dossiê executivo, na ordem; o número é dado na hora (capítulo sem conteúdo não entra nem deixa buraco)
+TITULOS_EXECUTIVOS = ['Orçamento', 'Força de trabalho', 'Contratos e convênios', 'Programas e obras',
+                      'Frota, patrimônio e meios operacionais', 'Dificuldades e gargalos']
+
+
+def capitulos_executivos(md):
+    """Os títulos dos capítulos numerados de um dossiê, sem o número; confere que a numeração é corrida."""
+    achados = re.findall(r"^## (\d+)\. (.+)$", md, flags=re.M)
+    assert [int(n) for n, _ in achados] == list(range(1, len(achados) + 1)), achados
+    return [t for _, t in achados]
 
 
 def r1_decisao(reg):
@@ -152,7 +160,8 @@ def test_analise_de_uma_secretaria_gera_o_documento_curto(llm):
     for titulo in ["Revisão dos agentes, risco a risco", "Todas as fontes do dossiê", "Anexo 3 – Como este documento foi feito"]:
         assert titulo in r["registro"]["auditoria_md"], titulo
     md = r["dossie_md"]
-    assert md.index("## Resumo executivo") < md.index("<<<QUEBRA>>>") < md.index("## 3. Contratos e convênios") < md.index("**Fontes:**")
+    assert "Contratos e convênios" in capitulos_executivos(md)
+    assert md.index("## Resumo executivo") < md.index("<<<QUEBRA>>>") < md.index(". Contratos e convênios") < md.index("**Fontes:**")
     assert "R$ 412 mi | LOA 2026" in md and "R$ 398,75 mi | Empenhado" in md and "Inventado" not in md    # os cartões
     assert "**Contrato 99/2026 – Empresa X**" in md and "Contrato 7/2025" not in md and "Contrato sem origem" not in md
     auditoria = r["registro"]["auditoria_md"]                   # o confronto e a cobertura ficam na auditoria
