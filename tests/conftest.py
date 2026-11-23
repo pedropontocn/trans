@@ -201,6 +201,7 @@ class LLMFalso:
                                   "para_que": "Confirmaria ou derrubaria o risco.", "onde": "SEI"}]
         self.conferencia_final = {"riscos": []}    # a conferência final das afirmações: nada a corrigir
         self.pontos_criticos = {"pontos": []}      # os pontos críticos que o modelo acha no material
+        self.repercussao = {"achados": []}         # a leitura de repercussão pública (o que pode virar notícia)
         self.agentes_que_falham = set()
         self.consolidacao_riscos = None            # None: a consolidação devolve a análise com as visões
         self.temas = {"temas": [{"titulo": "Contratos vencendo", "descricao": "Vários contratos vencem.",
@@ -333,6 +334,9 @@ class LLMFalso:
         if "Você cruza o Plano de Governo" in sistema:
             self.pedido_plano = ultimo
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.cruzamento_plano) + "[FIM DO JSON]")
+        if "LEITURA DE REPERCUSSÃO PÚBLICA" in contexto:
+            self.pedido_repercussao = contexto + " " + ultimo
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.repercussao) + "[FIM DO JSON]")
         if "lista os PONTOS CRÍTICOS" in contexto:
             self.pedido_pontos = contexto
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.pontos_criticos) + "[FIM DO JSON]")

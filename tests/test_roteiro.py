@@ -2,7 +2,7 @@
 Os itens 3 (gargalos) e g (plano dos 100 dias) são o único ponto em que a IA avalia e propõe; o código confere cada um."""
 import io
 
-from test_analise import CFG, RELATORIO, TITULOS_DO_ROTEIRO, TITULOS_EXECUTIVOS
+from test_analise import CFG, RELATORIO, TITULOS_DO_ROTEIRO, TITULOS_EXECUTIVOS, capitulos_executivos
 
 FATOS = [
     {"id": "F16", "origem": "item c", "texto": "A limpeza é prestada pela AGILE CORP por meio de Termos de Ajuste de Contas, com R$ 69.395.936,65 registrados."},
@@ -133,9 +133,10 @@ def test_rodada_do_dossie_no_roteiro(llm, tmp_path):
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, CFG)
     md = r["dossie_md"]
     titulos = [l for l in md.splitlines() if l.startswith("## ")]
-    # formato executivo: resumo na primeira página e os cinco capítulos curtos, na ordem
-    assert titulos[0] == "## Resumo executivo" and titulos[1:] == [t for t in TITULOS_EXECUTIVOS if t in titulos[1:]]
-    assert "## 5. Dificuldades e gargalos" in titulos
+    # formato executivo: resumo na primeira página e os capítulos curtos, na ordem e com numeração corrida
+    capitulos = capitulos_executivos(md)
+    assert titulos[0] == "## Resumo executivo" and capitulos == [t for t in TITULOS_EXECUTIVOS if t in capitulos]
+    assert capitulos[-1] == "Dificuldades e gargalos"
     # a leitura dos gargalos entra no capítulo 5; as propostas para os 100 dias ficam no registro, fora do documento
     assert "- **Gargalo operacional:** Licitações adiadas." in md
     assert "Definir o destino das licitações adiadas" not in md and "Primeiros 30 dias" not in md
@@ -148,7 +149,7 @@ def test_rodada_do_dossie_no_roteiro(llm, tmp_path):
     assert '"de": "relatório de riscos"' in llm.pedido_leitura and '"de": "calendário"' in llm.pedido_leitura
     assert "Propostas da análise" not in r["riscos_md"] and "Primeiros 30 dias" not in r["riscos_md"]
     textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
-    assert "Resumo executivo" in textos and "5. Dificuldades e gargalos" in textos
+    assert "Resumo executivo" in textos and f"{len(capitulos)}. Dificuldades e gargalos" in textos
     # só relatório de riscos: a leitura não roda
     antes = sum("Você apoia a Equipe de Transição de Governo" in str(c["mensagens"][0]["content"]) for c in llm.chamadas)
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, dict(CFG, produtos=["riscos"]))
@@ -157,7 +158,7 @@ def test_rodada_do_dossie_no_roteiro(llm, tmp_path):
     # a leitura fora do ar não derruba o dossiê: os itens 3 e g não aparecem, e o problema fica registrado
     llm.leitura_institucional = "isto não é um objeto"
     r = analise.analisar_orgao("Secretaria de Exemplo", RELATORIO, dict(CFG, produtos=["dossie"]))
-    assert "## 3. Contratos e convênios" in r["dossie_md"] and "## Resumo executivo" in r["dossie_md"]
+    assert "Contratos e convênios" in capitulos_executivos(r["dossie_md"]) and "## Resumo executivo" in r["dossie_md"]
     assert "Leitura da análise" not in r["dossie_md"]
 
 

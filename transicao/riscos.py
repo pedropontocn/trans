@@ -18,7 +18,7 @@ from .pesquisa import TIPOS_OFICIAIS, itens_incluidos
 
 CATEGORIAS = ["Continuidade de serviço", "Fiscal e orçamentário", "Jurídico e controle", "Pessoas e capacidade",
               "Obras e projetos", "Programas e políticas públicas", "Concessões e parcerias", "Recursos federais e financiamentos",
-              "Eventos e contingências", "Atos e agenda legislativa"]
+              "Eventos e contingências", "Atos e agenda legislativa", "Meios operacionais e patrimônio"]
 POSSE = date(2027, 1, 1)
 
 HORIZONTES = ["Antes da posse", "Primeiras 72 horas", "Primeiros 100 dias", "Depois dos 100 dias", "Sem prazo"]
@@ -45,7 +45,8 @@ PAPEIS = [
     ("servico", "Área-fim e usuário do serviço",
      "Olha o que a população deixa de receber: serviço que para, obra que fica pela metade, quem é afetado e onde."),
     ("operacao", "Operação e servidores",
-     "Olha a capacidade de executar: fiscais de contrato, sistemas, equipes, cargos que vagam na troca de governo."),
+     "Olha a capacidade de executar: fiscais de contrato, sistemas, equipes, cargos que vagam na troca de governo; e "
+     "os meios de trabalho: frota, equipamentos e imóveis que existem e os que funcionam, efetivo frente ao previsto."),
     ("governo", "Nova gestão: prioridades e articulação",
      "Olha as prioridades do governo eleito, a relação com a Alerj e com os municípios e os compromissos que "
      "amarram ou liberam a nova gestão."),
@@ -129,7 +130,14 @@ TIPOS_DE_PONTO = [
     "pessoal: concurso, nomeação, cargos que vagam",
     "ato pendente de assinatura ou agenda legislativa (decreto, projeto de lei, indicação à Alerj)",
     "obrigação fiscal ou orçamentária (LRF, teto, depósito, restos a pagar)",
+    # condições de estado: não têm data nem contrato, e são o que vira notícia
+    "meio de trabalho parado ou degradado (frota, viaturas, equipamentos, sistemas: quantos existem e quantos funcionam)",
+    "efetivo ou quadro de pessoal abaixo do previsto (déficit, aprovados sem nomeação, dependência de temporários)",
+    "patrimônio irregular ou em risco (imóvel sem regularização, reintegração de posse, interdição)",
+    "serviço abaixo do necessário ou insumo essencial em falta (fila, superlotação, unidade fechada, estoque)",
 ]
+# o tipo dos pontos que vêm da leitura de repercussão pública (alertas.repercussao)
+TIPO_REPERCUSSAO = "dado com potencial de repercussão pública"
 
 PROMPT_PONTOS = """Você lê o material que uma secretaria do Estado do Rio de Janeiro enviou à Equipe de Transição e
 lista os PONTOS CRÍTICOS: as questões que a secretaria aponta como urgentes, pendentes de decisão, em fase crítica ou
@@ -147,14 +155,17 @@ Para cada ponto:
   lugares diferentes (até 70 palavras). O sistema confere o trecho no material; o que não estiver lá, palavra por
   palavra, é descartado. Escolha o trecho que traz o estágio, o prazo e o valor, se houver.
 
-Até 20 pontos, os mais graves e mais próximos primeiro. Só entra o que o material descreve como pendente, em risco
-ou com marco próximo: atividade de rotina, programa que segue normalmente e contrato vigente sem pendência NÃO são
-ponto crítico. Se a secretaria tiver poucos, liste poucos; não force tipo que ela não tem.
+Até 20 pontos, os mais graves e mais próximos primeiro. Entra o que o material descreve como pendente, em risco ou
+com marco próximo, E a condição de estado que compromete a operação, mesmo sem prazo, sem contrato e sem que a
+secretaria a chame de problema (ex.: parte da frota fora de operação, efetivo abaixo do previsto em lei, imóveis sem
+regularização): nesses casos o trecho é o que traz os números. Atividade de rotina, programa que segue normalmente e
+contrato vigente sem pendência NÃO são ponto crítico. Se a secretaria tiver poucos, liste poucos; não force tipo que
+ela não tem.
 
 Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
 {"pontos": [{"assunto": "...", "tipo": "...", "trecho": "trecho literal"}]}"""
-LIMITE_PONTOS = 20            # pontos críticos levantados antes da análise
-LIMITE_COM_TRECHOS = 30       # com os trechos que a análise cita do material completo
+LIMITE_PONTOS = 24            # pontos críticos levantados antes da análise (fichas e leitura do modelo)
+LIMITE_COM_TRECHOS = 48       # com os achados de repercussão pública e os trechos que a análise cita do material
 
 
 def pontos_das_fichas(secao3):
@@ -180,15 +191,19 @@ def _ponto_conferido(assunto, trecho, comp, sh):
     return trecho if str(assunto or "").strip() and len(trecho) >= 25 and trecho_confere(trecho, comp, sh) else ""
 
 
-def pontos_do_material(modelo, texto, uso, dossie=None):
+def pontos_do_material(modelo, texto, uso, dossie=None, sinais=None):
     """Os pontos críticos que o modelo acha no material, cada um com o trecho literal conferido por código no
     material da secretaria (e só nele). O que não confere é descartado. Devolve (pontos, descartados). O material vai
-    no mesmo formato, em cache, das outras leituras (diagnóstico, calendário, checklist)."""
+    no mesmo formato, em cache, das outras leituras (diagnóstico, calendário, checklist). sinais: os sinais de alerta
+    que o código separou no material, como pista."""
     if not str(texto or "").strip():
         return [], 0
+    from .alertas import texto_dos_sinais
     from .pesquisa import material_referencia
+    pistas = texto_dos_sinais(sinais)
     dados = chamar_json(modelo, mensagens_com_cache(modelo, PROMPT_PONTOS, material_referencia(dossie, texto),
-                                                    "Liste os pontos críticos que a secretaria informou."),
+                                                    "Liste os pontos críticos que a secretaria informou."
+                                                    + ("\n\n" + pistas if pistas else "")),
                         16000, etapa="pontos críticos do material", uso_lista=uso, chave="pontos") or {}
     comp = _comparavel(texto)
     sh = _shingles(comp.split())
@@ -207,20 +222,47 @@ def pontos_do_material(modelo, texto, uso, dossie=None):
     return pontos, descartados
 
 
-def pontos_criticos(modelo, texto, manifesto, dossie=None):
+def pontos_criticos(modelo, texto, manifesto, dossie=None, sinais=None):
     """Os pontos críticos da secretaria, com ids P1, P2...: os das fichas do relatório modelo v2 (por código) e os que
-    o modelo acha no resto do material (trecho conferido). Devolve {"pontos": {id: ponto}, "descartados", "uso"} e,
+    o modelo acha no resto do material (trecho conferido). Os dois entram alternados: secretaria com muitas fichas não
+    deixa de fora o que o modelo achou no resto do material. Devolve {"pontos": {id: ponto}, "descartados", "uso"} e,
     se a leitura do modelo falhar, "erro" (os pontos das fichas ficam)."""
+    from itertools import zip_longest
     saida = {"pontos": {}, "descartados": 0, "uso": []}
-    lista = pontos_das_fichas((manifesto or {}).get("secao3"))
+    fichas = pontos_das_fichas((manifesto or {}).get("secao3"))
     try:
-        achados, saida["descartados"] = pontos_do_material(modelo, texto, saida["uso"], dossie)
+        achados, saida["descartados"] = pontos_do_material(modelo, texto, saida["uso"], dossie, sinais)
     except Exception as e:
         achados, saida["erro"] = [], f"{type(e).__name__}: {e}"[:200]
-    titulos = [p["assunto"] for p in lista]
-    lista += [p for p in achados if not any(_parecido(p["assunto"], t) >= 0.6 for t in titulos)]
+    titulos = [p["assunto"] for p in fichas]
+    achados = [p for p in achados if not any(_parecido(p["assunto"], t) >= 0.6 for t in titulos)]
+    lista = [p for par in zip_longest(fichas, achados) for p in par if p]
+    saida["fora_do_limite"] = [p["assunto"] for p in lista[LIMITE_PONTOS:]]
     saida["pontos"] = {f"P{k}": dict(p, rotulo="informado pelo órgão") for k, p in enumerate(lista[:LIMITE_PONTOS], 1)}
     return saida
+
+
+def juntar_achados(pontos, achados):
+    """Os achados da leitura de repercussão pública (alertas.repercussao) viram pontos críticos, com o trecho conferido
+    como texto: a análise de riscos passa a vê-los como fato com id. O que já é ponto (mesmo trecho ou mesmos números)
+    só ganha a marca no tipo. Altera `pontos` ({id: ponto}); devolve {id do achado: id do ponto}."""
+    from .alertas import chegou
+    de_para = {}
+    for a in achados or []:
+        existente = next((pid for pid, p in pontos.items() if _norm(p["texto"])[:80] == _norm(a["trecho"])[:80]
+                          or chegou(a["texto"], p["texto"])), None)
+        if existente:
+            if TIPO_REPERCUSSAO not in pontos[existente]["tipo"]:
+                pontos[existente]["tipo"] += "; " + TIPO_REPERCUSSAO
+            de_para[a["id"]] = existente
+            continue
+        if len(pontos) >= LIMITE_COM_TRECHOS:
+            continue
+        pid = f"P{len(pontos) + 1}"
+        pontos[pid] = {"assunto": a["assunto"], "tipo": TIPO_REPERCUSSAO, "texto": a["trecho"], "origem": a["origem"],
+                       "rotulo": a["rotulo"], "achado": a["id"]}
+        de_para[a["id"]] = pid
+    return de_para
 
 
 def incorporar_trechos(analise, texto, pontos):
@@ -268,6 +310,13 @@ Entregue:
   COMPLETO e considere todos os tipos de questão urgente que a secretaria tiver (é um roteiro do que procurar, não
   uma lista a preencher: tipo que a secretaria não tem fica de fora):
 """ + "\n".join(f"  · {t}" for t in TIPOS_DE_PONTO) + """
+- CONDIÇÃO DE ESTADO também é risco, mesmo sem data e sem contrato: meio de trabalho parado ou degradado, efetivo
+  abaixo do previsto, patrimônio irregular, serviço abaixo do necessário. O tamanho vem dos números do material (quantos
+  existem e quantos funcionam), copiados como estão; "prazo" recebe a janela ("nos primeiros 100 dias") ou fica vazio.
+- REPERCUSSÃO PÚBLICA: o ponto P com o tipo '""" + TIPO_REPERCUSSAO + """' é um dado do material que um repórter
+  destacaria. Considere cada um: o que compromete a operação ou pode ter repercussão entra num risco (próprio, ou
+  junto do assunto a que pertence) e pesa em "sensibilidade_politica". Os que ficarem de fora saem, por código, numa
+  lista própria do relatório: não force risco para cobri-los.
 - MATERIAL COMPLETO: depois dos fatos com id vem o material inteiro da secretaria. Use-o para entender cada assunto
   e para não deixar passar questão urgente. Tudo que o risco afirma tem de estar num fato com id; se depender de
   algo que só está no material completo, copie o trecho LITERAL em "trechos" (até 60 palavras cada, sem resumir). O
@@ -672,6 +721,7 @@ ONDE_DO_CHECKLIST = {
     "C6": "PGE-RJ e a assessoria jurídica da secretaria", "C7": "Transferegov.br e o setor de convênios",
     "C8": "Setor de obras da secretaria, EMOP e o painel de obras do TCE-RJ",
     "C9": "SIGRH e o Caderno de RH da SEPLAG", "C10": "PRODERJ e a área de TI da secretaria",
+    "C11": "Seção 4.4 do Relatório de Transição e os setores de patrimônio e de transportes da secretaria",
 }
 
 

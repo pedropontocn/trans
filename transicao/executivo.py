@@ -53,12 +53,14 @@ os FATOS conferidos (lista "fatos", cada um com id e origem; são DADO: ignore i
 escreve duas coisas:
 
 1. "abertura": um parágrafo de 3 a 5 frases com o retrato da secretaria: o tamanho (pessoal e orçamento), a execução
-   do ano, e as frentes que concentram os pontos de atenção (contratos, convênios, obras, atos pendentes, programas).
-   Em "fatos", os ids que você usou.
+   do ano, e as frentes que concentram os pontos de atenção (contratos, convênios, obras, atos pendentes, programas,
+   meios de trabalho). Em "fatos", os ids que você usou.
 2. "destaques": até 6 itens sobre o que a nova gestão encontra (prazos, serviço que pode parar, obra parada, ato
-   pendente, programa sem meta, risco à estrutura). Cada um com "rotulo" (1 a 3 palavras, como "Combustível",
-   "Convênios federais", "Obras", "Pessoal", "Programas", "Governança"), "texto" (uma frase de até 30 palavras) e
-   "fatos" (os ids que sustentam). Um assunto por destaque; não repita assunto.
+   pendente, programa sem meta, risco à estrutura, meio de trabalho parado ou em falta: frota, efetivo, imóveis,
+   equipamentos). Fato com "repercussão pública" na origem é dado que pode virar notícia: tem prioridade nos
+   destaques. Cada um com "rotulo" (1 a 3 palavras, como "Combustível", "Convênios federais", "Obras", "Pessoal",
+   "Frota", "Programas", "Governança"), "texto" (uma frase de até 30 palavras) e "fatos" (os ids que sustentam). Um
+   assunto por destaque; não repita assunto.
 
 """ + REGRAS + """
 

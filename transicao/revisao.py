@@ -169,10 +169,15 @@ def revisar_texto(modelo, resultado, uso, pistas=None):
     return registro
 
 
-def alertas_do_documento(md):
-    """A última conferência, no documento pronto: as linhas com recomendação ou corte que ainda ficaram."""
+def alertas_do_documento(md, fora=()):
+    """A última conferência, no documento pronto: as linhas com recomendação ou corte que ainda ficaram. fora: linhas
+    que o próprio código escreve e que não são texto da análise (a nota final diz "Descreve; não recomenda": sem isto,
+    toda rodada acusava um trecho com tom a conferir)."""
     saida = []
+    fora = {str(f).strip() for f in fora}
     for linha in str(md or "").splitlines():
+        if linha.strip() in fora:
+            continue
         a = [x for x in alertas(linha) if x != "parêntese sem fechar"]
         if a:
             saida.append({"trecho": linha.strip()[:200], "alertas": a})

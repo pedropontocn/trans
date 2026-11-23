@@ -204,8 +204,8 @@ def ordem_de_prioridade(e):
 # A ficha padrão: os mesmos blocos em todas as secretarias, para comparar e consolidar. A ordem é a da leitura
 # de quem decide: primeiro o que mais pesa na transição (contratos, pessoal, passivos), depois o resto.
 SECOES_DIAGNOSTICO = ["O que faz", "Como se organiza", "Funcionamento das unidades", "Programas e ações", "Contratos",
-                      "Pessoal", "Orçamento e execução", "Pendências com controle e justiça",
-                      "Sistemas, convênios e parcerias", "Dificuldades e problemas"]
+                      "Pessoal", "Patrimônio, frota e meios operacionais", "Orçamento e execução",
+                      "Pendências com controle e justiça", "Sistemas, convênios e parcerias", "Dificuldades e problemas"]
 
 # o dossiê responde "como essa secretaria funciona hoje?": cada bloco descreve; os detalhes que pesam na transição
 # (vencimentos, paralisações, aditivos, apontamentos) entram como fato, sem juízo, e servem à análise de riscos
@@ -223,9 +223,21 @@ ANGULOS_DIAGNOSTICO = {
                          "carteira de obras com valor, medido e saldo; obras ou ações paralisadas ou atrasadas.",
     "Contratos": "os contratos que sustentam a operação (objeto, contratado, valor, vigência), os de maior valor e os "
                  "de serviço essencial; emergenciais; aditivos relevantes; paralisados; com litígio ou apontamento.",
-    "Pessoal": "cargos existentes, ocupados e vagos; quantos efetivos, comissionados, cedidos, contratados e "
+    "Pessoal": "cargos existentes, ocupados e vagos; o efetivo ou quadro previsto em lei e o existente (os dois "
+               "números, quando o material traz); quantos efetivos, comissionados, cedidos, contratados, temporários e "
                "terceirizados; custo da folha; áreas que dependem de comissionados ou terceirizados; necessidade de "
-               "recomposição ou redimensionamento que a secretaria aponta (déficit, concurso, aposentadorias).",
+               "recomposição ou redimensionamento que a secretaria aponta (déficit, concurso, aprovados à espera de "
+               "nomeação, aposentadorias).",
+    "Patrimônio, frota e meios operacionais": "os meios de que a operação depende e o estado em que estão, sempre com "
+                                              "os dois números (quantos existem e quantos funcionam): frota de "
+                                              "veículos, viaturas, ambulâncias, aeronaves ou embarcações (total, em "
+                                              "operação, parados, em manutenção, em leilão; idade; contratos de "
+                                              "manutenção e combustível); equipamentos, armamento e sistemas "
+                                              "essenciais; imóveis (próprios, alugados, cedidos; situação documental; "
+                                              "interdição, reintegração de posse, sem condição de uso); estoques e "
+                                              "insumos essenciais; capacidade instalada frente à necessidade (leitos, "
+                                              "vagas, unidades). Entra mesmo que a secretaria apresente o dado como "
+                                              "informação neutra, numa tabela ou num anexo.",
     "Orçamento e execução": "dotação do ano, empenhado, liquidado e pago, com o percentual de execução; execução por "
                             "ação orçamentária em 2025 e 2026, se o material trouxer; onde se concentra o gasto; "
                             "restos a pagar; necessidades de recursos e compromissos já assumidos para 2027; "
@@ -274,8 +286,8 @@ Blocos, nesta ordem e com exatamente estes títulos, cada um com o que procurar:
 
 Em cada bloco:
 - "itens": até 5 afirmações descritivas e concretas (números, datas, nomes de unidades, programas, contratos), de uma
-  frase completa cada; até 8 em "Programas e ações", "Contratos", "Pendências com controle e justiça" e
-  "Dificuldades e problemas". Cada item cita a origem: "relatorio" com um trecho LITERAL de até 30 palavras do relatório, ou
+  frase completa cada; até 8 em "Programas e ações", "Contratos", "Patrimônio, frota e meios operacionais",
+  "Pendências com controle e justiça" e "Dificuldades e problemas". Cada item cita a origem: "relatorio" com um trecho LITERAL de até 30 palavras do relatório, ou
   "dossie" com o id do item (ex.: "O3"). O sistema confere: item sem origem conferida é descartado.
 - Quando o relatório e o dossiê dizem coisas diferentes sobre o mesmo ponto, registre os dois itens, cada um com sua
   origem, sem escolher.
@@ -296,8 +308,9 @@ Além dos blocos:
   estrutura, site oficial); nada que venha só da imprensa.
 - "indicadores": até 10 números-chave para a ficha rápida. Primeiro os que dão a ESCALA da secretaria: unidades de
   atendimento (escolas, hospitais, unidades prisionais, postos), público atendido (matrículas, atendimentos,
-  beneficiários), municípios ou regionais; depois execução do orçamento (atualizado, empenhado, pago, restos a
-  pagar), contratos ativos, programas e obras. Folha, vínculos, LOA e PLOA já entram por código: não repita. Cada um com "nome" curto, "valor"
+  beneficiários), municípios ou regionais; depois a DISPONIBILIDADE dos meios, quando o material traz (frota total e
+  em operação, efetivo previsto em lei e existente, imóveis e quantos estão regularizados); depois execução do
+  orçamento (atualizado, empenhado, pago, restos a pagar), contratos ativos, programas e obras. Folha, vínculos, LOA e PLOA já entram por código: não repita. Cada um com "nome" curto, "valor"
   como está na fonte e a mesma origem conferível dos itens. Só números que estão no material.
 
 Não invente números, nomes ou datas. Bloco sem informação: deixe "itens" vazio e explique em "nao_se_sabe".
@@ -312,8 +325,8 @@ Responda SOMENTE com JSON, entre [INÍCIO DO JSON] e [FIM DO JSON]:
 
 
 # quantos itens o código aceita por bloco (o pedido ao modelo é de 5, ou de 8 nos três blocos mais densos)
-ITENS_POR_BLOCO = {"Programas e ações": 8, "Contratos": 8, "Pendências com controle e justiça": 8,
-                   "Dificuldades e problemas": 8}
+ITENS_POR_BLOCO = {"Programas e ações": 8, "Contratos": 8, "Patrimônio, frota e meios operacionais": 8,
+                   "Pendências com controle e justiça": 8, "Dificuldades e problemas": 8}
 
 
 def _conferir_citacao(c, por_id, comp_rel, sh_rel):
@@ -334,15 +347,19 @@ def _conferir_citacao(c, por_id, comp_rel, sh_rel):
     return None
 
 
-def extrair_diagnostico(modelo, dossie, relatorio, orgao):
+def extrair_diagnostico(modelo, dossie, relatorio, orgao, sinais=None):
     """Diagnóstico na ficha padrão, com cada afirmação conferida na origem e numerada (F1, F2...) para os riscos
-    poderem citá-la. Devolve {"secoes", "descartados", "uso"}."""
+    poderem citá-la. sinais: os sinais de alerta que o código separou no material (alertas.sinais), como pista.
+    Devolve {"secoes", "descartados", "uso"}."""
+    from .alertas import texto_dos_sinais
     uso = []
     if not (relatorio or itens_incluidos(dossie)):
         return {"secoes": [], "descartados": 0, "uso": []}
+    pistas = texto_dos_sinais(sinais)
     dados = chamar_json(
         modelo, mensagens_com_cache(modelo, PROMPT_DIAGNOSTICO_ORGAO, material_referencia(dossie, relatorio),
-                                    f"Escreva o diagnóstico da secretaria {orgao}."),
+                                    f"Escreva o diagnóstico da secretaria {orgao}."
+                                    + (f"\n\n{pistas}\nO que proceder entra no bloco a que pertence." if pistas else "")),
         24000, etapa="diagnóstico", uso_lista=uso, chave="secoes") or {}
     comp_rel = _comparavel(relatorio or "")
     sh_rel = _shingles(comp_rel.split())
@@ -387,6 +404,37 @@ def extrair_diagnostico(modelo, dossie, relatorio, orgao):
     panorama = [str(x).strip() for x in dados.get("panorama") or [] if str(x).strip()][:4]
     return {"secoes": secoes, "indicadores": indicadores[:10], "organograma": organograma[:30], "panorama": panorama,
             "descartados": descartados, "uso": uso}
+
+
+def incorporar_achados(diag, achados):
+    """Os achados da leitura de repercussão pública (alertas.repercussao) no diagnóstico. O que o diagnóstico já traz
+    (pelos números) é só marcado ("repercussao": True); o que falta entra no bloco a que pertence, na frente, como
+    item informado pelo órgão e com id F novo (o trecho já foi conferido no material; os números da frase, no trecho).
+    Altera `diag`; devolve [{"achado", "situacao", "item"}] para o registro."""
+    from .alertas import chegou
+    secoes = {s["titulo"]: s for s in (diag or {}).get("secoes") or []}
+    registro = []
+    if not secoes:
+        return registro
+    n = max([int(i["id"][1:]) for s in secoes.values() for i in s["itens"] if re.fullmatch(r"F\d+", str(i.get("id")))]
+            + [0])
+    novos = {}
+    for a in achados or []:
+        existente = next((i for s in secoes.values() for i in s["itens"] if chegou(a["texto"], i["texto"])), None)
+        if existente:
+            existente["repercussao"] = True
+            registro.append({"achado": a["id"], "situacao": "já estava no diagnóstico", "item": existente["id"]})
+            continue
+        bloco = a["bloco"] if a["bloco"] in secoes else "Dificuldades e problemas"
+        if bloco not in secoes:
+            continue
+        n += 1
+        novos.setdefault(bloco, []).append({"id": f"F{n}", "texto": a["texto"], "rotulo": a["rotulo"], "url": "",
+                                            "origem_item": "", "repercussao": True, "achado": a["id"]})
+        registro.append({"achado": a["id"], "situacao": f"incluído em \"{bloco}\"", "item": f"F{n}"})
+    for bloco, itens in novos.items():
+        secoes[bloco]["itens"] = itens + secoes[bloco]["itens"]
+    return registro
 
 
 # --- CONTRATOS CRÍTICOS -------------------------------------------------------------------------
