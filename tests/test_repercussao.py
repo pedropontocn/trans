@@ -86,7 +86,7 @@ def test_leitura_de_repercussao_so_aceita_o_que_confere_no_material(llm):
         _achado(),
         _achado(assunto="Número que não está no trecho",
                 texto="Das 8.012 viaturas, 4.500 estão fora de operação."),
-        _achado(assunto="Proporção por extenso", texto="Menos da metade das 8.012 viaturas está em operação."),
+        _achado(assunto="Proporção sem percentual", texto="Menos da metade das 8.012 viaturas está em operação."),
         _achado(assunto="Recomendação", texto="É preciso recompor a frota de 8.012 viaturas."),
         _achado(assunto="Trecho inventado", texto="A corporação tem 900 blindados parados.",
                 trecho="A corporação tem 900 blindados parados por falta de peças desde 2024."),
@@ -94,24 +94,28 @@ def test_leitura_de_repercussao_so_aceita_o_que_confere_no_material(llm):
         _achado(assunto="Efetivo abaixo do previsto em lei", tema="Efetivo e pessoal", bloco="bloco que não existe",
                 texto="O efetivo previsto em lei é de 60.448 policiais militares e 43.442 estão na ativa.",
                 trecho="O efetivo previsto em lei é de 60.448 policiais militares. Atualmente, 43.442 estão na ativa."),
-        _achado(assunto="", texto="x"), "lixo"]}
+        _achado(assunto="", manchete="", texto="x"), "lixo"]}
     sinais = alertas.sinais(MATERIAL_PM)
     r = alertas.repercussao(CFG["modelo"], MATERIAL_PM, sinais)
     assert [(a["id"], a["assunto"]) for a in r["achados"]] == [("N1", "Frota de viaturas fora de operação"),
                                                               ("N2", "Efetivo abaixo do previsto em lei")]
     assert r["achados"][0]["rotulo"] == "informado pelo órgão" and r["achados"][0]["trecho"] == FROTA
+    assert r["achados"][0]["trechos"] == [FROTA] and r["achados"][0]["tipo"] == "dado" and r["partes"] == 1
+    assert r["achados"][0]["manchete"] == "Frota de viaturas fora de operação"       # sem manchete, vale o assunto
     assert r["achados"][1]["bloco"] == "Pessoal"                        # bloco inválido: vai o do tema
     motivos = {x["assunto"]: x["motivo"] for x in r["recusados"]}
-    assert motivos["Número que não está no trecho"] == "número que não está no trecho: 4500"
-    assert motivos["Proporção por extenso"].startswith("proporção por extenso que não está no trecho: metade")
+    assert motivos["Número que não está no trecho"] == "número que os trechos não sustentam: 4500"
+    assert motivos["Proporção sem percentual"] == "proporção por extenso sem base: menos da metade"
     assert motivos["Recomendação"].startswith("recomendação")
-    assert motivos["Trecho inventado"] == "trecho não encontrado no material"
+    assert motivos["Trecho inventado"].startswith("trecho não encontrado no material")
     assert motivos["A mesma frota, de novo"] == "repetido" and motivos[""] == "campo em branco"
     assert r["uso"][0]["etapa"] == "leitura de repercussão pública"
-    # o pedido: o material em cache, o olhar de repórter, o dado de estado e as pistas separadas por código
+    # o pedido: o material em cache, o olhar de repórter, o que procurar e as pistas separadas por código
     pedido = llm.pedido_repercussao
-    for trecho in ["procura o\nque vira notícia", "meio de trabalho parado ou degradado", "falta de gente",
-                   "patrimônio irregular ou em risco", "DADO DE ESTADO, mesmo sem prazo, sem contrato",
+    for trecho in ["procura manchete", "dinheiro parado ou mal gasto", "bandeira ou promessa que ficou no papel",
+                   "meio de trabalho parado ou degradado", "tema sensível por natureza, mesmo numa linha só",
+                   "vigilância e reconhecimento facial", "INCOERÊNCIA do próprio material", "O sistema refaz a conta",
+                   "Não use fato que não\nesteja no material", "liste também as AUSÊNCIAS do material inteiro",
                    "SINAIS que o sistema separou por código", "(Frota e veículos) [relatorio_pm.pdf · 4.4 Patrimônio e frota] "
                    "A frota da Corporação é composta por 8.012 viaturas"]:
         assert trecho in pedido, trecho
@@ -120,6 +124,123 @@ def test_leitura_de_repercussao_so_aceita_o_que_confere_no_material(llm):
     # sem material, nenhuma chamada
     antes = len(llm.chamadas)
     assert alertas.repercussao(CFG["modelo"], "", sinais)["achados"] == [] and len(llm.chamadas) == antes
+
+
+MATERIAL_LONGO = MATERIAL_PM + """
+4.6.2 Execução por ação
+
+| Ação | Dotação atualizada | Empenhado |
+|---|---|---|
+| 4945 Operação Contenção/Barricada Zero | 200.000.000,00 | 0,00 |
+| 2345 Gestão da frota | 95.200.000,00 | 49.712.300,00 |
+
+O resumo deste relatório registra que a frota está 64% operacional.
+Kit operacional entregue a 5.489 policiais, para meta de 14.000.
+
+8.3 Demandas judiciais
+
+A Operação Contenção, de 28/10/2025, é o foco atual da ADPF 635 no Supremo Tribunal Federal.
+"""
+
+
+def test_reporter_cruza_secoes_faz_conta_e_aponta_incoerencia_e_ausencia(llm):
+    """O que a leitura amarrada demais não fazia: juntar trechos de seções diferentes, escrever o percentual que o
+    material não escreve, arredondar, apontar número que não bate e o que o relatório não traz. Tudo conferido."""
+    from transicao import alertas
+    barricada = "| 4945 Operação Contenção/Barricada Zero | 200.000.000,00 | 0,00 |"
+    adpf = "A Operação Contenção, de 28/10/2025, é o foco atual da ADPF 635 no Supremo Tribunal Federal."
+    kit = "Kit operacional entregue a 5.489 policiais, para meta de 14.000."
+    resumo = "O resumo deste relatório registra que a frota está 64% operacional."
+    gestao = "| 2345 Gestão da frota | 95.200.000,00 | 49.712.300,00 |"
+    novo = lambda **c: {"tema": "Outros", "bloco": "Orçamento e execução", "tipo": "dado", "potencial": "matéria", **c}
+    llm.repercussao = {"achados": [
+        novo(manchete="Só 39% dos PMs receberam o kit operacional", assunto="Kit operacional", potencial="nota",
+             texto="Foram equipados 5.489 policiais de uma meta de 14.000.", trechos=[kit]),
+        novo(manchete="Barricada Zero teve R$ 200 milhões no orçamento e nenhum empenho", assunto="Barricada Zero",
+             potencial="capa", janela="herança",
+             texto="A ação 4945 tem R$ 200 milhões de dotação e R$ 0,00 empenhado. A Operação Contenção, de 28/10/2025, "
+                   "é o foco atual da ADPF 635.", trechos=[barricada, adpf]),
+        novo(manchete="Menos da metade das viaturas da PM está rodando", assunto="Frota", potencial="capa",
+             tipo="incoerência", tema="Frota e veículos",
+             texto="Das 8.012 viaturas, 3.902 estão operacionais (48,7%), menos da metade; o resumo fala em 64% operacional. "
+                   "Estão fora de operação 4.110, e a gestão da frota empenhou R$ 49,7 milhões de R$ 95,2 milhões (52%).",
+             trechos=[FROTA, resumo, gestao]),
+        novo(manchete="Relatório não informa mortes por intervenção policial", assunto="Letalidade policial",
+             tipo="ausência", potencial="nota", termos=["letalidade", "mortes por intervenção", "morte por intervenção"],
+             texto="O material não traz número de mortes por intervenção policial."),
+        # recusados: a conta não fecha; percentual tirado de data; ausência do que o material traz; ausência com número
+        novo(manchete="Só 45% dos PMs receberam o kit", assunto="Conta errada", texto="5.489 de 14.000.", trechos=[kit]),
+        novo(manchete="Operação em 28/10/2025", assunto="Percentual de data", trechos=[adpf],
+             texto="A operação de 28/10/2025 responde por 35,7% do total."),
+        novo(manchete="Relatório não fala da frota", assunto="Ausência falsa", tipo="ausência",
+             termos=["viaturas", "frota inexistente"], texto="O material não trata da frota."),
+        novo(manchete="Faltam os 300 casos", assunto="Ausência com número", tipo="ausência",
+             termos=["letalidade", "autos de resistência"], texto="O material não traz os 300 casos."),
+    ]}
+    r = alertas.repercussao(CFG["modelo"], MATERIAL_LONGO)
+    # do maior potencial para o menor; dentro do potencial, a ordem da leitura
+    assert [(a["id"], a["potencial"], a["assunto"]) for a in r["achados"]] == [
+        ("N1", "capa", "Barricada Zero"), ("N2", "capa", "Frota"), ("N3", "nota", "Kit operacional"),
+        ("N4", "nota", "Letalidade policial")]
+    n1, n2, _, n4 = r["achados"]
+    assert n1["trechos"] == [barricada, adpf] and n1["trecho"] == barricada + " […] " + adpf and n1["janela"] == "herança"
+    assert n2["tipo"] == "incoerência" and n2["rotulo"] == "leitura da análise (IA)"
+    assert n4["tipo"] == "ausência" and n4["trechos"] == [] and n4["termos"][0] == "letalidade"
+    motivos = {x["assunto"]: x["motivo"] for x in r["recusados"]}
+    assert motivos == {"Conta errada": "número que os trechos não sustentam: 45%",
+                       "Percentual de data": "número que os trechos não sustentam: 357%",
+                       "Ausência falsa": "o material traz o termo: viaturas", "Ausência com número": "ausência com número"}
+    # as contas que o código aceita, uma a uma
+    assert alertas._numeros_sem_base("39% de 14.000; R$ 49,7 milhões; 4.110 fora; 52%; 17 mil a menos", [
+        kit, gestao, "8.012 viaturas, 3.902 operacionais", "efetivo de 60.448 e 43.442 na ativa"]) == []
+    assert alertas._numeros_sem_base("R$ 49,8 milhões e 40%", [kit, gestao]) == ["498", "40%"]
+    assert alertas._proporcao_sem_base("mais da metade (48,7%) e a maioria", [FROTA]) == ["a maioria"[2:], "mais da metade"]
+    # a seção do documento
+    md = alertas.markdown_das_manchetes(r["achados"])
+    assert md.startswith("## O que pode virar notícia\n_Leitura da IA sobre o material da secretaria, feita como a imprensa")
+    assert md.index("**Potencial de capa**") < md.index("**Rendem nota**") and "**Rendem matéria**" not in md
+    assert ("- **Barricada Zero teve R$ 200 milhões no orçamento e nenhum empenho.** A ação 4945 tem R$ 200 milhões de "
+            "dotação e R$ 0,00 empenhado.") in md and "_(herança da gestão que sai)_" in md
+    assert "- **Menos da metade das viaturas da PM está rodando.** Incoerência do material. Das 8.012" in md
+    assert "- **Relatório não informa mortes por intervenção policial.** Ausência no material. O material não traz" in md
+    assert alertas.markdown_das_manchetes([]) == ""
+
+
+def test_material_longo_e_lido_em_partes_e_o_mesmo_dado_nao_entra_duas_vezes(llm, monkeypatch):
+    from transicao import alertas
+    monkeypatch.setattr(alertas, "TAMANHO_DA_PARTE", 700)
+    partes = alertas.partes_do_material(MATERIAL_LONGO, 700)
+    n = len(partes)
+    assert n >= 3 and "".join(partes) == MATERIAL_LONGO and all(p.endswith("\n") for p in partes)
+    assert len(alertas.partes_do_material("x\n" * 400_000)) == alertas.MAXIMO_DE_PARTES
+    frota = lambda **c: _achado(**{"manchete": "Frota parada", "potencial": "nota", **c})
+    llm.repercussao = {"achados": []}
+    llm.repercussao_por_parte = {
+        1: {"achados": [frota()]},
+        n: {"achados": [frota(potencial="capa", manchete="Menos da metade das viaturas roda (48,7%)",
+                              trechos=["O resumo deste relatório registra que a frota está 64% operacional.", FROTA],
+                              texto="Das 8.012 viaturas, 3.902 estão operacionais (48,7%); o resumo fala em 64%.")]}}
+    sinais = alertas.sinais(MATERIAL_LONGO)
+    r = alertas.repercussao(CFG["modelo"], MATERIAL_LONGO, sinais)
+    assert r["partes"] == n and len(llm.pedidos_repercussao) == n
+    # o mesmo dado achado em duas partes: fica o de maior potencial, com os trechos dos dois
+    assert len(r["achados"]) == 1 and r["achados"][0]["potencial"] == "capa"
+    assert r["achados"][0]["manchete"] == "Menos da metade das viaturas roda (48,7%)" and len(r["achados"][0]["trechos"]) == 2
+    assert [x["motivo"] for x in r["recusados"]] == ["repetido"] and len(r["uso"]) == n
+    primeiro = next(p for p in llm.pedidos_repercussao if f"PARTE 1 de {n} do material" in p)
+    assert "<parte>\n# ARQUIVO: relatorio_pm.pdf" in primeiro and "liste também as AUSÊNCIAS" in primeiro
+    assert "A frota da Corporação é composta por 8.012 viaturas" in primeiro          # a pista é da parte
+    outros = [p for p in llm.pedidos_repercussao if f"PARTE 1 de {n} do material" not in p]
+    assert not any("AUSÊNCIAS" in p or "A frota da Corporação é composta" in p.split("</parte>")[1] for p in outros)
+    # acima do limite: os de menor potencial ficam de fora dos documentos e vão para a auditoria
+    monkeypatch.setattr(alertas, "LIMITE_ACHADOS", 1)
+    llm.repercussao_por_parte = {1: {"achados": [frota(), _achado(**EFETIVO, potencial="capa")]}}
+    r = alertas.repercussao(CFG["modelo"], MATERIAL_LONGO)
+    assert [a["assunto"] for a in r["achados"]] == ["Efetivo abaixo do previsto em lei"]
+    assert r["fora_do_limite"] == [{"manchete": "Frota parada", "texto": _achado()["texto"]}]
+    conta = alertas.conta(r, [], {})
+    assert alertas.observacao(conta) == "1 achado(s) de repercussão acima do limite (ver auditoria)"
+    assert "passaram do limite de 1" in alertas.markdown_da_conta(conta)
 
 
 def _achados_conferidos(llm, *brutos):
@@ -202,11 +323,19 @@ def test_achado_vira_ponto_critico_e_o_que_nao_vira_risco_sai_em_lista_propria(l
                              "causa": "O terreno é do INSS e a reintegração transitou em julgado.", "fatos": ["F9"]}]}
     fora = funcoes.achados_fora_dos_riscos(achados, resultado, de_para)
     assert [a["id"] for a in fora] == ["N1"]
-    md = funcoes.relatorio_riscos({"riscos": [], "pedir": []}, None, "nota", repercussao=fora)
-    assert ("## Outros dados com possível repercussão pública\n_Dados que a secretaria informou e que não estão nos pontos "
-            "de atenção acima.") in md
+    # no relatório saem todos, tenham ou não virado ponto de atenção, na seção própria
+    md = funcoes.relatorio_riscos({"riscos": [], "pedir": []}, None, "nota", repercussao=achados)
+    assert "## O que pode virar notícia\n_Leitura da IA sobre o material da secretaria" in md
     assert "- **Frota de viaturas fora de operação.** Das 8.012 viaturas da frota, 3.902 estão operacionais" in md
-    assert "Outros dados com possível repercussão" not in funcoes.relatorio_riscos({"riscos": [], "pedir": []}, None, "nota")
+    assert "- **Sede do Regimento de Polícia Montada.** A sede do Regimento" in md
+    assert "O que pode virar notícia" not in funcoes.relatorio_riscos({"riscos": [], "pedir": []}, None, "nota")
+    # a ausência não tem trecho: não vira ponto crítico nem item do diagnóstico (é leitura, não fato do órgão)
+    ausencia = {"id": "N9", "tipo": "ausência", "trecho": "", "trechos": [], "assunto": "x", "texto": "y", "bloco": "Pessoal",
+                "rotulo": "leitura da análise (IA)", "origem": ""}
+    assert riscos.juntar_achados(dict(pontos), [ausencia]) == {}
+    from transicao import produtos
+    diag = {"secoes": [{"titulo": "Pessoal", "itens": []}]}
+    assert produtos.incorporar_achados(diag, [ausencia]) == [] and diag["secoes"][0]["itens"] == []
 
 
 def test_fichas_nao_tiram_do_funil_o_que_o_modelo_achou_no_resto_do_material(llm):
@@ -268,11 +397,13 @@ def test_rodada_inteira_leva_o_dado_que_vira_noticia_aos_dois_produtos(llm):
     assert "O efetivo previsto em lei é de 60.448 policiais militares e 43.442 estão na ativa." in md
     textos = [p.text for p in docx.Document(io.BytesIO(r["dossie_docx"])).paragraphs]
     assert any("3.902 estão operacionais (48,7%)" in t for t in textos)
-    # relatório de riscos: a análise (falsa) não fez risco com a frota; o dado sai, por código, na lista própria
-    assert "## Outros dados com possível repercussão pública" in r["riscos_md"]
-    assert "- **Frota de viaturas fora de operação.** Das 8.012 viaturas" in r["riscos_md"]
-    textos = [p.text for p in docx.Document(io.BytesIO(r["riscos_docx"])).paragraphs]
-    assert "Outros dados com possível repercussão pública" in textos
+    # a seção "O que pode virar notícia" sai nos dois documentos, com tudo o que a leitura achou
+    for doc_md, doc_docx in ((r["riscos_md"], r["riscos_docx"]), (md, r["dossie_docx"])):
+        assert "## O que pode virar notícia" in doc_md and "**Rendem nota**" in doc_md
+        assert "- **Frota de viaturas fora de operação.** Das 8.012 viaturas" in doc_md
+        textos = [p.text for p in docx.Document(io.BytesIO(doc_docx)).paragraphs]
+        assert "O que pode virar notícia" in textos and "Rendem nota" in textos
+    assert md.index("## O que pode virar notícia") < md.index("**Fontes:**")
     # a análise de riscos recebeu os achados como pontos críticos com id
     pontos = reg["pontos_criticos"]["pontos"]
     assert [p["assunto"] for p in pontos.values() if p["tipo"] == "dado com potencial de repercussão pública"] == [
