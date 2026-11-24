@@ -249,6 +249,8 @@ def juntar_achados(pontos, achados):
     from .alertas import chegou
     de_para = {}
     for a in achados or []:
+        if not a.get("trecho"):                 # a ausência não tem trecho: não é fato do material
+            continue
         existente = next((pid for pid, p in pontos.items() if _norm(p["texto"])[:80] == _norm(a["trecho"])[:80]
                           or chegou(a["texto"], p["texto"])), None)
         if existente:

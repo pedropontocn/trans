@@ -109,11 +109,16 @@ memória do app e valem para todas as abas; sem senha, quem tiver o link vê o a
      tabela, atrás de quantidade junto de sinal de alerta (inoperante, fora de operação, déficit, sem saldo,
      pendência, reintegração de posse) ou de proporção de disponibilidade (quantos existem e quantos funcionam). São
      pista para as leituras do modelo.
-   - **Leitura de repercussão pública, com o modelo principal:** o material é lido como um repórter leria. Cada achado
-     traz o trecho literal, conferido por código no material, e uma frase descritiva cujos números têm de estar no
-     trecho. Os achados entram no diagnóstico (bloco "Patrimônio, frota e meios operacionais", "Pessoal" ou o que
-     couber; no dossiê, capítulo próprio) e na análise de riscos, como pontos críticos. O que a análise não transformar
-     em ponto de atenção sai, por código, na lista "Outros dados com possível repercussão pública" do relatório.
+   - **Leitura de repercussão pública, com o modelo principal:** o material é lido como um repórter leria, em
+     partes de até 60 mil caracteres (cada parte com uma leitura própria; o resto do material fica como contexto, para
+     cruzar seções). Cada achado traz a manchete, o potencial (capa, matéria ou nota), a janela (herança, até a posse,
+     primeiros 100 dias), um texto de até três frases e de 1 a 4 trechos literais, conferidos por código no material.
+     Os números do texto têm de estar nos trechos; o código aceita, refazendo a conta, o arredondamento, o percentual
+     de um número sobre outro e a diferença ou soma de dois. Dois tipos além do dado: **incoerência** (dois pontos do
+     material que não batem) e **ausência** (o que o relatório deveria trazer e não traz; o código procura os termos
+     no material inteiro e descarta a ausência se achar algum). Nada de fora do material entra. Tudo o que for
+     conferido (até 24) sai na seção **"O que pode virar notícia"** do relatório de riscos e do dossiê. Os achados do
+     tipo dado entram também no diagnóstico (no bloco a que pertencem) e na análise de riscos, como pontos críticos.
    - **Conta, por código:** no fim da rodada, a auditoria diz em quais produtos cada achado apareceu e quais sinais
      fortes do material não chegaram a nenhum. Achado fora de algum produto vai para a coluna de observação.
 5. **Análise de riscos.** Antes dela, o funil é alargado: (a) os **pontos críticos** que a secretaria informou (até

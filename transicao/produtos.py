@@ -420,6 +420,8 @@ def incorporar_achados(diag, achados):
             + [0])
     novos = {}
     for a in achados or []:
+        if a.get("tipo", "dado") != "dado":     # incoerência e ausência são leitura da análise, não fato do órgão
+            continue
         existente = next((i for s in secoes.values() for i in s["itens"] if chegou(a["texto"], i["texto"])), None)
         if existente:
             existente["repercussao"] = True

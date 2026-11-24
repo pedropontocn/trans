@@ -306,7 +306,10 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         except Exception as e:
             problemas.append(f"gargalos e plano dos 100 dias: {type(e).__name__}: {e}"[:300])
     corpo = montar_corpo() if precisa["riscos"] else documentos.markdown_capitulos(diagnostico, contratos_criticos)
-    base = "\n".join([pesquisa.texto_dossie(dossie), relatorio, material])
+    # os achados de repercussão já tiveram os números conferidos contra os trechos (inclusive percentual e
+    # arredondamento feitos pela leitura): entram na base para a conferência abaixo não acusar a conta como número solto
+    base = "\n".join([pesquisa.texto_dossie(dossie), relatorio, material]
+                     + [a["manchete"] + ". " + a["texto"] for a in achados])
     numeros = verificacao.verificar_numeros(corpo, base)
 
     uso_total = list(dossie.get("uso") or []) + uso
@@ -346,15 +349,15 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
         resultado, diagnostico, None, eventos, dossie, confronto, checklist.markdown(cobertura),
         documentos.nota_dossie(registro_id, modelos, cfg["data_corte"], bases_por_codigo, bool(leitura), cortes),
         cobertura=cobertura, contratos_criticos=contratos_criticos,
-        orgao=nome, lei=lei, plano=cruzamento_plano, leitura=leitura, resumo=resumo_dossie)
-    # o achado de repercussão que não virou ponto de atenção sai em lista própria: não fica fora do documento
+        orgao=nome, lei=lei, plano=cruzamento_plano, leitura=leitura, resumo=resumo_dossie, repercussao=achados)
+    # tudo o que a leitura de repercussão achou sai nos dois documentos, na seção "O que pode virar notícia"
     fora_dos_riscos = documentos.achados_fora_dos_riscos(achados, resultado, achado_para_ponto)
     texto_riscos = documentos.relatorio_riscos(
         resultado, cobertura, documentos.nota_riscos(registro_id, modelos, revisoes, conferencia_final, revisao_texto),
         diag=diagnostico, dossie=dossie, data_corte=cfg["data_corte"], confianca=confianca,
         cortes=cortes, vencimentos=vencimentos, extras=extras(),
         tce_md=tce.markdown_executivo(cruzamento_tce), resumo=resumo_riscos,
-        repercussao=fora_dos_riscos) if "riscos" in escolha else ""
+        repercussao=achados) if "riscos" in escolha else ""
     revisao_texto["alertas_no_documento"] = revisao.alertas_do_documento(                # a última conferência
         texto_riscos, fora=(documentos.sobre_o_relatorio(confianca, cfg["data_corte"], cortes),))
     if "dossie" not in escolha:
@@ -362,7 +365,9 @@ def analisar_orgao(nome, texto, cfg, estado=None, progresso=None, dossie=None, m
     # a conta, por código: em quais produtos cada achado e cada sinal forte do material apareceu
     repercussao_publica = alertas.conta(
         leitura_publica, sinais, {"dossiê": texto_dossie, "relatório de riscos": texto_riscos},
-        cobertos={"relatório de riscos": {a["id"] for a in achados} - {a["id"] for a in fora_dos_riscos}})
+        cobertos={nome_do_produto: {a["id"] for a in achados if a["manchete"] in texto_do_produto}
+                  for nome_do_produto, texto_do_produto in (("dossiê", texto_dossie), ("relatório de riscos", texto_riscos))})
+    repercussao_publica["sem_ponto_de_atencao"] = [a["id"] for a in fora_dos_riscos]
     repercussao_publica.update(no_diagnostico=achados_no_diagnostico, nos_pontos_criticos=achado_para_ponto)
     if alertas.observacao(repercussao_publica):
         problemas.append(alertas.observacao(repercussao_publica))

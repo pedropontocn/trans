@@ -1970,7 +1970,7 @@ def fontes_executivas(diag, dossie, folha=None, lei=None):
 
 def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobertura_md, nota_md, cobertura=None,
                       contratos_criticos=None, antes_md="", orgao="", lei=None, plano=None, leitura=None, tce_md="",
-                      resumo=None):
+                      resumo=None, repercussao=None):
     """Produto 2, o dossiê, no formato executivo (vai ao governador eleito). Primeira página: resumo executivo
     (abertura, titular, números em cartões e destaques; a abertura e os destaques são da IA, conferidos por código em
     executivo.resumir_dossie). Depois: 1. orçamento (frase e tabela enxuta, sem códigos), 2. força de trabalho, 3.
@@ -1978,11 +1978,14 @@ def dossie_secretaria(resultado, diag, ficha, eventos, dossie, confronto, cobert
     (com a leitura da análise); capítulo sem conteúdo não entra e a numeração é corrida; as fontes numa
     linha e a nota do que o documento é. Estrutura, funcionamento, pendências com controle e justiça, plano de governo e
     propostas para os 100 dias ficam no registro e na auditoria. antes_md, ficha, eventos, confronto, cobertura e
-    tce_md ficam na assinatura por compatibilidade."""
+    tce_md ficam na assinatura por compatibilidade. repercussao: os achados da leitura de repercussão pública, que
+    saem na seção "O que pode virar notícia", depois dos capítulos."""
+    from .alertas import markdown_das_manchetes
     folha = (dossie or {}).get("folha")
     lei = lei if lei is not None else (dossie or {}).get("orcamento_lei")
     partes = [resumo_executivo_do_dossie(resumo, diag or {}, folha, lei, leitura), "<<<QUEBRA>>>",
               capitulos_executivos(diag, contratos_criticos, folha, lei, leitura),
+              markdown_das_manchetes(repercussao),
               fontes_executivas(diag, dossie, folha, lei), nota_md]
     return "\n\n".join(p for p in partes if p)
 
@@ -2300,7 +2303,6 @@ def _grupo_da_lacuna(p, num_de):
     return (None, "Outras informações")
 
 
-LIMITE_OUTROS_DADOS = 8        # achados de repercussão pública que não viraram ponto de atenção
 
 
 def achados_fora_dos_riscos(achados, resultado, de_para=None, limite_riscos=10):
@@ -2326,8 +2328,8 @@ def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=10, limite_ped
     o que é, em que pé está, a consequência, a repercussão possível e a fonte; o controle externo (TCE-RJ); as
     informações que faltam, pelos mesmos temas; e, no fim, a nota sobre o que o documento é. Analisa; não recomenda.
     resumo: o que executivo.resumir_riscos devolveu (sem ele, a abertura sai por código e o "em jogo" é a consequência).
-    repercussao: os achados da leitura de repercussão pública que não viraram ponto de atenção (alertas.repercussao):
-    saem numa lista própria, por código, para o dado não ficar fora do documento.
+    repercussao: os achados da leitura de repercussão pública (alertas.repercussao), todos: saem na seção "O que pode
+    virar notícia", do maior potencial para o menor, tenham ou não virado ponto de atenção.
     Votos, objeções, pontos contestados, onde procurar e quem apontou ficam na auditoria."""
     from . import executivo
     hoje = _data_de_corte(data_corte)
@@ -2387,10 +2389,8 @@ def relatorio_riscos(resultado, cobertura, nota_md, limite_riscos=10, limite_ped
                        (f"Processo {processo}." if processo else ""))]
             md += [f"- **{rotulo}:** {texto}" for rotulo, texto in linhas if texto]
     if repercussao:
-        md += ["## Outros dados com possível repercussão pública",
-               "_Dados que a secretaria informou e que não estão nos pontos de atenção acima. A leitura é da IA; o trecho "
-               "de cada um foi conferido por código no material._"]
-        md += [f"- **{a['assunto']}.** {a['texto']}" for a in repercussao[:LIMITE_OUTROS_DADOS]]
+        from .alertas import markdown_das_manchetes
+        md.append(markdown_das_manchetes(repercussao))
     if tce_md:
         md.append(tce_md)
     pedir = (resultado.get("pedir") or [])[:limite_pedir]

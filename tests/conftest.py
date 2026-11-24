@@ -336,7 +336,10 @@ class LLMFalso:
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.cruzamento_plano) + "[FIM DO JSON]")
         if "LEITURA DE REPERCUSSÃO PÚBLICA" in contexto:
             self.pedido_repercussao = contexto + " " + ultimo
-            return self._resp("[INÍCIO DO JSON]" + json.dumps(self.repercussao) + "[FIM DO JSON]")
+            self.pedidos_repercussao = getattr(self, "pedidos_repercussao", []) + [ultimo]
+            parte = re.search(r"PARTE (\d+) de \d+", ultimo)        # material longo: uma resposta por parte
+            resposta = getattr(self, "repercussao_por_parte", {}).get(int(parte.group(1)) if parte else 1, self.repercussao)
+            return self._resp("[INÍCIO DO JSON]" + json.dumps(resposta) + "[FIM DO JSON]")
         if "lista os PONTOS CRÍTICOS" in contexto:
             self.pedido_pontos = contexto
             return self._resp("[INÍCIO DO JSON]" + json.dumps(self.pontos_criticos) + "[FIM DO JSON]")
